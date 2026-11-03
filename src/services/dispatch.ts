@@ -1,6 +1,7 @@
 import type { Booking, DemoSchedule, DemoState } from '../data/seed'
 import { LEAD_TIME_MS } from './booking'
 import { demoStore } from './demoStore'
+import { driverAvailable } from './resources'
 
 export const PREPARATION_MINUTES = 20 as const
 // Editable demo estimates taken from D-02's example, never routing estimates.
@@ -24,12 +25,12 @@ export function bookingReviewIssue(booking: Booking, now = Date.now()): string |
   return null
 }
 export function makeDemoSchedule(booking: Booking, centerToPickupMinutes: number, pickupToHospitalMinutes: number): DemoSchedule {
-  if (![centerToPickupMinutes, pickupToHospitalMinutes].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('กรุณากรอกเวลาเดินทางจำลองเป็นจำนวนนาทีเต็มตั้งแต่ 0 ขึ้นไป')
+  if (![centerToPickupMinutes, pickupToHospitalMinutes].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('กรุณากรอกเวลาเดินทางเป็นจำนวนนาทีเต็มตั้งแต่ 0 ขึ้นไป')
   const appointment = Date.parse(booking.appointmentAt)
   const arrival = appointment - PREPARATION_MINUTES * 60000
   const pickup = arrival - pickupToHospitalMinutes * 60000
   const departure = pickup - centerToPickupMinutes * 60000
-  if (![appointment, arrival, pickup, departure].every(n => Number.isFinite(n) && Math.abs(n) <= 8640000000000000)) throw new Error('เวลาเดินทางจำลองอยู่นอกช่วงที่รองรับ')
+  if (![appointment, arrival, pickup, departure].every(n => Number.isFinite(n) && Math.abs(n) <= 8640000000000000)) throw new Error('เวลาเดินทางอยู่นอกช่วงที่รองรับ')
   return { departureAt: new Date(departure).toISOString(), pickupAt: new Date(pickup).toISOString(), arrivalAt: new Date(arrival).toISOString(), endsAt: booking.appointmentAt, centerToPickupMinutes, pickupToHospitalMinutes, preparationMinutes: PREPARATION_MINUTES, calculation: 'demo-manual-v1' }
 }
 export interface AssignmentCheck { issues: string[]; conflicts: { booking: Booking; vehicle: boolean; driver: boolean }[]; ready: boolean }
@@ -39,7 +40,7 @@ export function checkAssignment(state: DemoState, booking: Booking, vehicleId: s
   const reviewIssue = bookingReviewIssue(booking, now)
   if (reviewIssue) issues.push(reviewIssue)
   if (!state.vehicles.find(v => v.id === vehicleId)?.active) issues.push('รถรับส่งไม่พร้อมใช้งาน กรุณาเลือกรถที่พร้อม')
-  if (!state.drivers.find(d => d.id === driverId)?.active) issues.push('คนขับไม่พร้อมใช้งาน กรุณาเลือกคนขับที่พร้อม')
+  if (!driverAvailable(state, state.drivers.find(d => d.id === driverId))) issues.push('คนขับไม่พร้อมใช้งาน กรุณาเลือกคนขับที่พร้อม')
   const start = Date.parse(schedule.departureAt)
   const end = Date.parse(schedule.endsAt)
   const conflicts: AssignmentCheck['conflicts'] = []
@@ -73,7 +74,7 @@ export function assignBooking(id: string, vehicleId: string, driverId: string, c
     if (!booking) throw new Error('ไม่พบคำขอนี้แล้ว')
     const schedule = makeDemoSchedule(booking, centerMinutes, hospitalMinutes)
     const check = checkAssignment(state, booking, vehicleId, driverId, schedule)
-    if (!check.ready) throw new Error([...check.issues, ...check.conflicts.map(c => `Schedule Conflict กับ ${c.booking.id}: ${[c.vehicle ? 'รถ' : '', c.driver ? 'คนขับ' : ''].filter(Boolean).join(' / ')}`)].join(' · '))
+    if (!check.ready) throw new Error([...check.issues, ...check.conflicts.map(c => `ตารางเวลาซ้อนกันกับ ${c.booking.id}: ${[c.vehicle ? 'รถ' : '', c.driver ? 'คนขับ' : ''].filter(Boolean).join(' / ')}`)].join(' · '))
     return { ...state, bookings: state.bookings.map(b => b.id === id ? { ...b, vehicleId, driverId, schedule, assignedAt: new Date().toISOString() } : b) }
   })
 }
@@ -82,5 +83,5 @@ export const dispatchDate = (iso: string) => new Intl.DateTimeFormat('th-TH', { 
 export function dispatchStatus(booking: Booking) {
   if (booking.status === 'pending') return 'รอตรวจสอบ'
   if (booking.status === 'approved') return booking.schedule ? 'มอบหมายแล้ว' : 'รอจัดตาราง'
-  return { rejected: 'ไม่อนุมัติ', in_transit: 'กำลังเดินทาง', completed: 'เสร็จสิ้น' }[booking.status]
+  return { rejected: 'ไม่อนุมัติ', in_transit: 'กำลังเดินทาง', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิกแล้ว' }[booking.status]
 }

@@ -1,0 +1,28 @@
+.pickup-map-panel { margin: 16px 0; }
+.pickup-map-frame { position: relative; height: clamp(320px, 48vh, 480px); border: 1px solid var(--color-border); border-radius: 18px; overflow: hidden; background: #e5eee8; }
+.pickup-map-frame:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 4px; }
+.pickup-map-canvas { width: 100%; height: 100%; }
+.pickup-map-frame.pickup-map-failed { min-height: 400px; }
+.pickup-map-retry { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 12px 12px 36px; background: #102c246b; pointer-events: none; }
+.pickup-map-error-caption { width: min(100%, 340px); margin: 0; padding: 10px 12px; border-radius: 12px; background: #102c24eb; color: white; font-size: 16px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; box-shadow: 0 3px 12px #102c2433; }
+.pickup-map-retry-card { width: min(100%, 300px); display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border: 1px solid #d9e8e3; border-radius: 16px; background: white; color: #1f3b38; text-align: center; box-shadow: 0 8px 28px #102c2433; }
+.pickup-map-retry-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: #eaf7f3; color: #176448; }
+.pickup-map-retry-icon svg { width: 24px; height: 24px; }
+.pickup-map-retry-title { margin: 0; font-size: 18px; font-weight: 700; }
+.pickup-map-retry-description { margin: 0; font-size: 16px; line-height: 1.5; color: #49635f; }
+.pickup-map-retry .booking-button { width: 100%; min-height: 48px; margin-top: 4px; padding: 12px; background: #176448; color: white; pointer-events: auto; }
+.pickup-map-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -100%); display: grid; place-items: center; width: 34px; height: 42px; border-radius: 50% 50% 50% 0; background: var(--color-primary, #176448); color: white; border: 3px solid white; box-shadow: 0 3px 8px #0005; pointer-events: none; }
+.pickup-map-hint { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 88px); padding: 8px 12px; border-radius: 12px; background: white; color: #184d3a; font-size: 15px; pointer-events: none; box-shadow: 0 2px 8px #0002; }
+.pickup-place-search { position: relative; margin-bottom: 14px; }
+.pickup-place-search .booking-field { margin-bottom: 0; }
+.pickup-map-results { position: absolute; inset-inline: 0; top: 100%; z-index: 5; max-height: 310px; overflow-y: auto; list-style: none; padding: 0; margin: 0; border: 1px solid var(--color-border); border-radius: 12px; background: white; box-shadow: 0 8px 24px #123c3026; }
+.pickup-map-results:empty { display: none; }
+.pickup-map-results [role=option] { min-height: 52px; padding: 14px; color: var(--color-primary); border-bottom: 1px solid var(--color-border); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.pickup-map-results [role=option]:hover, .pickup-map-results [aria-selected=true] { background: #edf5ef; box-shadow: inset 4px 0 var(--color-primary); }
+.pickup-search-status { margin: 6px 0 0; font-size: 14px; color: var(--color-muted); }
+.pickup-map-coordinates { font-size: 15px; color: var(--color-muted); overflow-wrap: anywhere; }
+.pickup-map-manual { margin: 16px 0; }
+.pickup-map-manual summary { min-height: 44px; cursor: pointer; }
+.pickup-map-manual-fields { display: grid; gap: 12px; }
+.pickup-map-panel .maplibregl-ctrl button { width: 44px; height: 44px; }
+.pickup-map-panel .maplibregl-ctrl-attrib { font-size: 12px; }

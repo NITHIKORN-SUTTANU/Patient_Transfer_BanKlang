@@ -7,6 +7,8 @@ export const actors = [
 
 export type ActorId = typeof actors[number]['id']
 export type Actor = typeof actors[number]
+export const accountRoleLabels = { Dispatcher: 'เจ้าหน้าที่จัดรถ', Driver: 'พนักงานขับรถ', Admin: 'ผู้ดูแลระบบ' } as const
+export const actorRoutes: Record<ActorId, string> = { 'ACT-01': '/booking', 'ACT-02': '/dispatcher', 'ACT-03': '/driver', 'ACT-04': '/admin' }
 export function isActorId(value: unknown): value is ActorId {
   return actors.some(actor => actor.id === value)
 }

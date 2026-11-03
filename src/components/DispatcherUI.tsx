@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { BookingButton, BookingModal } from './BookingUI'
 
-export function DispatchButton(props: ButtonHTMLAttributes<HTMLButtonElement> & { secondary?: boolean }) {
+export function DispatchButton(props: Parameters<typeof BookingButton>[0]) {
   return <BookingButton {...props} className={`dispatch-button ${props.className || ''}`} />
 }
 export function DispatchModal({ title, children, onClose, kind = '' }: { title: string; children: ReactNode; onClose: () => void; kind?: string }) {
@@ -31,7 +31,7 @@ export function ResourcePicker({ label, placeholder, value, options, onChange }:
       choices[next].focus()
     }
   }}>
-    <button ref={trigger} type="button" className="dispatch-resource-trigger" aria-label={`${label}: ${options.find(o => o.id === value)?.label || placeholder}`} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}><span>{label}</span><strong>{options.find(o => o.id === value)?.label || placeholder} ▾</strong></button>
-    {open && <div role="listbox" aria-label={label} className="dispatch-resource-options">{options.length ? options.map(option => <button type="button" role="option" key={option.id} disabled={!option.active} aria-selected={value === option.id} onClick={() => { onChange(option.id); close() }}><strong>{option.label}</strong><span>{option.active ? 'แตะเพื่อเลือก' : 'ไม่พร้อมใช้งาน'}</span></button>) : <p>ไม่มี{label}ในระบบสาธิต</p>}</div>}
+    <button ref={trigger} type="button" className="dispatch-resource-trigger" aria-label={`${label}: ${options.find(o => o.id === value)?.label || placeholder}`} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}><span>{label}:</span>{' '}<strong>{options.find(o => o.id === value)?.label || placeholder}<span aria-hidden="true"> ▾</span></strong></button>
+    {open && <div role="listbox" aria-label={label} className="dispatch-resource-options">{options.length ? options.map(option => <button type="button" role="option" key={option.id} disabled={!option.active} aria-selected={value === option.id} onClick={() => { onChange(option.id); close() }}><strong>{option.label}</strong><span>{option.active ? 'แตะเพื่อเลือก' : 'ไม่พร้อมใช้งาน'}</span></button>) : <p>ไม่มี{label}ที่พร้อมใช้งาน</p>}</div>}
   </div>
 }

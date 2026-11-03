@@ -1,13 +1,12 @@
-import type { Actor } from '../data/actors'
+import { Link } from 'react-router'
+import { actorRoutes, type Actor } from '../data/actors'
+import { ServiceSymbol } from './ServiceSymbol'
 
 interface Props { actor: Actor; selected: boolean; onSelect: () => void }
 export function ActorCard({ actor, selected, onSelect }: Props) {
-  return <button type="button" onClick={onSelect} aria-pressed={selected} className={`actor-card group ${selected ? 'actor-card-selected' : ''}`}>
-    <span className="flex items-center justify-between gap-4"><span className="actor-number">{actor.number}</span><span className="text-sm font-semibold text-primary">{actor.id}</span></span>
-    <span className="mt-6 block text-2xl font-semibold">{actor.name}</span>
-    <span lang="en" className="mt-1 block text-sm text-muted">{actor.english}</span>
-    <span className="mt-4 block text-base leading-7 text-muted">{actor.description}</span>
-    <span className="mt-6 block border-t border-border pt-4 text-sm text-muted">{actor.tasks}</span>
-    <span className="mt-5 flex min-h-14 items-center justify-between gap-3 rounded-xl bg-accent px-4 font-semibold text-primary">{selected ? 'เลือกบทบาทนี้แล้ว' : 'เลือกบทบาทนี้'}<span aria-hidden="true">{selected ? '✓' : '→'}</span></span>
-  </button>
+  return <Link to={actorRoutes[actor.id]} onClick={onSelect} data-actor-id={actor.id} className={`actor-card group ${selected ? 'actor-card-selected' : ''}`}>
+    <span className="actor-symbol"><ServiceSymbol kind={actor.id === 'ACT-01' ? 'person' : actor.id === 'ACT-02' ? 'calendar' : actor.id === 'ACT-03' ? 'vehicle' : 'settings'} /></span>
+    <span className="actor-copy"><strong>{actor.name}</strong><span>{actor.id === 'ACT-01' ? 'จองรถ · ดูสถานะ' : actor.id === 'ACT-02' ? 'ตรวจคำขอ · จัดรถ' : actor.id === 'ACT-03' ? 'ดูงาน · เริ่มเดินทาง' : 'บัญชี · รถ · คนขับ'}</span>{selected && <span className="actor-last-used">ใช้ล่าสุด</span>}</span>
+    <span className="actor-select" aria-hidden="true">→</span>
+  </Link>
 }

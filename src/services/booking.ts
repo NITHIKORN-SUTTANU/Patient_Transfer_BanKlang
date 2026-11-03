@@ -9,7 +9,7 @@ export interface BookingDetails {
   time: string
   assistance: string
   extras: string[]
-  pickup: { x: number; y: number; label: string } | null
+  pickup: { x: number; y: number; label: string; latitude?: number; longitude?: number; accuracy?: number } | null
   acknowledged: boolean
 }
 export const emptyBooking = (): BookingDetails => ({ bookingFor: 'self', patientName: '', contactName: '', phone: '', relationship: '', hospital: '', date: '', time: '', assistance: 'เดินได้', extras: [], pickup: null, acknowledged: false })

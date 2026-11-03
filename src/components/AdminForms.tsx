@@ -1,0 +1,73 @@
+import { accountRoleLabels } from '../data/actors'
+import { useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
+import type { AdminAccount, AdminSettings, DemoState, Driver, Vehicle } from '../data/seed'
+import { BookingButton, BookingModal } from './BookingUI'
+import { defaultSettings, saveAdmin, type AdminCategory } from '../services/admin'
+
+export type AdminEntity = AdminAccount | AdminSettings | Driver | Vehicle
+export interface AdminEditor { category: AdminCategory; previous?: AdminEntity; disable?: boolean }
+export function AdminButton(props: Parameters<typeof BookingButton>[0]) { return <BookingButton {...props} className={`admin-button ${props.className || ''}`} /> }
+export function AdminField({ label, children }: { label: string; children: ReactNode }) { return <label className="admin-field"><span>{label}</span>{children}</label> }
+export function AdminForm({ editor, state, onClose, onSaved }: { editor: AdminEditor; state: DemoState; onClose: () => void; onSaved: () => void }) {
+  const { category, previous } = editor
+  const source = previous as (Partial<AdminAccount & AdminSettings & Driver & Vehicle> | undefined)
+  const [name, setName] = useState(source?.name || source?.label || '')
+  const [username, setUsername] = useState(source?.username || '')
+  const [role, setRole] = useState(source?.role || 'Dispatcher')
+  const [active, setActive] = useState(source?.active ?? true)
+  const [vehicleType, setVehicleType] = useState(source?.vehicleType || 'รถรับส่งทั่วไป')
+  const [support, setSupport] = useState(source?.support || 'รถรับส่งทั่วไป')
+  const [accountId, setAccountId] = useState(source?.accountId || '')
+  const [phone, setPhone] = useState(source?.phone || '')
+  const [settings, setSettings] = useState<AdminSettings>(category === 'settings' && previous ? previous as AdminSettings : defaultSettings)
+  const [reason, setReason] = useState('')
+  const [confirmDisable, setConfirmDisable] = useState(editor.disable || false)
+  const [disableOnly, setDisableOnly] = useState(editor.disable || false)
+  const [error, setError] = useState('')
+  const entityId = source?.id
+  const related = state.bookings.filter(b => category === 'vehicles' ? b.vehicleId === entityId : category === 'drivers' ? b.driverId === entityId : category === 'accounts' ? state.drivers.some(d => d.accountId === entityId && d.id === b.driverId) : false)
+  const openJobs = related.filter(b => ['approved', 'in_transit'].includes(b.status))
+  const noun = { accounts: 'บัญชี', vehicles: 'รถ', drivers: 'คนขับ', settings: 'การตั้งค่า' }[category]
+  const title = confirmDisable ? category === 'vehicles' ? 'ปิดใช้งานรถ' : category === 'drivers' ? 'ระงับบัญชีคนขับ' : 'ระงับบัญชี' : category === 'settings' ? 'แก้ไขการตั้งค่า' : `${previous ? 'แก้ไข' : 'เพิ่ม'}${noun}`
+  function submit(e: FormEvent) {
+    e.preventDefault(); setError('')
+    if (!confirmDisable && !active && (source?.active ?? true)) { setConfirmDisable(true); return }
+    const id = entityId || `${{ accounts: 'USR', vehicles: 'VEH', drivers: 'DRV', settings: 'CFG' }[category]}-${crypto.randomUUID().slice(0, 8)}`
+    let next: AdminEntity
+    if (confirmDisable && disableOnly && previous && 'active' in previous) next = { ...previous, active: false }
+    else if (category === 'accounts') next = { id, name: name.trim(), username: username.trim(), role, active: confirmDisable ? false : active }
+    else if (category === 'vehicles') next = { ...previous, id, label: name.trim(), vehicleType, support, active: confirmDisable ? false : active } as Vehicle
+    else if (category === 'drivers') next = { ...previous, id, name: name.trim(), accountId, phone: phone.trim(), active: confirmDisable ? false : active } as Driver
+    else next = { center: settings.center.trim(), serviceArea: settings.serviceArea.trim(), opensAt: settings.opensAt, closesAt: settings.closesAt }
+    try { saveAdmin(category, next, previous, reason); onSaved() } catch (e) { setError((e as Error).message) }
+  }
+  return <BookingModal title={title} onClose={onClose} className="admin-modal"><p className="admin-muted">{confirmDisable ? 'ตรวจสอบข้อมูลและผลกระทบก่อนยืนยัน' : 'ตรวจสอบข้อมูลให้ครบถ้วนก่อนบันทึก'}</p>
+    <form className="admin-form" onSubmit={submit}>
+      {confirmDisable ? <>
+        <AdminField label={`เลือก${noun}`}><input readOnly value={source?.label || source?.name || name} /></AdminField>
+        <AdminField label="สถานะปัจจุบัน"><input readOnly value={source?.active ? 'ใช้งานอยู่' : 'ไม่พร้อมใช้งาน'} /></AdminField>
+        <details className="admin-related"><summary>งานรับส่งที่เกี่ยวข้อง · {related.length} งาน ({openJobs.length} งานยังไม่เสร็จ)</summary>{related.length ? related.map(b => <p key={b.id}>{b.id} · {b.status}</p>) : <p>ไม่มีงานรับส่งที่เกี่ยวข้อง</p>}</details>
+        <p className="admin-warning">หยุดการมอบหมายงานใหม่ งานเดิมและประวัติจะยังคงอยู่{category !== 'vehicles' && ' คนขับที่ถูกระงับจะอัปเดตงานไม่ได้จนกว่าจะเปิดใช้งานอีกครั้ง'} {openJobs.length > 0 && 'มีงานที่ยังไม่เสร็จ กรุณาประสานเจ้าหน้าที่ก่อนยืนยัน'}</p>
+        <AdminField label="เหตุผลในการระงับ / ปิดใช้งาน"><input required maxLength={200} value={reason} onChange={e => setReason(e.target.value)} /></AdminField>
+      </> : <>
+        {category === 'settings' ? <>
+          <AdminField label="ตำแหน่งศูนย์รถเทศบาล"><input required maxLength={200} value={settings.center} onChange={e => setSettings({ ...settings, center: e.target.value })} /></AdminField>
+          <AdminField label="พื้นที่ให้บริการ"><input required maxLength={200} value={settings.serviceArea} onChange={e => setSettings({ ...settings, serviceArea: e.target.value })} /></AdminField>
+          <div className="admin-form-grid"><AdminField label="เวลาเปิดบริการ"><input required type="time" value={settings.opensAt} onChange={e => setSettings({ ...settings, opensAt: e.target.value })} /></AdminField><AdminField label="เวลาปิดบริการ"><input required type="time" value={settings.closesAt} onChange={e => setSettings({ ...settings, closesAt: e.target.value })} /></AdminField></div>
+          <AdminField label="จองล่วงหน้า 48 ชม. / เตรียมรถ 20 นาที (แก้ไขไม่ได้)"><input readOnly value="48 ชั่วโมง / 20 นาที" /></AdminField>
+        </> : <>
+          <AdminField label={category === 'vehicles' ? 'รหัสรถ / ทะเบียนรถ' : category === 'drivers' ? 'ชื่อ–นามสกุลคนขับ' : 'ชื่อ–นามสกุล'}><input required maxLength={200} value={name} onChange={e => setName(e.target.value)} /></AdminField>
+          {category === 'accounts' && <><AdminField label="ชื่อผู้ใช้งาน"><input required maxLength={200} value={username} onChange={e => setUsername(e.target.value)} /></AdminField><AdminField label="บทบาทและสิทธิ์"><select value={role} onChange={e => setRole(e.target.value as AdminAccount['role'])}>{(['Dispatcher', 'Driver', 'Admin'] as const).map(r => <option key={r} value={r}>{accountRoleLabels[r]}</option>)}</select></AdminField><p className="admin-muted">{role === 'Admin' ? 'ดูแลบัญชี ทรัพยากร การตั้งค่า และประวัติ' : role === 'Driver' ? 'ดูงานที่ได้รับมอบหมายและอัปเดตสถานะงาน' : 'ตรวจสอบคำขอ จัดรถและคนขับ และติดตามงาน'}</p></>}
+          {category === 'vehicles' && <><AdminField label="ประเภทรถ"><input required maxLength={200} list="admin-vehicle-types" value={vehicleType} onChange={e => setVehicleType(e.target.value)} /><datalist id="admin-vehicle-types"><option value="รถรับส่งทั่วไป" />{[...new Set(state.vehicles.flatMap(v => v.vehicleType ? [v.vehicleType] : []))].map(t => <option key={t} value={t} />)}</datalist></AdminField><AdminField label="การรองรับรถเข็นหรือเปลนอน"><select value={support} onChange={e => setSupport(e.target.value)}>{['รถรับส่งทั่วไป', 'รองรับรถเข็น', 'รองรับเปลนอน'].map(t => <option key={t}>{t}</option>)}</select></AdminField></>}
+          {category === 'drivers' && <><AdminField label="บัญชีผู้ใช้งาน Role: Driver"><select required value={accountId} onChange={e => setAccountId(e.target.value)}><option value="">เลือกบัญชีคนขับ</option>{state.accounts?.filter(a => a.role === 'Driver').map(a => <option key={a.id} value={a.id} disabled={state.drivers.some(d => d.id !== entityId && d.accountId === a.id)}>{a.name} · {a.username}{!a.active ? ' (ระงับ)' : ''}</option>)}</select></AdminField><AdminField label="เบอร์ติดต่อ"><input required inputMode="tel" pattern="0[0-9]{8,9}" maxLength={10} value={phone} onChange={e => setPhone(e.target.value)} /></AdminField></>}
+          <AdminField label={category === 'vehicles' ? 'สถานะรถ' : category === 'drivers' ? 'สถานะพร้อมปฏิบัติงาน' : 'สถานะบัญชี'}><select value={String(active)} onChange={e => setActive(e.target.value === 'true')}><option value="true">{category === 'accounts' ? 'ใช้งานอยู่' : 'พร้อมใช้งาน'}</option><option value="false">{category === 'vehicles' ? 'ปิดใช้งาน' : 'ระงับการใช้งาน'}</option></select></AdminField>
+        </>}
+      </>}
+      {error && <p role="alert" className="admin-error">{error}</p>}
+      <div className="admin-form-actions"><AdminButton secondary onClick={onClose}>ยกเลิก</AdminButton><AdminButton danger={confirmDisable} type="submit">บันทึก</AdminButton></div>
+      {previous && category !== 'settings' && source?.active && !confirmDisable && <AdminButton secondary danger onClick={() => { setError(''); setDisableOnly(true); setConfirmDisable(true) }}>{category === 'vehicles' ? 'ปิดใช้งานรถ' : 'ระงับการใช้งาน'}</AdminButton>}
+      {previous && 'active' in previous && !previous.active && !confirmDisable && <AdminButton secondary onClick={() => { try { saveAdmin(category, { ...previous, active: true }, previous); onSaved() } catch (e) { setError((e as Error).message) } }}>เปิดใช้งานอีกครั้ง</AdminButton>}
+    </form>
+  </BookingModal>
+}

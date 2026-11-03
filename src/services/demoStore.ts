@@ -42,7 +42,7 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 
 export const demoStore = {
   getState: () => state,
-  selectActor: (selectedActor: ActorId) => persist({ ...state, selectedActor }),
+  selectActor: (selectedActor: ActorId) => persist({ ...latestState(), selectedActor }),
   reset: () => persist(createSeedState()),
   update: (update: (current: DemoState) => DemoState) => {
     // Recheck persisted data even before another tab's storage event arrives.
