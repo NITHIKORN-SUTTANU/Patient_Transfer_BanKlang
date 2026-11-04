@@ -73,7 +73,7 @@ export function AdminForm({ editor, state, onClose, onSaved }: { editor: AdminEd
     else next = { ...settings, center: settings.center.trim(), serviceArea: settings.serviceArea.trim(), opensAt: settings.opensAt, closesAt: settings.closesAt }
     try { saveAdmin(category, next, previous, reason); onSaved() } catch (e) { setError((e as Error).message) }
   }
-  return <BookingModal title={title} onClose={onClose} className={`admin-modal${editor.settingsSection === 'center' ? ' admin-parking-modal' : ''}`}><p className="admin-muted">{confirmDisable ? 'ตรวจสอบข้อมูลและผลกระทบก่อนยืนยัน' : 'ตรวจสอบข้อมูลให้ครบถ้วนก่อนบันทึก'}</p>
+  return <BookingModal title={title} onClose={onClose} className={`admin-modal admin-editor-modal${editor.settingsSection === 'center' ? ' admin-parking-modal' : ''}`}><p className="admin-muted">{confirmDisable ? 'ตรวจสอบข้อมูลและผลกระทบก่อนยืนยัน' : 'ตรวจสอบข้อมูลให้ครบถ้วนก่อนบันทึก'}</p>
     <form className="admin-form" onSubmit={submit}>
       {confirmDisable ? <>
         <AdminField label={`เลือก${noun}`}><input readOnly value={source?.label || source?.name || name} /></AdminField>
@@ -104,7 +104,7 @@ export function AdminForm({ editor, state, onClose, onSaved }: { editor: AdminEd
       </>}
       {error && <p role="alert" className="admin-error">{error}</p>}
       <div className="admin-form-actions"><AdminButton secondary onClick={onClose}>ยกเลิก</AdminButton><AdminButton danger={confirmDisable} disabled={locating} type="submit">บันทึก</AdminButton></div>
-      {previous && category !== 'settings' && source?.active && !confirmDisable && <AdminButton secondary danger onClick={() => { setError(''); setDisableOnly(true); setConfirmDisable(true) }}>{category === 'vehicles' ? 'ปิดใช้งานรถ' : 'ระงับการใช้งาน'}</AdminButton>}
+      {previous && category === 'vehicles' && source?.active && !confirmDisable && <AdminButton secondary danger onClick={() => { setError(''); setDisableOnly(true); setConfirmDisable(true) }}>ปิดใช้งานรถ</AdminButton>}
       {previous && 'active' in previous && !previous.active && !confirmDisable && <AdminButton secondary onClick={() => { try { saveAdmin(category, { ...previous, active: true }, previous); onSaved() } catch (e) { setError((e as Error).message) } }}>เปิดใช้งานอีกครั้ง</AdminButton>}
     </form>
   </BookingModal>
