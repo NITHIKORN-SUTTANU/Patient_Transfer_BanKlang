@@ -139,6 +139,9 @@ button, a { touch-action:manipulation; }
 .booking-modal header button { min-width:48px; min-height:48px; }
 .booking-text-link { min-height:48px; }
 .booking-home-link { display:flex; align-items:center; justify-content:center; min-height:48px; padding:8px 12px; color:var(--color-primary); font-size:16px; text-decoration:underline; }
+.booking-home-link.booking-list-back { justify-content:flex-start; width:fit-content; padding:8px 0; font-size:17px; font-weight:700; text-underline-offset:4px; text-decoration-thickness:2px; }
+.booking-list-back:hover { text-decoration-thickness:3px; }
+.booking-list-back:focus-visible { outline:2px solid var(--color-primary); outline-offset:4px; border-radius:2px; }
 .booking-summary-card { --booking-state-color:#075e57; --booking-state-background:#ecf9f5; --booking-state-accent:var(--booking-state-color); display:flex; flex-direction:column; gap:12px; min-width:0; padding:18px; border:1px solid var(--color-border); border-left:4px solid var(--booking-state-accent); border-radius:18px; background:white; color:var(--color-ink); text-align:left; overflow-wrap:anywhere; }
 .booking-summary-card.pending { --booking-state-color:#705400; --booking-state-background:#fff7cc; --booking-state-accent:#e5b800; }
 .booking-screen-bookings .booking-summary-card { border-left:5px solid var(--booking-state-accent); }

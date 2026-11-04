@@ -1,16 +1,26 @@
 import { driverAvailable } from '../services/resources'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { Booking, DemoSchedule, DemoState } from '../data/seed'
-import { assignBooking, checkAssignment, DEFAULT_DEMO_TRAVEL, dispatchDate, dispatchTime, makeDemoSchedule } from '../services/dispatch'
+import { assignBooking, checkAssignment, DEFAULT_DEMO_TRAVEL, dispatchDate, dispatchTime, estimateParkingTravel, makeDemoSchedule } from '../services/dispatch'
 import { DispatchButton, DispatchModal, ResourcePicker } from './DispatcherUI'
 
 export function ScheduleSummary({ booking, schedule }: { booking: Booking; schedule: DemoSchedule }) {
-  return <div className="dispatch-schedule-summary"><p>เวลานัดหมาย</p><strong>{dispatchTime(booking.appointmentAt)} น.</strong><p>ออกศูนย์ {dispatchTime(schedule.departureAt)} · รับ {dispatchTime(schedule.pickupAt)} · ถึง รพ. {dispatchTime(schedule.arrivalAt)}</p><b>นัด {dispatchTime(booking.appointmentAt)} · เผื่อก่อนนัด 20 นาที</b></div>
+  return <div className="dispatch-schedule-summary">
+    <p>เวลานัดหมาย · {dispatchDate(booking.appointmentAt)}</p><strong>{dispatchTime(booking.appointmentAt)} น.</strong>
+    <ol className="dispatch-assignment-timeline" aria-label="กำหนดการเดินทาง">
+      <li><span>ออกศูนย์</span><strong>{dispatchTime(schedule.departureAt)}</strong><small>{dispatchDate(schedule.departureAt)}</small></li>
+      <li><span>รับผู้ป่วย</span><strong>{dispatchTime(schedule.pickupAt)}</strong><small>{dispatchDate(schedule.pickupAt)}</small></li>
+      <li><span>ถึงโรงพยาบาล</span><strong>{dispatchTime(schedule.arrivalAt)}</strong><small>{dispatchDate(schedule.arrivalAt)}</small></li>
+    </ol>
+    <b>ถึงโรงพยาบาลก่อนนัด 20 นาที</b>
+  </div>
 }
 export function DispatchAssignment({ booking, state, onAssigned }: { booking: Booking; state: DemoState; onAssigned: () => void }) {
   const [vehicleId, setVehicleId] = useState('')
   const [driverId, setDriverId] = useState('')
-  const [center, setCenter] = useState(String(DEFAULT_DEMO_TRAVEL.centerToPickupMinutes))
+  const [centerOverride, setCenter] = useState<string | null>(null)
+  const parkingMinutes = estimateParkingTravel(state.settings?.parking, booking.details?.pickup)
+  const center = centerOverride ?? String(parkingMinutes ?? DEFAULT_DEMO_TRAVEL.centerToPickupMinutes)
   const [hospital, setHospital] = useState(String(DEFAULT_DEMO_TRAVEL.pickupToHospitalMinutes))
   const [dialog, setDialog] = useState<'ready' | 'conflict' | 'confirm' | null>(null)
   const [error, setError] = useState('')
@@ -40,10 +50,13 @@ export function DispatchAssignment({ booking, state, onAssigned }: { booking: Bo
   const changeVehicle = (id: string) => { setVehicleId(id); setError('') }
   const changeDriver = (id: string) => { setDriverId(id); setError('') }
   return <section ref={root} className="dispatch-panel dispatch-assignment-form">
-    <h2>2 ตารางเวลาเดินทางที่ระบบคำนวณ</h2>
+    <div className="dispatch-selected-job"><span>งานที่เลือก · {booking.id}</span><strong>{booking.patientName}</strong><p>{booking.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</p></div>
+    <h2>2. ตารางเวลาเดินทางที่ระบบคำนวณ</h2>
+    <p className="dispatch-small">{state.settings?.parking ? `จุดเริ่มเดินทาง: ${state.settings.center} · จุดจอดรถร่วมทุกคัน` : 'ยังไม่ได้ตั้งพิกัดจุดจอดรถ ใช้เวลาเดินทางที่ระบุไว้'} <a className="dispatch-details-link" href="/admin/settings">ตั้งค่าจุดจอดรถ</a></p>
+    <p className="dispatch-small">{centerOverride !== null ? 'ใช้เวลาเดินทางที่เจ้าหน้าที่ระบุ' : parkingMinutes !== null ? `จุดจอดรถ → จุดรับ ประมาณ ${parkingMinutes} นาที · ประมาณจากระยะทาง ไม่ใช่เส้นทางถนนหรือสภาพจราจร` : 'ยังประมาณจากตำแหน่งไม่ได้ กรุณาตรวจสอบเวลาเดินทางด้วยตนเอง'}</p>
     {schedule ? <ScheduleSummary booking={booking} schedule={schedule} /> : <p className="dispatch-alert" role="alert">{scheduleIssue}</p>}
-    <h2>3 เลือกรถและคนขับ</h2><div className="dispatch-resource-row"><ResourcePicker label="รถรับส่ง" placeholder="เลือกรถ" value={vehicleId} options={state.vehicles} onChange={changeVehicle} /><ResourcePicker label="คนขับ" placeholder="เลือกคนขับ" value={driverId} options={state.drivers.map(d => ({ ...d, label: d.name, active: driverAvailable(state, d) }))} onChange={changeDriver} /></div>
-    <h2>4 ตรวจสอบความพร้อม</h2>
+    <h2>3. เลือกรถและคนขับ</h2><div className="dispatch-resource-row"><ResourcePicker label="รถรับส่ง" placeholder="เลือกรถ" value={vehicleId} options={state.vehicles} onChange={changeVehicle} /><ResourcePicker label="คนขับ" placeholder="เลือกคนขับ" value={driverId} options={state.drivers.map(d => ({ ...d, label: d.name, active: driverAvailable(state, d) }))} onChange={changeDriver} /></div>
+    <h2>4. ตรวจสอบความพร้อม</h2>
     <div className={`dispatch-availability ${selected && check?.ready ? 'ready' : ''}`} aria-live="polite"><strong>{!selected ? 'ตรวจสอบตารางอัตโนมัติเมื่อเลือกรถและคนขับ' : check?.ready ? '✓ รถและคนขับพร้อมรับงาน' : check?.conflicts.length ? '! ตารางเวลาซ้อนกัน' : 'ทรัพยากรหรือข้อมูลไม่พร้อม'}</strong><p>{!selected ? 'ตรวจสอบเวลารถและคนขับ รวมเวลาเตรียมตัว 20 นาที' : check?.ready ? 'ไม่พบตารางเวลาซ้อนกัน' : [...(check?.issues || []), ...(check?.conflicts.map(c => `${c.booking.id}: ${[c.vehicle ? 'รถ' : '', c.driver ? 'คนขับ' : ''].filter(Boolean).join(' / ')}มีงานซ้อนกัน`) || []), scheduleIssue].filter(Boolean).join(' · ')}</p></div>
     {error && <p className="dispatch-alert" role="alert">{error}</p>}
     <DispatchButton onClick={inspect}>ตรวจสอบซ้ำและยืนยันการมอบหมาย</DispatchButton>

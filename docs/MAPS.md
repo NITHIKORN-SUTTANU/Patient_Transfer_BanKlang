@@ -27,3 +27,11 @@ VITE_MAP_SEARCH_URL=https://your-photon.example/api/
 The tile URL must return 256px Web Mercator raster tiles. If replacing OpenStreetMap attribution with another provider's required attribution, update the map style in `src/components/PickupMap.tsx`. The search endpoint must return Photon GeoJSON features. Restart the development server after changing settings.
 
 GPS requires HTTPS or localhost and browser permission. Map tiles and search require internet access; coordinate entry remains available if WebGL or the network fails.
+
+## Shared car parking and departure estimates
+
+Admin → settings → CFG-01 → Manage lets the admin save one parking pin for all cars. The location is stored as optional `settings.parking` coordinates; older browser data remains valid without a pin. No default map center is saved as the parking location until the admin selects it.
+
+Assignments with parking and pickup coordinates estimate parking-to-pickup minutes from Haversine distance × 1.3 at an assumed 30 km/h, rounded up. This is a mock estimate, not road routing or traffic data. The dispatcher can override it under travel-time details. Missing coordinates retain the existing manual travel-time fallback. Pickup-to-hospital travel remains manually specified (35 minutes initially).
+
+Times are calculated backward: hospital arrival = appointment minus 20 minutes; pickup = arrival minus pickup-to-hospital minutes; parking departure = pickup minus parking-to-pickup minutes. Moving parking changes departure, while pickup stays tied to the hospital leg. Parking changes flag approved assigned jobs for review without overwriting their current schedules. Review starts with an estimate from the latest parking pin.

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import type { Booking, DemoState } from '../data/seed'
 import { demoStore } from '../services/demoStore'
-import { checkAssignment, dispatchTime, makeDemoSchedule } from '../services/dispatch'
+import { checkAssignment, dispatchTime, estimateParkingTravel, makeDemoSchedule } from '../services/dispatch'
 import { BookingButton, BookingModal } from './BookingUI'
 
 export function RecalculationPending({ state }: { state: DemoState }) {
@@ -18,7 +18,7 @@ export function ScheduleReview({ state }: { state: DemoState }) {
   const [hospital, setHospital] = useState('35')
   const [error, setError] = useState('')
   const waiting = state.bookings.filter(b => b.scheduleReview && b.status === 'approved' && b.schedule)
-  function open(booking: Booking) { setSelected(booking); setCenter(String(booking.schedule!.centerToPickupMinutes)); setHospital(String(booking.schedule!.pickupToHospitalMinutes)); setError('') }
+  function open(booking: Booking) { setSelected(booking); setCenter(String(estimateParkingTravel(state.settings?.parking, booking.details?.pickup) ?? booking.schedule!.centerToPickupMinutes)); setHospital(String(booking.schedule!.pickupToHospitalMinutes)); setError('') }
   function confirm() {
     try {
       demoStore.update(latest => {

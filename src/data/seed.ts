@@ -20,7 +20,7 @@ export interface Vehicle { id: string; label: string; active: boolean; vehicleTy
 export interface Driver { id: string; name: string; active: boolean; accountId?: string; phone?: string }
 export type AdminRole = 'Dispatcher' | 'Driver' | 'Admin'
 export interface AdminAccount { id: string; name: string; username: string; role: AdminRole; active: boolean }
-export interface AdminSettings { center: string; serviceArea: string; opensAt: string; closesAt: string }
+export interface AdminSettings { center: string; parking?: { latitude: number; longitude: number }; serviceArea: string; opensAt: string; closesAt: string }
 export interface AuditEvent { id: string; at: string; actor: string; category: 'accounts' | 'vehicles' | 'drivers' | 'settings'; action: string; recordId: string; reason?: string; before?: string; after: string }
 export interface DemoState {
   version: 1

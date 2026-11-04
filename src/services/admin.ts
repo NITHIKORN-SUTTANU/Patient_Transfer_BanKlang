@@ -47,12 +47,13 @@ export function saveAdmin(category: AdminCategory, next: Entity, previous?: Enti
     } else if (category === 'settings') {
       const settings = next as AdminSettings
       required(settings.center, 'ตำแหน่งศูนย์รถ'); required(settings.serviceArea, 'พื้นที่ให้บริการ')
+      if (settings.parking && (!Number.isFinite(settings.parking.latitude) || !Number.isFinite(settings.parking.longitude) || Math.abs(settings.parking.latitude) > 90 || Math.abs(settings.parking.longitude) > 180)) throw new Error('พิกัดจุดจอดรถไม่ถูกต้อง')
       if (![settings.opensAt, settings.closesAt].every(t => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)) || settings.opensAt >= settings.closesAt) throw new Error('เวลาเปิดต้องอยู่ก่อนเวลาปิดบริการ')
     }
     const action = !previous ? 'เพิ่มข้อมูล' : 'active' in next && 'active' in previous && next.active !== previous.active ? next.active ? 'เปิดใช้งาน' : 'ระงับ / ปิดใช้งาน' : 'แก้ไขข้อมูล'
     const event: AuditEvent = { id: crypto.randomUUID(), at: new Date().toISOString(), actor: 'ผู้ดูแลระบบ', category, action, recordId: id, reason: reason.trim() || undefined, before: previous ? JSON.stringify(previous) : undefined, after: JSON.stringify(next) }
     const updated: DemoState = category === 'settings' ? { ...state, settings: next as AdminSettings } : { ...state, [category]: existing ? (state[category] as { id: string }[]).map(r => r.id === id ? next : r) : [...(state[category] || []), next] }
-    const geospatialChanged = category === 'settings' && previous && ((previous as AdminSettings).center !== (next as AdminSettings).center || (previous as AdminSettings).serviceArea !== (next as AdminSettings).serviceArea)
+    const geospatialChanged = category === 'settings' && previous && ((previous as AdminSettings).center !== (next as AdminSettings).center || (previous as AdminSettings).serviceArea !== (next as AdminSettings).serviceArea || JSON.stringify((previous as AdminSettings).parking) !== JSON.stringify((next as AdminSettings).parking))
     return { ...updated, bookings: geospatialChanged ? updated.bookings.map(b => b.status === 'approved' && b.schedule ? { ...b, scheduleReview: { requestedAt: event.at } } : b) : updated.bookings, auditEvents: [event, ...(state.auditEvents || [])] }
   })
 }

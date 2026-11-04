@@ -3,6 +3,62 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 const key = 'ban-klang-transit:demo:v1'
+test('parking popup uses GPS, keeps saved pin on permission failure, and fits mobile and desktop', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 18.58, longitude: 99.01 })
+  await page.goto('/admin/settings')
+  const manage = () => page.getByRole('row').filter({ hasText: 'CFG-01' }).getByRole('button', { name: 'จัดการ', exact: true }).click()
+  await manage()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'ใช้ตำแหน่งปัจจุบัน', exact: true }).click()
+  await expect(dialog).toContainText('พิกัดจุดจอดรถ 18.580000, 99.010000')
+  await expect(dialog.getByRole('region', { name: 'แผนที่จุดจอดรถ', exact: true })).toBeVisible()
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 800 })
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+    const inner = dialog.locator('.booking-modal-inner')
+    await expect(inner).toHaveCSS('padding-left', width === 320 ? '16px' : '24px')
+    await dialog.evaluate(el => el.scrollTo(0, el.scrollHeight))
+    const bounds = (await dialog.boundingBox())!
+    const saveButton = (await dialog.getByRole('button', { name: 'บันทึก', exact: true }).boundingBox())!
+    expect(bounds.y + bounds.height - saveButton.y - saveButton.height).toBeGreaterThanOrEqual(28)
+    await page.screenshot({ path: `test-results/admin-parking-gps-${width}.png`, fullPage: true })
+  }
+  await dialog.getByRole('button', { name: 'บันทึก', exact: true }).click()
+  await page.reload()
+  expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).settings.parking, key)).toEqual({ latitude: 18.58, longitude: 99.01 })
+  await manage()
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: { getCurrentPosition: (_success: unknown, failure: (error: { code: number }) => void) => failure({ code: 1 }) } })
+  })
+  await dialog.getByRole('button', { name: 'ใช้ตำแหน่งปัจจุบัน', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('กรุณาอนุญาตให้เว็บไซต์เข้าถึงตำแหน่ง')
+  await expect(dialog).toContainText('พิกัดจุดจอดรถ 18.580000, 99.010000')
+  await expect(dialog.getByRole('button', { name: 'บันทึก', exact: true })).toBeEnabled()
+})
+
+test('settings use row actions only and preserve other sections', async ({ page }) => {
+  await page.goto('/admin/settings')
+  const original = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).settings, key)
+  await expect(page.getByRole('button', { name: 'แก้ไขการตั้งค่า', exact: true })).toHaveCount(0)
+  for (const [id, title, fields] of [
+    ['CFG-01', 'แก้ไขตำแหน่งศูนย์รถเทศบาล', ['ตำแหน่งศูนย์รถเทศบาล']],
+    ['CFG-02', 'แก้ไขพื้นที่ให้บริการ', ['พื้นที่ให้บริการ']],
+    ['CFG-03', 'แก้ไขเวลาเปิดให้บริการ', ['เวลาเปิดบริการ', 'เวลาปิดบริการ']],
+  ] as const) {
+    await page.getByRole('row').filter({ hasText: id }).getByRole('button', { name: 'จัดการ', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toHaveAccessibleName(title)
+    await expect(dialog.locator('.admin-field input')).toHaveCount(fields.length)
+    for (const label of fields) await expect(dialog.getByLabel(label, { exact: true })).toBeVisible()
+    if (id === 'CFG-01') await dialog.getByLabel('ตำแหน่งศูนย์รถเทศบาล', { exact: true }).fill('ศูนย์ใหม่')
+    await dialog.getByRole('button', { name: 'บันทึก', exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  }
+  await page.reload()
+  expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).settings, key)).toEqual({ ...original, center: 'ศูนย์ใหม่' })
+})
+
 const save = (page: Page) => page.getByRole('button', { name: 'บันทึก', exact: true }).click()
 async function saved(page: Page) { await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page.getByRole('status')).toContainText('บันทึกข้อมูล') }
 async function addAccount(page: Page, name = 'คนขับ ใหม่จำลอง', username = 'new.driver.demo') {
@@ -157,9 +213,10 @@ test('account validation, permissions, linked suspension, settings, stale edit a
   await other.getByRole('button', { name: /^คนขับ:/ }).click()
   await expect(other.getByRole('option', { name: /คนขับ A/ })).toBeDisabled()
   await page.goto('/admin/settings')
-  await page.getByRole('button', { name: 'แก้ไขการตั้งค่า', exact: true }).click()
-  await expect(page.getByLabel('จองล่วงหน้า 48 ชม. / เตรียมรถ 20 นาที (แก้ไขไม่ได้)')).toHaveAttribute('readonly', '')
+  await page.getByRole('row').filter({ hasText: 'CFG-01' }).getByRole('button', { name: 'จัดการ', exact: true }).click()
   await page.getByLabel('ตำแหน่งศูนย์รถเทศบาล').fill('ศูนย์จำลองใหม่')
+  await save(page); await saved(page)
+  await page.getByRole('row').filter({ hasText: 'CFG-03' }).getByRole('button', { name: 'จัดการ', exact: true }).click()
   await page.getByLabel('เวลาเปิดบริการ', { exact: true }).fill('18:00')
   await save(page)
   await expect(page.getByRole('alert')).toContainText('เวลาเปิดต้องอยู่ก่อน')
@@ -181,7 +238,8 @@ for (const width of [320, 375, 390, 430, 768, 1024, 1280, 1440, 1920]) {
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (['accounts', 'vehicles', 'drivers', 'settings'].includes(route)) {
-        await page.getByRole('button', { name: route === 'settings' ? 'แก้ไขการตั้งค่า' : route === 'accounts' ? '+ เพิ่มบัญชี' : route === 'vehicles' ? '+ เพิ่มรถ' : '+ เพิ่มคนขับ', exact: true }).click()
+        if (route === 'settings') await page.getByRole('row').filter({ hasText: 'CFG-01' }).getByRole('button', { name: 'จัดการ', exact: true }).click()
+        else await page.getByRole('button', { name: route === 'accounts' ? '+ เพิ่มบัญชี' : route === 'vehicles' ? '+ เพิ่มรถ' : '+ เพิ่มคนขับ', exact: true }).click()
         const dialog = page.getByRole('dialog')
         await expect(dialog).toBeVisible()
         expect(await dialog.evaluate(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && el.scrollWidth <= el.clientWidth })).toBe(true)

@@ -2,10 +2,24 @@ import type { Booking, DemoSchedule, DemoState } from '../data/seed'
 import { LEAD_TIME_MS } from './booking'
 import { demoStore } from './demoStore'
 import { driverAvailable } from './resources'
+import { driverLabels, driverStage } from './driver'
 
 export const PREPARATION_MINUTES = 20 as const
 // Editable demo estimates taken from D-02's example, never routing estimates.
 export const DEFAULT_DEMO_TRAVEL = { centerToPickupMinutes: 30, pickupToHospitalMinutes: 35 }
+// Prototype estimate only: straight-line distance with a 1.3 detour factor,
+// at an assumed 30 km/h. This is not a road route or traffic prediction.
+export function estimateParkingTravel(parking: { latitude: number; longitude: number } | undefined, pickup: { latitude?: number; longitude?: number } | null | undefined): number | null {
+  if (!parking || pickup?.latitude === undefined || pickup.longitude === undefined) return null
+  const points = [parking.latitude, parking.longitude, pickup.latitude, pickup.longitude]
+  if (!points.every(Number.isFinite) || Math.abs(parking.latitude) > 90 || Math.abs(pickup.latitude) > 90 || Math.abs(parking.longitude) > 180 || Math.abs(pickup.longitude) > 180) return null
+  const radians = (degrees: number) => degrees * Math.PI / 180
+  const latitude = radians(pickup.latitude - parking.latitude)
+  const longitude = radians(pickup.longitude - parking.longitude)
+  const haversine = Math.sin(latitude / 2) ** 2 + Math.cos(radians(parking.latitude)) * Math.cos(radians(pickup.latitude)) * Math.sin(longitude / 2) ** 2
+  const distanceKm = 6371 * 2 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, haversine))))
+  return Math.ceil(distanceKm * 1.3 / 30 * 60)
+}
 export function initializeDispatcherResources() {
   if (demoStore.getState().dispatcherResourcesInitialized) return
   demoStore.update(state => ({
@@ -82,6 +96,8 @@ export const dispatchTime = (iso: string) => new Intl.DateTimeFormat('th-TH', { 
 export const dispatchDate = (iso: string) => new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso))
 export function dispatchStatus(booking: Booking) {
   if (booking.status === 'pending') return 'รอตรวจสอบ'
-  if (booking.status === 'approved') return booking.schedule ? 'มอบหมายแล้ว' : 'รอจัดตาราง'
-  return { rejected: 'ไม่อนุมัติ', in_transit: 'กำลังเดินทาง', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิกแล้ว' }[booking.status]
+  if (booking.status === 'approved') return booking.schedule ? 'รอเริ่มเดินทาง' : 'รอจัดตาราง'
+  if (booking.status === 'in_transit') return driverLabels[driverStage(booking)]
+  return { rejected: 'ไม่อนุมัติ', completed: 'ส่งถึงโรงพยาบาลแล้ว', cancelled: 'ยกเลิกแล้ว' }[booking.status]
 }
+

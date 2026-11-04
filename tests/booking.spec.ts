@@ -33,6 +33,38 @@ async function selectPickup(page: Page) {
   await page.keyboard.press('ArrowRight')
 }
 
+test('repeat booking remembers submitted details after reload but requires a new appointment and consent', async ({ page }) => {
+  await enterBooking(page)
+  await expect(page.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('')
+  await fillPatient(page, true)
+  await page.getByRole('button', { name: 'รถเข็น', exact: true }).click()
+  await page.getByLabel('มีผู้ดูแลเดินทางไปด้วย', { exact: true }).check()
+  await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุที่อยู่แทน', { exact: true }).click()
+  await page.getByLabel('ที่อยู่จุดรับ', { exact: true }).fill('บ้านเลขที่ 12 ใกล้ศาลาหมู่บ้าน')
+  await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
+  await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'ส่งคำขอแล้ว', exact: true })).toBeVisible()
+
+  await page.reload()
+  await enterBooking(page)
+  await expect(page.getByRole('button', { name: 'จองให้ผู้อื่น', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('ผู้ป่วย จำลอง')
+  await expect(page.getByLabel('ชื่อผู้ดูแล / ผู้ติดต่อ *', { exact: true })).toHaveValue('ผู้ดูแล จำลอง')
+  await expect(page.getByLabel('ความสัมพันธ์กับผู้ป่วย *', { exact: true })).toHaveValue('ผู้ดูแล')
+  await expect(page.getByLabel('เบอร์โทรศัพท์ผู้ติดต่อ *', { exact: true })).toHaveValue('0800000000')
+  await expect(page.getByLabel('โรงพยาบาล *', { exact: true })).toHaveValue('โรงพยาบาลลำพูน')
+  await page.getByLabel('ชื่อผู้ป่วย *', { exact: true }).fill('แก้ไขชื่อ')
+  await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
+  await expect(page.getByText('กรุณาเลือกวันนัดหมาย', { exact: true })).toBeVisible()
+  await expect(page.getByText('กรุณาเลือกเวลานัดหมาย', { exact: true })).toBeVisible()
+  await fillPatient(page, true)
+  await expect(page.getByRole('button', { name: 'รถเข็น', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByLabel('มีผู้ดูแลเดินทางไปด้วย', { exact: true })).toBeChecked()
+  await expect(page.locator('.booking-pickup-value')).toContainText('บ้านเลขที่ 12 ใกล้ศาลาหมู่บ้าน')
+  await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุที่อยู่แทน', { exact: true }).click()
+  await expect(page.getByLabel('ที่อยู่จุดรับ', { exact: true })).toHaveValue('บ้านเลขที่ 12 ใกล้ศาลาหมู่บ้าน')
+})
+
 test('time columns scroll independently, support keyboard selection, and confirm the selected time', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 })
   await enterBooking(page)
@@ -482,3 +514,4 @@ test('visual checks across the main flow and service icons', async ({ page }) =>
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ban-klang-transit:demo:v1')!).bookings)).toHaveLength(2)
   expect(errors).toEqual([])
 })
+

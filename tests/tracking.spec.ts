@@ -1,18 +1,31 @@
 import { expect, test } from '@playwright/test'
 
-test('dashboard queue sorts appointment dates and times ascending across statuses', async ({ page }) => {
+test('dashboard separates review requests from assignment jobs and sorts each by appointment', async ({ page }) => {
   await page.goto('/')
   await page.evaluate(() => {
     const bookings = [
       { id: 'later-day', status: 'pending', appointmentAt: '2026-11-06T01:00:00Z' },
       { id: 'later-time', status: 'approved', appointmentAt: '2026-11-05T05:00:00Z' },
+      { id: 'earlier-approved', status: 'approved', appointmentAt: '2026-11-05T01:00:00Z' },
       { id: 'earliest', status: 'pending', appointmentAt: '2026-11-05T01:00:00Z' },
       { id: 'finished', status: 'completed', appointmentAt: '2026-11-04T01:00:00Z' },
     ].map(b => ({ ...b, patientName: 'Test patient' }))
     localStorage.setItem('ban-klang-transit:demo:v1', JSON.stringify({ version: 1, selectedActor: 'ACT-02', bookings, vehicles: [], drivers: [] }))
   })
   await page.goto('/dispatcher')
-  await expect(page.locator('#dispatch-queue tbody th')).toHaveText(['earliest', 'later-time', 'later-day'])
+  await expect(page.locator('#dispatch-queue tbody th .service-cell-content > span:first-child')).toHaveText(['earliest', 'later-day'])
+  await expect(page.locator('#dispatch-assignment-queue tbody th .service-cell-content > span:first-child')).toHaveText(['earlier-approved', 'later-time'])
+  await expect(page.locator('#dispatch-queue .dispatch-queue-count')).toHaveText('2 รายการ')
+  await expect(page.locator('#dispatch-assignment-queue .dispatch-queue-count')).toHaveText('2 รายการ')
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    const left = (await page.locator('#dispatch-queue').boundingBox())!
+    const right = (await page.locator('#dispatch-assignment-queue').boundingBox())!
+    if (width === 1440) { expect(right.x).toBeGreaterThan(left.x); expect(right.y).toBe(left.y) }
+    else expect(right.y).toBeGreaterThanOrEqual(left.y + left.height)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width)
+    await page.screenshot({ path: `test-results/dashboard-split-${width}.png`, fullPage: true })
+  }
 })
 
 test('tracking opens on all jobs, prioritizes Bangkok today, and filters dates', async ({ page }) => {
@@ -36,7 +49,7 @@ test('tracking opens on all jobs, prioritizes Bangkok today, and filters dates',
   await page.goto('/dispatcher/tracking')
   const ids = page.locator('tbody th')
   const cancelled = page.locator('.dispatch-status-badge.cancelled')
-  await expect(cancelled).toHaveText('ยกเลิกแล้ว')
+  await expect(cancelled).toContainText('ยกเลิกแล้ว')
   await expect(cancelled).toHaveCSS('background-color', 'rgb(255, 240, 241)')
   await expect(cancelled).toHaveCSS('color', await page.locator('main').evaluate(el => getComputedStyle(el).getPropertyValue('--color-error').trim()).then(hex => {
     const value = hex.replace('#', '')
@@ -47,6 +60,23 @@ test('tracking opens on all jobs, prioritizes Bangkok today, and filters dates',
   await expect(page.locator('.dispatch-tracking-day')).toHaveCount(0)
   await expect(page.locator('.dispatch-tracking-metrics article').first()).toContainText('4 พ.ย. 2569')
   await expect(ids).toHaveText(['activePatient active', 'waiting-earlyPatient waiting-early', 'waiting-latePatient waiting-late', 'donePatient done', 'pastPatient past', 'futurePatient future'])
+  await expect(page.getByRole('row').filter({ hasText: 'waiting-early' }).locator('.dispatch-status-badge')).toContainText('รอเริ่มเดินทาง')
+  await expect(page.getByRole('row').filter({ hasText: 'Patient done' }).locator('.dispatch-status-badge')).toContainText('ส่งถึงโรงพยาบาลแล้ว')
+  for (const [stage, label] of [
+    ['going_to_pickup', 'กำลังไปรับผู้ป่วย'],
+    ['patient_onboard', 'รับผู้ป่วยขึ้นรถแล้ว'],
+    ['going_to_hospital', 'กำลังเดินทางไปโรงพยาบาล'],
+  ]) {
+    await page.evaluate(stage => {
+      const key = 'ban-klang-transit:demo:v1'
+      const state = JSON.parse(localStorage.getItem(key)!)
+      state.bookings.find((b: { id: string }) => b.id === 'active').driverProgress = { stage, events: [{ stage, at: '2026-11-04T00:00:00Z' }] }
+      localStorage.setItem(key, JSON.stringify(state))
+    }, stage)
+    await page.reload()
+    const active = page.getByRole('row').filter({ hasText: 'Patient active' })
+    await expect(active.locator('.dispatch-status-badge')).toContainText(label)
+  }
   await page.getByLabel('วันรับผู้ป่วย', { exact: true }).fill('2026-11-03')
   await expect(ids).toHaveText(['pastPatient past'])
   await page.getByRole('button', { name: 'วันนี้', exact: true }).click()

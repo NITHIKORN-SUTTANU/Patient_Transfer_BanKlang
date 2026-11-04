@@ -15,7 +15,21 @@ import { cancelBooking, citizenCanCancel } from '../services/cancellation'
 import '../booking.css'
 
 const statusLabels: Record<BookingStatus, string> = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ', in_transit: 'กำลังเดินทาง', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิกแล้ว' }
-const initialBookingForm = (): BookingDetails => ({ ...emptyBooking(), hospital: 'โรงพยาบาลลำพูน' })
+const initialBookingForm = (): BookingDetails => {
+  // Submitted bookings already persist in this browser. Reuse the latest details,
+  // but require a fresh appointment and acknowledgement for every new request.
+  const previous = [...demoStore.getState().bookings].reverse().find(booking => booking.details)?.details
+  return {
+    ...emptyBooking(),
+    hospital: 'โรงพยาบาลลำพูน',
+    ...previous,
+    extras: previous ? [...previous.extras] : [],
+    pickup: previous?.pickup ? { ...previous.pickup } : null,
+    date: '',
+    time: '',
+    acknowledged: false,
+  }
+}
 export function BookingPage() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -32,7 +46,7 @@ export function BookingPage() {
   const [locatingPath, setLocatingPath] = useState<string | null>(null)
   const locating = locatingPath === pathname
   const locationRequest = useRef(0)
-  const [pickupAddress, setPickupAddress] = useState('')
+  const [pickupAddress, setPickupAddress] = useState(() => draft.pickup?.latitude === undefined ? draft.pickup?.label || '' : '')
   const gpsActive = draft.pickup?.accuracy !== undefined
   const [sending, setSending] = useState(false)
   const [saveError, setSaveError] = useState(false)
@@ -116,7 +130,14 @@ export function BookingPage() {
   const error = (key: string) => errors[key] ? <span className="booking-error" id={`${key}-error`} role="alert">{errors[key]}</span> : null
   const selection = (key: 'hospital' | 'relationship', label: string, placeholder: string, values: string[]) => <div className="booking-field"><label htmlFor={key}>{label} *</label><select id={key} required value={draft[key]} aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `${key}-error` : undefined} onChange={e => update(key, e.target.value)}><option value="">{placeholder}</option>{values.map(value => <option key={value}>{value}</option>)}</select>{error(key)}</div>
   const edit = (target: string, label: string) => <button type="button" className="booking-edit" aria-label={`แก้ไข ${label}`} onClick={() => go(target)}>แก้ไข</button>
-  function start() { submittedId.current = null; setDraft(initialBookingForm()); setLocationError(''); setPickupAddress(''); go('privacy') }
+  function start() {
+    const next = initialBookingForm()
+    submittedId.current = null
+    setDraft(next)
+    setLocationError('')
+    setPickupAddress(next.pickup?.latitude === undefined ? next.pickup?.label || '' : '')
+    go('privacy')
+  }
   function openPin() { root.current?.querySelector<HTMLElement>('.pickup-map-frame')?.focus() }
   function selectPoint(latitude: number, longitude: number, label?: string) {
     setPickupAddress('')
@@ -195,8 +216,8 @@ export function BookingPage() {
   </>
   else if (screen === 'bookings') content = <>
     <BookingHeader title="รายการจองของฉัน" subtitle={state.bookings.length ? 'ดูสถานะและรายละเอียดการจอง' : 'ไม่มีคำขอจองรถในขณะนี้'} />
+    <Link className="booking-home-link booking-list-back" to="/booking" onClick={() => setErrors({})}>← กลับหน้าหลัก</Link>
     {state.bookings.length ? <><div className="booking-list-title"><h2>รายการจองทั้งหมด</h2><span>{state.bookings.length} รายการ</span></div>{[...state.bookings].reverse().map(b => <BookingSummaryCard key={b.id} booking={b} statusLabel={statusLabels[b.status]} to={`/booking/status/${b.id}`} />)}</> : <><section className="booking-empty"><span aria-hidden="true">▱</span><h2>ยังไม่มีรายการจอง</h2><p>เริ่มส่งคำขอจองรถได้เลย</p></section><BookingButton onClick={start}>เริ่มจองรถ</BookingButton></>}
-    <Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
   </>
   else if (screen === 'cancel' && saved) content = <>
     <BookingHeader title="ยกเลิกการจอง" subtitle="ตรวจสอบข้อมูลก่อนยืนยันการยกเลิก" />
