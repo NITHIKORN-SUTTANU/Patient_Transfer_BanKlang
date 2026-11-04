@@ -1,4 +1,86 @@
-# Session handoff — 2026-11-04
+# Session handoff — 2026-11-05
+
+Read this section first. Earlier sections below are historical; their work-state and test claims do not describe the latest tree.
+
+## Workspace, preferences, and repository state
+
+- React 19 + Vite + TypeScript; Thai product labels. User wants concise English replies, caveman style.
+- Workspace: `C:\Users\User\Desktop\banklang-transit-prototype`.
+- Immediately before this handoff update, `git status` was clean. HEAD: `01606bf feat: enhance admin interface with improved layout and icon integration`. `main...origin/main` showed no ahead/behind indicator against the locally recorded remote ref; no fetch was performed.
+- Assistant did not commit, push, or deploy. Changes appear to have been committed outside assistant actions during the session. This handoff edit itself is a new local change. Inspect status before further edits; preserve user work.
+- User is exiting. No new feature is pending.
+
+## Citizen booking
+
+- Repeat booking auto-fills the most recently submitted booking details in this browser: patient/contact names, phone, relationship, hospital, assistance/extras, and pickup.
+- New date, time, and privacy acknowledgement are always required. Fields remain editable. Address-only pickup text is restored too.
+- This reuses persisted demo bookings, not a real citizen identity/profile. User intends access through a LINE Official Account / LINE MINI App, but explicitly agreed to mimic for now. No LINE login, backend, shared database, or cross-device data sync exists.
+- Booking list has a left-aligned, bold underlined `← กลับหน้าหลัก` link near the top. User explicitly rejected CTA/button styling.
+
+## Dispatcher
+
+- Dashboard separates two queues: pending requests on left, approved/unassigned jobs on right; stacks on narrow screens. Each panel has count, patient details, and relevant action. Each queue sorts appointment date/time ascending.
+- Approval moves an item from review queue to assignment queue. Review metric scroll/focus still targets `dispatch-queue` / `queue-title`.
+- User rejected a subsequent flat-row dashboard redesign; it was undone. Keep existing card/table layout. Dashboard status text is bold and appears at top right of each booking card.
+- Right panel removes only surrounding table-wrapper border, preserving individual card outlines. Extra final-cell line under cards was removed.
+- Dashboard link reads `ดูงานรับส่งทั้งหมด →`.
+- Dispatcher notices auto-dismiss after 5 seconds; timer cleans up/restarts on notice changes.
+- Assignment headings use `1.` through `4.`. Waiting cards show patient name and explicit selected/unselected cue. Selected job context appears above assignment form. Schedule displays separate departure/pickup/arrival stops, with dates.
+- Tracking status uses actual driver stage, waiting-to-start, delivered, or cancelled, with colored icon badges. User asked to remove the small explanatory text under badges; it is gone.
+- Booking details include read-only pickup map and Google Maps location link. Missing/invalid coordinates show contact/address fallback, never a made-up pin. `DispatcherPickupMap.tsx` owns this view.
+- Tracking popup includes `ดูรายละเอียดงาน →`: opens full patient/contact/pickup/map/assigned car+driver/schedule details. `← กลับไปติดตามสถานะ` returns to the same job status.
+
+## Shared car parking and mock calculation
+
+- User confirmed ONE SHARED parking location for all cars.
+- Admin settings CFG-01 (`ตำแหน่งศูนย์รถเทศบาล` → `จัดการ`) stores optional `settings.parking = {latitude, longitude}`. Map selection or `ใช้ตำแหน่งปัจจุบัน` sets the pin. No default map center is silently saved as parking.
+- GPS has loading/disabled state, secure-context/support check, permission/timeout/error handling, and stale-request cleanup. Selecting manually invalidates pending GPS. Save waits until locating ends. Permission failure retains the old pin.
+- Coordinates validated in `saveAdmin` and `isDemoState`; old saved data without parking remains valid. Saving other settings preserves parking.
+- `estimateParkingTravel`: Haversine straight-line km × 1.3 assumed road detour ÷ 30 km/h × 60, rounded up. MOCK only, not road routing or traffic. UI says so. Dispatcher can override minutes; missing coordinates keep existing manual fallback (30 min parking-to-pickup).
+- Hospital leg remains manually specified, initially 35 min. Arrival = appointment minus 20 min; pickup = arrival minus hospital-leg minutes; departure = pickup minus parking-leg minutes. Moving parking affects departure, not pickup independently.
+- Parking changes flag approved assigned jobs for review without overwriting schedules. ScheduleReview starts with estimate from latest parking coordinates; dispatcher must confirm. See `docs/MAPS.md`.
+
+## Admin UI and settings
+
+- Cars and drivers have separate sidebar entries/routes and dashboard management rows. Removed combined resource tabs. Active link and icons track each route independently.
+- Drivers has total/available/unavailable count cards; availability uses `driverAvailable`, including linked account state.
+- Removed driver-only white background/small heading/borderless-panel overrides so drivers matches other admin pages. Audit-only overrides remain.
+- Shared responsive table cards now have consistent internal separators on the last card and no extra bottom-cell border on earlier cards. Rules exist in both mobile media and narrow-container sections in `figma-alignment.css`.
+- Added existing ServiceSymbol icons to admin dashboard metrics and management category rows. Other admin metric pages keep their original icon-free presentation.
+- Removed top-level `แก้ไขการตั้งค่า` button. Row `จัดการ` opens only that section (center/parking, service area, or hours). Fixed rules row opens read-only fixed-rules tab.
+- Removed redundant `ระงับการใช้งาน` button for accounts/drivers. Status dropdown + Save still leads to confirmation/reason. Vehicle `ปิดใช้งานรถ` and inactive-record `เปิดใช้งานอีกครั้ง` buttons remain.
+- Latest change: AdminForm gets `admin-editor-modal`. Inner content has no restrictive max-height; dialog handles scrolling. Desktop padding 24px sides/top, mobile 20px top/16px sides, bottom at least 28px including safe area. Form gap 20px, top margin 8px; action gap 12px/top margin 8px. Parking-specific rules remain compatible. This fixes controls overflowing inner height and touching popup bottom.
+
+## Map loading: actual failure found and corrected
+
+- All roles share lazy `LocationMap` / `PickupMap`.
+- Initially reproduced temporary tile failure that remained stuck until manual retry. Added bounded automatic map recreation after 1s then 2s (max two per mount), 12s initial load watchdog, timer/disposal cleanup, camera preservation, and a fresh budget on manual Retry. Track failed tile keys so one successful tile does not clear unrelated failures.
+- User then suggested popup opens before loading finishes. Added full-height Suspense placeholder and loading overlay until tile data arrives; popup stays open throughout loading.
+- Crucial root cause uncovered by delayed-module test: MapLibre **6.16.0** worker failed to load. Default relative worker path was unreliable with Vite, and prior production build had no worker asset.
+- Correct fix in `PickupMap.tsx`: import `maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url`, then `maplibregl.setWorkerUrl(workerUrl)` before map creation, per official MapLibre v6 Vite instructions. Do not remove this.
+- Production build after fix emitted `dist/assets/maplibre-gl-worker-Dro7GA4u.js` (~517 KB; hash can change). Delayed module + blocked tiles test passed with zero console/page errors and same popup DOM retained. This proves a local worker-loading defect; live deployment/device was not inspected.
+
+## Deployment
+
+- User will deploy manually, currently prefers GitHub → Vercel.
+- User created root `vercel.json`, verified valid: rewrite `/(.*)` to `/index.html` for SPA routes. Vite build command `npm run build`, output `dist`.
+- Netlify exploration was abandoned. Removed `public/_redirects` and generated `dist/_redirects`. No Netlify project config/dependency remains in repo. An `npx netlify-cli status` approval was aborted; no deploy was completed.
+- No live URL was supplied, and no live-site verification/deployment claim should be made. Current source changes after the map-worker build require a fresh build/deploy to appear online.
+- No shared data between friends/devices: each browser has its own demo localStorage. All-role testing works within the same browser.
+
+## Verification and next-session limits
+
+- Latest production build passed after worker/loading fixes, before later admin navigation/icons/button/padding refinements. Existing large lazy MapLibre chunk warning remains.
+- Typecheck/lint passed after navigation changes and after removing redundant suspension button. Latest padding edit was subsequently browser-tested; no full production rebuild or full suite was run after all admin refinements.
+- Latest final check: both existing admin seven-screen/dialog responsive cases at **320px and 1280px passed** after final editor padding change. Includes dropdown-based suspension confirmation paths. Earlier runs verified separate car/driver navigation and active states.
+- Focused passes during session: repeat-booking persistence/consent/date reset; split dashboard sorting/responsiveness/approval movement; assignment card selection/time stops; tracking driver stages; dispatcher pickup map/fallback; tracking → details → status; shared parking estimate + schedule review; settings row-only edits; GPS success/permission denial/padding; map manual/zoom/automatic/two-failure recovery; delayed lazy-module/tile loading with no worker errors.
+- Historical full dispatcher journey test stopped on outdated patient-status text (`รอจัดรถและคนขับ`), before assignment. Do not claim the full suite passes. One generic notice selector in dispatcher helper was scoped to `.dispatch-notice` to avoid map loading/error status ambiguity.
+- Windows PowerShell, Node available, Python unavailable. Use `npm.cmd`/`npx.cmd`. Vite/Playwright/build needed sandbox escalation for parent-directory access; do not keep rerunning restricted failures.
+- If continuing: inspect current git state, ask what user wants next, and run only checks relevant to new work. No outstanding user-requested work beyond this handoff.
+
+---
+
+# Earlier session handoff — 2026-11-04
 
 Read this latest section first. Earlier map/navigation handoff is preserved below.
 
