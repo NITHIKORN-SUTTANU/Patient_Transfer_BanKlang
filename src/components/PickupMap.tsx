@@ -2,11 +2,13 @@ import { PlaceSearch } from './PlaceSearch'
 import { ServiceSymbol } from './ServiceSymbol'
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import type { BookingDetails } from '../services/booking'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import './pickup-map.css'
 
 const defaultCenter: [number, number] = [99.008456, 18.578321]
+maplibregl.setWorkerUrl(workerUrl)
 
 export function PickupMap({ value, onChange, locationName = 'จุดรับ' }: { value: BookingDetails['pickup']; onChange?: (latitude: number, longitude: number, label?: string) => void; locationName?: string }) {
   const container = useRef<HTMLDivElement>(null)
@@ -16,6 +18,7 @@ export function PickupMap({ value, onChange, locationName = 'จุดรับ'
   const callback = useRef(onChange)
   const [message, setMessage] = useState('กำลังโหลดแผนที่…')
   const [failed, setFailed] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [attempt, setAttempt] = useState(0)
   const camera = useRef<{ center: [number, number]; zoom: number } | null>(null)
   const automaticRetries = useRef(0)
@@ -32,6 +35,7 @@ export function PickupMap({ value, onChange, locationName = 'จุดรับ'
         automaticRetries.current += 1
         setMessage('กำลังโหลดแผนที่…')
         setFailed(false)
+        setLoading(true)
         setAttempt(previous => previous + 1)
       }, 1000 * 2 ** automaticRetries.current)
     }
@@ -85,6 +89,7 @@ export function PickupMap({ value, onChange, locationName = 'จุดรับ'
         retryTimer = undefined
         hasError = false
         setFailed(false)
+        setLoading(false)
         setMessage('')
       }
     })
@@ -139,11 +144,11 @@ export function PickupMap({ value, onChange, locationName = 'จุดรับ'
       onChange(Math.max(-85, Math.min(85, latitude + (event.key === 'ArrowUp' ? 0.0002 : event.key === 'ArrowDown' ? -0.0002 : 0))), ((longitude + (event.key === 'ArrowRight' ? 0.0002 : event.key === 'ArrowLeft' ? -0.0002 : 0) + 540) % 360) - 180)
     }}>
       <div ref={container} className="pickup-map-canvas" />
+      {loading && !failed && <div className="pickup-map-loading" role="status">กำลังโหลดแผนที่…</div>}
       {onChange && <span className="pickup-map-center" aria-hidden="true">●</span>}
       {onChange && <span className="pickup-map-hint">เลื่อนแผนที่ให้หมุดตรง{locationName}</span>}
-      {failed && <div className="pickup-map-retry"><div className="pickup-map-retry-card"><span className="pickup-map-retry-icon"><ServiceSymbol kind="pin" /></span><p className="pickup-map-retry-title">โหลดแผนที่ไม่สำเร็จ</p><p className="pickup-map-retry-description">กรุณาตรวจสอบอินเทอร์เน็ต แล้วลองอีกครั้ง</p><button type="button" className="booking-button" onClick={() => { automaticRetries.current = 0; setMessage('กำลังโหลดแผนที่…'); setFailed(false); setAttempt(previous => previous + 1) }}>ลองโหลดแผนที่อีกครั้ง</button></div><p role="status" className="pickup-map-error-caption">{onChange ? 'หรือค้นหาชื่อสถานที่ด้านบน' : message}</p></div>}
+      {failed && <div className="pickup-map-retry"><div className="pickup-map-retry-card"><span className="pickup-map-retry-icon"><ServiceSymbol kind="pin" /></span><p className="pickup-map-retry-title">โหลดแผนที่ไม่สำเร็จ</p><p className="pickup-map-retry-description">กรุณาตรวจสอบอินเทอร์เน็ต แล้วลองอีกครั้ง</p><button type="button" className="booking-button" onClick={() => { automaticRetries.current = 0; setMessage('กำลังโหลดแผนที่…'); setFailed(false); setLoading(true); setAttempt(previous => previous + 1) }}>ลองโหลดแผนที่อีกครั้ง</button></div><p role="status" className="pickup-map-error-caption">{onChange ? 'หรือค้นหาชื่อสถานที่ด้านบน' : message}</p></div>}
     </div>
-    {message && !failed && <p role="status" className="booking-info">{message}</p>}
     {!onChange && value?.latitude !== undefined && value.longitude !== undefined && <p className="pickup-map-coordinates">พิกัด {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}</p>}
     {onChange && <p className="booking-small">ค้นหาชื่อสถานที่ หรือแตะบนแผนที่เพื่อเลือก{locationName}</p>}
   </section>

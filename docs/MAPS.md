@@ -30,6 +30,8 @@ GPS requires HTTPS or localhost and browser permission. Map tiles and search req
 
 The shared map retries failed loads automatically at most twice (1-second then 2-second delay), preserving the camera and saved pin. A 12-second initial loading timeout exposes recovery instead of leaving a stalled request loading indefinitely. Manual Retry starts a fresh retry budget. Successful tiles clear their own errors; one successful tile does not hide other failed tiles in the current view. This applies to booking, parking, dispatcher, and driver maps; it cannot guarantee public tile-provider availability.
 
+MapLibre v6 requires an explicit worker URL with Vite. `PickupMap.tsx` imports `maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url` and calls `setWorkerUrl` before constructing a map. The production build must include the resulting `maplibre-gl-worker-*.js` asset. Without this, the default worker path can resolve to a missing file (or the SPA fallback HTML), causing worker-loading errors. The lazy map placeholder reserves map height, and a loading overlay remains until tile data arrives; opening a popup does not require waiting for a download or reopening it.
+
 ## Shared car parking and departure estimates
 
 Admin → settings → CFG-01 → Manage lets the admin save one parking pin for all cars. The location is stored as optional `settings.parking` coordinates; older browser data remains valid without a pin. No default map center is saved as the parking location until the admin selects it.

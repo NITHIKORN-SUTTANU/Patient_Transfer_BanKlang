@@ -3,6 +3,49 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 const key = 'ban-klang-transit:demo:v1'
+test('parking popup reserves space for a slow map module and waits for tiles without reopening', async ({ page }) => {
+  const errors: string[] = []
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  page.on('pageerror', error => errors.push(error.message))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/admin/settings')
+  const tile = await page.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 256
+    const drawing = canvas.getContext('2d')!
+    drawing.fillStyle = '#e0f0e0'; drawing.fillRect(0, 0, 256, 256)
+    return canvas.toDataURL('image/png').split(',')[1]
+  })
+  let releaseModule!: () => void
+  let releaseTiles!: () => void
+  const moduleGate = new Promise<void>(resolve => { releaseModule = resolve })
+  const tilesGate = new Promise<void>(resolve => { releaseTiles = resolve })
+  await page.route(/\/src\/components\/PickupMap\.tsx(\?.*)?$/, async route => { await moduleGate; await route.continue() })
+  await page.route('https://tile.openstreetmap.org/**', async route => { await tilesGate; await route.fulfill({ contentType: 'image/png', body: Buffer.from(tile, 'base64') }) })
+  try {
+    await page.getByRole('row').filter({ hasText: 'CFG-01' }).getByRole('button', { name: 'จัดการ', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.evaluate(el => el.setAttribute('data-original-popup', 'true'))
+    await expect(dialog.locator('.pickup-map-placeholder')).toBeVisible()
+    expect((await dialog.locator('.pickup-map-placeholder').boundingBox())!.height).toBeGreaterThanOrEqual(320)
+    releaseModule()
+    await expect(dialog.locator('.pickup-map-loading')).toBeVisible()
+    await expect(dialog.locator('.pickup-map-retry'), JSON.stringify(errors)).toHaveCount(0)
+    releaseTiles()
+    await expect(dialog.locator('.pickup-map-loading')).toHaveCount(0)
+    await expect(dialog.locator('.pickup-map-canvas')).toHaveAttribute('data-ready', 'true')
+    await expect(dialog).toHaveAttribute('data-original-popup', 'true')
+    expect((await dialog.locator('.maplibregl-canvas').boundingBox())!.width).toBeGreaterThan(200)
+    expect(errors).toEqual([])
+  } catch (error) {
+    if (errors.length) throw new Error(errors.join('\n'), { cause: error })
+    throw error
+  } finally {
+    releaseModule()
+    releaseTiles()
+  }
+})
+
 test('parking popup uses GPS, keeps saved pin on permission failure, and fits mobile and desktop', async ({ page, context }) => {
   await context.grantPermissions(['geolocation'])
   await context.setGeolocation({ latitude: 18.58, longitude: 99.01 })
