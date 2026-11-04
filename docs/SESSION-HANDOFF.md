@@ -1,4 +1,78 @@
-# Session handoff — 2026-10-30
+# Session handoff — 2026-11-04
+
+Read this latest section first. Earlier map/navigation handoff is preserved below.
+
+## Current workspace and user preferences
+
+- React 19 + Vite + TypeScript, Thai product UI. Workspace: `C:\Users\User\Desktop\banklang-transit-prototype`.
+- User explicitly wants assistant replies in concise English, caveman style. Keep product labels in Thai.
+- Changes are saved locally but remain uncommitted. No commit, push, or deployment performed. Preserve all existing changes, including those present before this session.
+- Pre-existing modified files included `BookingSummaryCard.tsx`, `PickupMap.tsx`, `PlaceSearch.tsx`, `BookingPage.tsx`, and `figma-alignment.css`. Do not revert them wholesale.
+- User is exiting Codex and requested this handoff. No further feature request is pending.
+
+## Dispatcher changes and final decisions
+
+- Tracking defaults to **ทั้งหมด**, with only **ทั้งหมด / วันนี้** scope buttons. The earlier **วันถัดไป** button was removed at user request.
+- All-jobs view puts today's jobs first using Bangkok dates. Within each day: in transit, assigned, completed, cancelled; then pickup time ascending. Other dates sort ascending. Date/search/status filters remain available.
+- Removed the separate `dispatch-tracking-day` banner. Today's date is inside the **งานทั้งหมดวันนี้** metric card.
+- Tracking rows include patient name and pickup date/time. Cancelled status badge is red.
+- Dashboard request queue sorts appointment date/time ascending, independent of pending/approved status.
+- Shared table header corners now fit rounded borders; header text can wrap.
+- Fixed mobile assignment navbar height: it was ~145px versus 98px on other empty pages. `.dispatch-shell { grid-template-rows:auto 1fr; }` at mobile widths prevents spare page height stretching the navbar.
+- Dispatcher links use consistent active/hover colors and font weight across routes and mobile drawer.
+
+## Driver changes and final decisions
+
+- One active trip per driver. `advanceDriverTrip` checks latest shared state inside `demoStore.update` and rejects starting another job while that driver has an `in_transit` job.
+- Details start button is disabled when another job is active, with explanation/link to current job. Stale confirmation dialogs also disable confirmation if another tab starts a job. Finishing current trip releases the next start. Different drivers remain independent.
+- Current status card shows **planned departure → appointment time**, using `schedule.departureAt` and `appointmentAt`. These are planned times, not actual departure timestamps.
+- **ดูรายละเอียดงาน** is now a full-width outlined button with bold text and hover/pressed/focus states.
+- Job details has **← กลับหน้าก่อนหน้า**. Entry points pass original path/query through router state; back link returns there, including after reload. Direct entry falls back to `/driver`.
+- Full **ตารางที่ได้รับมอบหมาย** appears only on job details, not status. Status retains the time arrow and failed-pickup reporting action.
+- Reduced leftover status-page margins and mobile bottom padding after removing the schedule. Mobile fixed action bar retains clearance.
+- History cards show one status badge at top, without duplicate completed/cancelled badges. Cancellation reason remains plain text when available.
+- Final user decision: history **job numbers match status color**: cancelled red, completed green. Cancelled status is also red. (An earlier clarification briefly left numbers normal; the later explicit request supersedes it.)
+
+## Shared navigation and citizen list styling
+
+- All navbar roles (dispatcher, driver, admin) use larger borderless hamburger and close controls: 36px icons within 56px controls.
+- Hamburger and drawer-close buttons have translucent hover/pressed backgrounds and slight pressed scaling. Keyboard focus remains visible.
+- Soft shadows on desktop sidebars, mobile headers, and navigation drawers.
+- Citizen booking list left bars track status colors and are 5px wide.
+- Latest styling makes pending **รออนุมัติ** visibly different from cancelled: golden-yellow bar `#e5b800`, pale-yellow badge `#fff7cc`, dark olive/gold text `#705400`. Cancelled remains red.
+- `--booking-state-accent` separates bright border accent from readable badge text. Hover preserves the status-colored left bar.
+
+## Files to inspect
+
+- `src/pages/DispatcherPage.tsx`, `src/dispatcher.css`: queue/tracking behavior and styling.
+- `src/services/driver.ts`, `src/pages/DriverPage.tsx`, `src/driver-refinements.css`: trip guard, status/details/history changes.
+- `src/figma-alignment.css`: shared navbar/table styling and citizen status colors. Multiple older stylesheet layers exist; check specificity and import order before changing rules.
+- `tests/tracking.spec.ts` (new): tracking defaults, Bangkok today priority, filtering, cancelled badge colors, header containment, responsive overflow, dashboard ascending order.
+- `tests/navbar-check.spec.ts` (new): dispatcher layout consistency, active styles, collapsed/mobile navigation, equal mobile navbar heights.
+- `tests/driver.spec.ts`: added active-trip/cross-tab guard, status time range/mobile containment, and details return-navigation checks.
+- `tests/dispatcher.spec.ts`: existing flow explicitly selects **ทั้งหมด** before searching future jobs.
+
+## Verification and limits
+
+- Production build passed earlier during initial tracking implementation, with the existing large lazy MapLibre chunk warning. It was **not rerun after subsequent changes**.
+- Typecheck and lint passed repeatedly during implementation. Latest typecheck was after the first citizen pending-color change; the final pending accent adjustment was CSS-only and not separately tested.
+- Driver focused runs passed: one active trip/stale confirmation/service rejection, start after completion, time arrow at 320px, details return after reload, and existing work-status progression.
+- Navbar consistency tests passed after the mobile height fix. All 8 existing navigation tests passed after hamburger sizing. All 3 role mobile navigation tests passed after close-button sizing and again after hover/pressed feedback.
+- Tracking/dashboard focused tests passed earlier. Desktop tracking and mobile screenshots were inspected during earlier tracking/header work.
+- Later history badge/ID styling, duplicate badge removal, navbar shadow, and latest citizen color tweaks have not received a final combined browser/visual pass. Do not claim the full suite passed on the final tree.
+- The entire browser suite was not run this session. Existing earlier test results below are historical, not final-state verification.
+- Browser/Vite commands needed sandbox escalation for filesystem access. `npm.cmd` avoids the PowerShell npm wrapper permission noise. Windows shell is PowerShell; Python is unavailable, Node is available.
+
+## Suggested next session
+
+1. Read this file and inspect `git status`/diff before editing.
+2. If continuing validation, run `npm.cmd run build`, `npm.cmd run lint`, and relevant Playwright specs (navigation/navbar-check/tracking/driver), with required sandbox approval.
+3. Visually review citizen pending versus cancelled cards and driver history/status on mobile and desktop.
+4. Review and commit changes only when user asks. No commit has been made.
+
+---
+
+# Earlier session handoff — 2026-10-30
 
 ## Project and working state
 

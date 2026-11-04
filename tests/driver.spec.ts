@@ -107,6 +107,58 @@ async function seedDriver(page: Page) {
   await page.reload()
 }
 
+test('driver must finish active job before starting another, including stale confirmations', async ({ page, context }) => {
+  await seedDriver(page)
+  await page.goto('/driver/details?booking=BK-0002')
+  await page.getByRole('button', { name: 'ไปเริ่มรับผู้ป่วย', exact: true }).click()
+  const other = await context.newPage()
+  await other.goto('/driver/details?booking=BK-0001')
+  await other.getByRole('button', { name: 'ไปเริ่มรับผู้ป่วย', exact: true }).click()
+  await other.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true })).toBeDisabled()
+  await expect(page.getByRole('alert')).toContainText('กรุณาจบงาน BK-0001 ก่อนเริ่มงานใหม่')
+  const blocked = await page.evaluate(async () => {
+    const modulePath = '/src/services/driver.ts'
+    const { advanceDriverTrip } = await import(modulePath)
+    try { advanceDriverTrip('BK-0002', 'demo-driver-A', 'assigned'); return '' }
+    catch (e) { return (e as Error).message }
+  })
+  expect(blocked).toContain('กรุณาจบงาน BK-0001 ก่อนเริ่มงานใหม่')
+  await page.getByRole('button', { name: 'ยกเลิก', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'ไปเริ่มรับผู้ป่วย', exact: true })).toBeDisabled()
+  for (let step = 0; step < 3; step++) {
+    await other.locator('.driver-action').getByRole('button').click()
+    await other.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  }
+  await expect(page.getByRole('button', { name: 'ไปเริ่มรับผู้ป่วย', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'ไปเริ่มรับผู้ป่วย', exact: true }).click()
+  await page.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  await expect(page.locator('.driver-header')).toContainText('BK-0002')
+  await expect(page.locator('.driver-current')).toContainText('กำลังไปรับผู้ป่วย')
+  const timeRange = page.getByRole('group', { name: 'ช่วงเวลางานตามแผน' })
+  await expect(timeRange.locator('time')).toHaveText(['14:45 น.', '16:10 น.'])
+  await expect(timeRange.locator('time').first()).toHaveAttribute('datetime', '2026-10-30T07:45:00.000Z')
+  await page.setViewportSize({ width: 320, height: 844 })
+  expect(await timeRange.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+})
+
+test('job details returns to its source page and survives reload', async ({ page }) => {
+  await seedDriver(page)
+  await page.locator('.driver-trip').first().getByRole('button').click()
+  await page.getByRole('link', { name: 'กลับหน้าก่อนหน้า', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await page.locator('.driver-trip').first().getByRole('button').click()
+  await page.getByRole('button', { name: 'ไปเริ่มรับผู้ป่วย', exact: true }).click()
+  await page.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  const statusUrl = page.url()
+  await page.getByRole('link', { name: 'ดูรายละเอียดงาน →', exact: true }).click()
+  await page.reload()
+  await page.getByRole('link', { name: 'กลับหน้าก่อนหน้า', exact: true }).click()
+  await expect(page).toHaveURL(statusUrl)
+  await page.goto('/driver/details?booking=BK-0002')
+  await expect(page.getByRole('link', { name: 'กลับหน้าก่อนหน้า', exact: true })).toHaveAttribute('href', '/driver')
+})
+
 test('work status shows only the started job and clears after completion', async ({ page }) => {
   await seedDriver(page)
   await page.goto('/driver/status?booking=BK-0001')

@@ -284,6 +284,7 @@ test('dashboard, assignment and monitoring navigation, filters, modal cancel and
   await page.getByRole('button', { name: 'กลับไปแก้ไข', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await assign(page, id)
+  await page.getByRole('button', { name: 'ทั้งหมด', exact: true }).click()
   await page.getByRole('searchbox', { name: 'ค้นหารหัสงาน ชื่อผู้ป่วย หรือคนขับ' }).fill('ไม่ตรงกับข้อมูล')
   await expect(page.getByText('ไม่พบงานรับส่งที่ตรงกับตัวกรอง', { exact: true })).toBeVisible()
   await page.getByRole('searchbox').fill('ผู้รับบริการ จำลอง')

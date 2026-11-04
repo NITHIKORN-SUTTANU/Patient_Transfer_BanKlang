@@ -129,6 +129,7 @@
 .dispatch-status-badge { display: inline-block; width: 100%; text-align: center; background: #f0f2f2; color: #49635f; padding: 10px 6px; border-radius: 9px; font-size: 16px; font-weight: 700; }
 .dispatch-status-badge.in_transit { background: #e0f0ff; color: #1f59ad; }
 .dispatch-status-badge.completed { background: #eaf7f3; color: var(--color-primary); }
+.dispatch-tracking .dispatch-status-badge.cancelled { background: #fff0f1; color: var(--color-error); }
 .dispatch-modal { inset: 0; width: min(520px, calc(100% - 32px)); height: fit-content; max-height: calc(100dvh - 32px); border-radius: 20px; box-shadow: 0 16px 70px #132d2c26; font-size: 16px; }
 .dispatch-modal .booking-modal-inner { padding: 28px; gap: 18px; }
 .dispatch-modal .booking-modal-inner > header { align-items: start; }
@@ -177,3 +178,8 @@
 @media (max-width: 767px) { .dispatch-notice { top: auto; bottom: 16px; } }
 @media (max-width: 1199px) { .dispatch-main { padding-right: 28px; padding-left: 28px; } .dispatch-assignment-grid { grid-template-columns: minmax(0, 1fr); } .dispatch-waiting { min-height: 0; } .dispatch-waiting-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } .dispatch-queue-table { min-width: 850px; } .dispatch-monitor-table { min-width: 970px; } }
 @media (max-width: 767px) { .dispatch-shell { grid-template-columns: minmax(0, 1fr); } .dispatch-sidebar { padding: 20px 16px; } .dispatch-sidebar h2 { font-size: 20px; } .dispatch-sidebar p { margin-top: 6px; font-size: 16px; } .dispatch-sidebar nav { margin-top: 20px; gap: 6px; } .dispatch-sidebar nav a { min-height: 44px; } .dispatch-demo-links { margin-top: 20px; padding: 0 10px; flex-direction: row; flex-wrap: wrap; } .dispatch-demo-links span { width: 100%; } .dispatch-main { padding: 24px 18px; } .dispatch-page-header h1 { font-size: 25px; } .dispatch-metrics { grid-template-columns: minmax(0, 1fr); gap: 12px; } .dispatch-metrics article { min-height: 120px; } .dispatch-metrics article strong { font-size: 30px; } .dispatch-queue { margin-top: 24px; } .dispatch-resource-row { gap: 12px; } .dispatch-assignment-form, .dispatch-waiting { padding: 18px; } .dispatch-filters { flex-wrap: wrap; gap: 8px; padding: 12px; } .dispatch-filters .dispatch-search { flex-basis: 100%; } .dispatch-filters > label { flex: 1; min-width: 0; } .dispatch-modal .booking-modal-inner { padding: 22px; } .dispatch-details-heading > span { min-width: 0; } .dispatch-detail-section dl { gap: 16px; } .dispatch-dialog-actions { flex-direction: column; gap: 10px; } .dispatch-appointment > div { flex-wrap: wrap; } .dispatch-demo-calculation > div { flex-direction: column; } }
+.dispatch-tracking-scopes { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 12px; }
+.dispatch-tracking-scopes button { min-height: 44px; padding: 10px 22px; border: 1px solid #bccfc8; border-radius: 10px; color: #234d40; background: white; font: inherit; cursor: pointer; }
+.dispatch-tracking-scopes button[aria-pressed=true] { color: white; background: var(--color-primary); border-color: var(--color-primary); font-weight: 700; }
+.dispatch-tracking-scopes button:focus-visible { outline: 3px solid #276ac0; outline-offset: 3px; }
+.dispatch-tracking-secondary { display: block; margin-top: 5px; font-weight: 400; font-size: 14px; color: #52685f; }

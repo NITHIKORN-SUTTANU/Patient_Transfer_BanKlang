@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 type Place = { geometry: { coordinates: [number, number] }; properties: Record<string, string> }
 const placeName = (place: Place) => [...new Set([place.properties.name, place.properties.street, place.properties.city, place.properties.state, place.properties.country].filter(Boolean))].join(' · ') || 'เลือกสถานที่นี้'
 
-export function PlaceSearch({ latitude, longitude, onSelect }: { latitude: number; longitude: number; onSelect: (latitude: number, longitude: number) => void }) {
+export function PlaceSearch({ latitude, longitude, onSelect }: { latitude: number; longitude: number; onSelect: (latitude: number, longitude: number, label?: string) => void }) {
   const listId = useId()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Place[]>([])
@@ -49,11 +49,11 @@ export function PlaceSearch({ latitude, longitude, onSelect }: { latitude: numbe
   function select(place: Place) {
     const [lon, lat] = place.geometry.coordinates
     setQuery(placeName(place)); setOpen(false); setActive(-1); setSearching(false); setResults([])
-    onSelect(lat, lon)
+    onSelect(lat, lon, placeName(place))
   }
   const expanded = open && query.trim().length >= 2
   return <div className="pickup-place-search" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false) }}>
-    <label className="booking-field">ค้นหาสถานที่<input lang="th" role="combobox" autoComplete="off" aria-autocomplete="list" aria-expanded={expanded} aria-controls={listId} aria-activedescendant={expanded && active >= 0 ? `${listId}-${active}` : undefined} aria-describedby={`${listId}-status`} value={query} maxLength={200} placeholder="พิมพ์ชื่อสถานที่ภาษาไทย เช่น วัดพระธาตุหริภุญชัย" onFocus={() => { setOpen(true); setActive(-1) }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} onChange={event => { setQuery(event.target.value); setOpen(true); setResults([]); setError(''); setActive(-1); setSearching(event.target.value.trim().length >= 2) }} onKeyDown={event => {
+    <label className="booking-field"><input aria-label="ค้นหาสถานที่" lang="th" role="combobox" autoComplete="off" aria-autocomplete="list" aria-expanded={expanded} aria-controls={listId} aria-activedescendant={expanded && active >= 0 ? `${listId}-${active}` : undefined} aria-describedby={`${listId}-status`} value={query} maxLength={200} placeholder="ค้นหาสถานที่ เช่น หมู่บ้านบ้านกลาง" onFocus={() => { setOpen(true); setActive(-1) }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} onChange={event => { setQuery(event.target.value); setOpen(true); setResults([]); setError(''); setActive(-1); setSearching(event.target.value.trim().length >= 2) }} onKeyDown={event => {
       if (event.nativeEvent.isComposing) return
       if (event.key === 'Escape') { event.preventDefault(); setOpen(false); setActive(-1) }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

@@ -14,6 +14,8 @@ export function advanceDriverTrip(id: string, driverId: string, expected: Driver
     if (!booking || booking.driverId !== driverId || !booking.schedule || !booking.vehicleId || !['approved', 'in_transit', 'completed'].includes(booking.status)) throw new Error('งานนี้ไม่ได้มอบหมายให้คนขับที่เลือก กรุณาตรวจสอบงานล่าสุด')
     const current = driverStage(booking)
     if (current !== expected || current === 'delivered') throw new Error('สถานะงานเปลี่ยนแล้ว กรุณาปิดหน้าต่างและตรวจสอบสถานะล่าสุด')
+    const activeJob = state.bookings.find(b => b.id !== id && b.driverId === driverId && b.status === 'in_transit')
+    if (current === 'assigned' && activeJob) throw new Error(`กรุณาจบงาน ${activeJob.id} ก่อนเริ่มงานใหม่`)
     const next = driverStages[driverStages.indexOf(current) + 1]
     const events = [...(booking.driverProgress?.events || []), { stage: next, at: new Date().toISOString() }]
     return { ...state, bookings: state.bookings.map(b => b.id === id ? { ...b, status: next === 'delivered' ? 'completed' : 'in_transit', driverProgress: { stage: next, events } } : b) }

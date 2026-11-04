@@ -28,6 +28,7 @@ export function DispatcherPage() {
   const [reason, setReason] = useState('')
   const [search, setSearch] = useState('')
   const [date, setDate] = useState('')
+  const [trackingScope, setTrackingScope] = useState<'today' | 'all'>('all')
   const [filter, setFilter] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -37,6 +38,7 @@ export function DispatcherPage() {
   useEffect(() => { window.scrollTo(0, 0); main.current?.querySelector<HTMLHeadingElement>('h1')?.focus() }, [pathname])
   const today = bangkokDate(now)
   const queue = state.bookings.filter(b => b.status === 'pending' || b.status === 'approved' && !b.schedule)
+    .sort((a, b) => Date.parse(a.appointmentAt) - Date.parse(b.appointmentAt) || a.id.localeCompare(b.id))
   const waiting = state.bookings.filter(b => b.status === 'approved' && !b.schedule)
   const assigned = state.bookings.filter(b => !!b.schedule && ['approved', 'in_transit', 'completed', 'cancelled'].includes(b.status))
   const todaysJobs = assigned.filter(b => bangkokDate(Date.parse(b.schedule!.pickupAt)) === today)
@@ -64,7 +66,15 @@ export function DispatcherPage() {
   const monitoring = assigned.filter(b => {
     const needle = search.trim().toLocaleLowerCase()
     const driver = state.drivers.find(d => d.id === b.driverId)?.name || ''
-    return (!date || bangkokDate(Date.parse(b.schedule!.pickupAt)) === date) && (!filter || b.status === filter) && (!needle || `${b.id} ${b.patientName} ${driver}`.toLocaleLowerCase().includes(needle))
+    const pickupDay = bangkokDate(Date.parse(b.schedule!.pickupAt))
+    const matchesDay = date ? pickupDay === date : trackingScope === 'today' ? pickupDay === today : true
+    return matchesDay && (!filter || b.status === filter) && (!needle || `${b.id} ${b.patientName} ${driver}`.toLocaleLowerCase().includes(needle))
+  }).sort((a, b) => {
+    const dayA = bangkokDate(Date.parse(a.schedule!.pickupAt))
+    const dayB = bangkokDate(Date.parse(b.schedule!.pickupAt))
+    if (dayA !== dayB) return dayA === today ? -1 : dayB === today ? 1 : dayA.localeCompare(dayB)
+    const priority = { in_transit: 0, approved: 1, completed: 2, cancelled: 3, pending: 4, rejected: 4 }
+    return priority[a.status] - priority[b.status] || Date.parse(a.schedule!.pickupAt) - Date.parse(b.schedule!.pickupAt) || a.id.localeCompare(b.id)
   })
   if (!Object.hasOwn(headers, screen)) return <Navigate to="/dispatcher" replace />
   const [title, subtitle] = headers[screen as keyof typeof headers]
@@ -79,9 +89,10 @@ export function DispatcherPage() {
       </>}
       {screen === 'assignment' && <div className="dispatch-assignment-grid"><section className="dispatch-panel dispatch-waiting"><h2>1 เลือกงานที่รอจัดตาราง</h2><p>เลือกงาน แล้วจัดรถและคนขับ</p><div className="dispatch-waiting-list">{waiting.map(b => <article key={b.id} className={selected?.id === b.id ? 'selected' : ''}><button type="button" aria-pressed={selected?.id === b.id} onClick={() => { setError(''); setParams({ booking: b.id }) }}><strong>{b.id}</strong><b>{dispatchDate(b.appointmentAt)} · นัด {dispatchTime(b.appointmentAt)} น.</b><span>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</span><span className="dispatch-status approved">รอจัดตาราง</span></button><button type="button" className="dispatch-details-link" onClick={() => openDetails(b)}>ดูรายละเอียด</button></article>)}</div>{!waiting.length && <p className="dispatch-empty">ไม่มีงานรอจัดตาราง กรุณาอนุมัติคำขอจากแดชบอร์ดก่อน</p>}<p className="dispatch-small">แสดงเฉพาะงานที่ยังไม่ได้จัดรถ</p></section>{selected ? <DispatchAssignment key={selected.id} booking={selected} state={state} onAssigned={() => { setNotice(`มอบหมายงาน ${selected.id} แล้ว`); navigate('/dispatcher/tracking') }} /> : <section className="dispatch-panel dispatch-empty"><h2>{selectedId ? 'ไม่พบงานที่รอจัดตารางนี้' : 'เลือกงานที่รอจัดตาราง'}</h2><p>งานอาจถูกมอบหมายแล้ว หรือยังไม่ได้รับอนุมัติ</p><Link to="/dispatcher">กลับแดชบอร์ด</Link></section>}</div>}
       {screen === 'tracking' && <>
-        <section className="dispatch-metrics dispatch-tracking-metrics" aria-label="ภาพรวมการรับส่งวันนี้">{[['งานทั้งหมดวันนี้', todaysJobs.length], ['อยู่ระหว่างรับส่ง', todaysJobs.filter(b => b.status === 'in_transit').length], ['ดำเนินการเสร็จแล้ว', todaysJobs.filter(b => b.status === 'completed').length]].map(([label, value]) => <article key={label}><p>{label}</p><strong>{value}</strong></article>)}</section>
+        <section className="dispatch-metrics dispatch-tracking-metrics" aria-label="ภาพรวมการรับส่งวันนี้">{[['งานทั้งหมดวันนี้', todaysJobs.length], ['อยู่ระหว่างรับส่ง', todaysJobs.filter(b => b.status === 'in_transit').length], ['ดำเนินการเสร็จแล้ว', todaysJobs.filter(b => b.status === 'completed').length]].map(([label, value]) => <article key={label}><p>{label}</p><strong>{value}</strong>{label === 'งานทั้งหมดวันนี้' && <span className="dispatch-tracking-secondary">{dispatchDate(new Date(now).toISOString())}</span>}</article>)}</section>
+        <div className="dispatch-tracking-scopes" role="group" aria-label="ช่วงเวลาของงานรับส่ง">{([['all', 'ทั้งหมด'], ['today', 'วันนี้']] as const).map(([scope, label]) => <button type="button" key={scope} aria-pressed={!date && trackingScope === scope} onClick={() => { setTrackingScope(scope); setDate('') }}>{label}</button>)}</div>
         <div className="dispatch-filters"><label className="dispatch-search"><span className="sr-only">ค้นหารหัสงาน ชื่อผู้ป่วย หรือคนขับ</span><input type="search" value={search} placeholder="⌕ ค้นหารหัสงาน ชื่อผู้ป่วย หรือคนขับ" onChange={e => setSearch(e.target.value)} /></label><label className="dispatch-date-filter"><span>วันรับผู้ป่วย</span><input type="date" aria-label="วันรับผู้ป่วย" value={date} onChange={e => setDate(e.target.value)} /></label><label><span className="sr-only">กรองสถานะ</span><select aria-label="กรองสถานะ" value={filter} onChange={e => setFilter(e.target.value)}><option value="">สถานะทั้งหมด</option><option value="approved">มอบหมายแล้ว</option><option value="in_transit">กำลังเดินทาง</option><option value="completed">เสร็จสิ้น</option><option value="cancelled">ยกเลิกแล้ว</option></select></label></div>
-        <section className="dispatch-panel dispatch-monitoring"><h2>รายการงานรับส่ง</h2><p className="dispatch-muted">เลือกงานเพื่อดูความคืบหน้า</p><ServiceTable headings={['รหัสงาน', 'เวลารับ', 'โรงพยาบาล', 'รถ / คนขับ', 'สถานะ', 'รายละเอียด']} label="ตารางงานรับส่ง">{monitoring.length ? monitoring.map(b => <tr key={b.id}><th scope="row">{b.id}</th><td>{dispatchTime(b.schedule!.pickupAt)} น.</td><td>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</td><td>{state.vehicles.find(v => v.id === b.vehicleId)?.label || b.vehicleId} · {state.drivers.find(d => d.id === b.driverId)?.name || b.driverId}</td><td><span className={`dispatch-status-badge ${b.status}`}>{dispatchStatus(b)}</span></td><td><DispatchButton secondary onClick={() => openDetails(b)}>{b.status === 'completed' ? 'ดูรายละเอียด →' : 'ดูสถานะ →'}</DispatchButton></td></tr>) : <tr><td colSpan={6} className="dispatch-empty">ไม่พบงานรับส่งที่ตรงกับตัวกรอง</td></tr>}</ServiceTable><p className="dispatch-small">สถานะอัปเดตเมื่อคนขับกดยืนยัน</p></section>
+        <section className="dispatch-panel dispatch-monitoring"><h2>{date ? dispatchDate(date) : trackingScope === 'today' ? 'รายการงานวันนี้' : 'รายการงานรับส่งทั้งหมด'} · {monitoring.length} งาน</h2><p className="dispatch-muted">งานกำลังเดินทางและงานรอรับแสดงก่อนงานที่จบแล้วในแต่ละวัน</p><ServiceTable headings={['งาน / ผู้ป่วย', 'วัน / เวลารับ', 'โรงพยาบาล', 'รถ / คนขับ', 'สถานะ', 'รายละเอียด']} label="ตารางงานรับส่ง">{monitoring.length ? monitoring.map(b => <tr key={b.id}><th scope="row">{b.id}<span className="dispatch-tracking-secondary">{b.patientName}</span></th><td><strong>{dispatchTime(b.schedule!.pickupAt)} น.</strong><span className="dispatch-tracking-secondary">{dispatchDate(b.schedule!.pickupAt)}</span></td><td>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</td><td>{state.vehicles.find(v => v.id === b.vehicleId)?.label || b.vehicleId} · {state.drivers.find(d => d.id === b.driverId)?.name || b.driverId}</td><td><span className={`dispatch-status-badge ${b.status}`}>{dispatchStatus(b)}</span></td><td><DispatchButton secondary onClick={() => openDetails(b)}>{b.status === 'completed' ? 'ดูรายละเอียด →' : 'ดูสถานะ →'}</DispatchButton></td></tr>) : <tr><td colSpan={6} className="dispatch-empty">{!date && trackingScope === 'today' && !search && !filter ? 'ไม่มีงานรับส่งวันนี้ เลือกทั้งหมดเพื่อดูงานวันอื่น' : 'ไม่พบงานรับส่งที่ตรงกับตัวกรอง'}</td></tr>}</ServiceTable><p className="dispatch-small">สถานะอัปเดตเมื่อคนขับกดยืนยัน</p></section>
       </>}
     <RoleSelectionLink /></main>
     {dialog && !modalBooking && <DispatchModal title="ไม่พบคำขอนี้" onClose={closeModal}><p>รายการนี้ไม่มีอยู่แล้ว กรุณาตรวจสอบรายการล่าสุด</p><DispatchButton secondary onClick={closeModal}>กลับไปตรวจสอบ</DispatchButton></DispatchModal>}

@@ -10,7 +10,6 @@ import { BookingButton, BookingCard, BookingHeader, BookingIcon, BookingModal, B
 import { appointmentTimestamp, emptyBooking, thaiDate, validatePatient } from '../services/booking'
 import type { BookingDetails } from '../services/booking'
 import { demoStore, useDemoState } from '../services/demoStore'
-import { dispatchDate, dispatchTime } from '../services/dispatch'
 import type { Booking, BookingStatus } from '../data/seed'
 import { cancelBooking, citizenCanCancel } from '../services/cancellation'
 import '../booking.css'
@@ -119,9 +118,9 @@ export function BookingPage() {
   const edit = (target: string, label: string) => <button type="button" className="booking-edit" aria-label={`แก้ไข ${label}`} onClick={() => go(target)}>แก้ไข</button>
   function start() { submittedId.current = null; setDraft(initialBookingForm()); setLocationError(''); setPickupAddress(''); go('privacy') }
   function openPin() { root.current?.querySelector<HTMLElement>('.pickup-map-frame')?.focus() }
-  function selectPoint(latitude: number, longitude: number) {
+  function selectPoint(latitude: number, longitude: number, label?: string) {
     setPickupAddress('')
-    update('pickup', { x: 50, y: 50, latitude, longitude, label: 'จุดรับที่เลือกบนแผนที่' })
+    update('pickup', { x: 50, y: 50, latitude, longitude, label: label || 'จุดรับที่เลือกบนแผนที่' })
   }
   let content: ReactNode
   if (['patient', 'assistance', 'pickup', 'review'].includes(screen) && !draft.acknowledged) return <Navigate to="/booking/privacy" replace />
@@ -163,17 +162,28 @@ export function BookingPage() {
     <BookingButton secondary className="booking-location-button" aria-pressed={gpsActive} disabled={locating} onClick={useCurrentLocation}>{locating ? 'กำลังค้นหาตำแหน่ง…' : gpsActive ? '✓ ใช้ตำแหน่งปัจจุบันแล้ว' : 'ใช้ตำแหน่งปัจจุบัน'}</BookingButton>
     </div>
     <details className="booking-address-fallback"><summary>เลือกจุดบนแผนที่ไม่ได้? ระบุที่อยู่แทน</summary><p className="booking-small">กรอกที่อยู่ให้ชัดเจน เพื่อให้เจ้าหน้าที่ติดต่อยืนยันจุดรับ</p><label className="booking-field">ที่อยู่จุดรับ<input value={pickupAddress} maxLength={200} autoComplete="street-address" placeholder="บ้านเลขที่ หมู่บ้าน ตำบล และจุดสังเกต" onChange={e => { setPickupAddress(e.target.value); update('pickup', e.target.value.trim() ? { x: 50, y: 50, label: e.target.value.trim() } : null) }} /></label></details>
-    <p className="booking-info">ตรวจสอบจุดรับบนแผนที่ หรือที่อยู่ที่ระบุ ก่อนดำเนินการต่อ</p>
     <section className="booking-pickup-value" tabIndex={errors.pickup ? -1 : undefined} aria-invalid={!!errors.pickup} aria-describedby={errors.pickup ? 'pickup-error' : undefined}><p>จุดรับที่เลือก</p>{(draft.pickup || !errors.pickup) && <strong>{draft.pickup?.label || 'กรุณาเลือกจุดรับก่อนดำเนินการ'}</strong>}{error('pickup')}</section>
+    <p className="booking-info">ตรวจสอบจุดรับบนแผนที่ หรือที่อยู่ที่ระบุ ก่อนดำเนินการต่อ</p>
     <div className="booking-pickup-actions"><BookingButton onClick={assistanceNext}>ถัดไป →</BookingButton><BookingButton secondary onClick={() => go('patient')}>ย้อนกลับ</BookingButton></div>
   </>
   else if (screen === 'pickup') return <Navigate to="/booking/assistance" replace />
   else if (screen === 'review') content = sending ? <><BookingHeader title="กำลังส่งคำขอ" subtitle="กรุณารอสักครู่" /><section className="booking-hero" role="status"><h2>กำลังส่งคำขอจองรถ</h2><p>โปรดอย่ากดส่งซ้ำ</p></section><BookingButton disabled>กำลังส่งคำขอ…</BookingButton></> : <>
     <BookingHeader title="ตรวจสอบข้อมูล" subtitle="ถูกต้องแล้ว กดส่งคำขอได้เลย" /><BookingProgress step={3} />
-    <BookingCard icon="user" title="ข้อมูลผู้ป่วย" action={edit('patient', 'ข้อมูลผู้ป่วย')}><p>{draft.patientName} · {draft.phone}</p>{draft.bookingFor === 'other' && <p>{draft.contactName} · {draft.relationship}</p>}</BookingCard>
-    <BookingCard icon="smallMedical" title="วันนัดหมาย" action={edit('patient', 'วันนัดหมาย')}><p>{draft.hospital}<br />{thaiDate(draft.date)} · {draft.time} น.</p></BookingCard>
-    <BookingCard icon="smallWheel" title="ความช่วยเหลือ" action={edit('assistance', 'ความช่วยเหลือ')}><p>{draft.assistance}<br />{draft.extras.join(' · ') || 'ไม่ต้องการความช่วยเหลือเพิ่มเติม'}</p></BookingCard>
-    <BookingCard icon="smallPin" title="จุดรับผู้ป่วย" action={edit('assistance', 'จุดรับผู้ป่วย')}><p>{draft.pickup?.label}</p></BookingCard>
+    <section className="booking-review-section"><header><h2>ข้อมูลผู้ป่วย</h2>{edit('patient', 'ข้อมูลผู้ป่วย')}</header><dl>
+      <div><dt>ชื่อผู้ป่วย</dt><dd>{draft.patientName}</dd></div>
+      <div><dt>{draft.bookingFor === 'self' ? 'เบอร์โทรศัพท์' : 'เบอร์โทรศัพท์ผู้ติดต่อ'}</dt><dd>{draft.phone}</dd></div>
+      {draft.bookingFor === 'other' && <><div><dt>ชื่อผู้ดูแล / ผู้ติดต่อ</dt><dd>{draft.contactName}</dd></div><div><dt>ความสัมพันธ์กับผู้ป่วย</dt><dd>{draft.relationship}</dd></div></>}
+    </dl></section>
+    <section className="booking-review-section booking-review-appointment"><header><h2>วันนัดหมาย</h2>{edit('patient', 'วันนัดหมาย')}</header><dl>
+      <div><dt>โรงพยาบาล</dt><dd>{draft.hospital}</dd></div>
+      <div><dt>วันที่นัดหมาย</dt><dd>{thaiDate(draft.date)}</dd></div>
+      <div><dt>เวลานัดหมาย</dt><dd className="booking-review-time">{draft.time} น.</dd></div>
+    </dl></section>
+    <section className="booking-review-section"><header><h2>ความช่วยเหลือ</h2>{edit('assistance', 'ความช่วยเหลือ')}</header><dl>
+      <div><dt>การเดินทางของผู้ป่วย</dt><dd>{draft.assistance}</dd></div>
+      <div><dt>ความช่วยเหลือเพิ่มเติม</dt><dd>{draft.extras.length ? <ul>{draft.extras.map(extra => <li key={extra}>{extra}</li>)}</ul> : 'ไม่ต้องการความช่วยเหลือเพิ่มเติม'}</dd></div>
+    </dl></section>
+    <section className="booking-review-section"><header><h2>จุดรับผู้ป่วย</h2>{edit('assistance', 'จุดรับผู้ป่วย')}</header><dl><div><dt>สถานที่รับ</dt><dd>{draft.pickup?.label}</dd></div></dl></section>
     {saveError && <p role="alert" className="booking-error-box">ส่งคำขอไม่สำเร็จ กรุณาลองส่งคำขออีกครั้ง</p>}
     <BookingButton onClick={() => void submit()}>{saveError ? 'ลองส่งคำขออีกครั้ง' : 'ยืนยันและส่งคำขอ'}</BookingButton><BookingButton secondary onClick={() => go('assistance')}>ย้อนกลับ</BookingButton>
   </>
@@ -201,7 +211,7 @@ export function BookingPage() {
   else if (screen === 'status' && saved) content = <>
     <BookingHeader title="สถานะการจอง" /><BookingSummaryCard booking={saved} statusLabel={statusLabels[saved.status]} />
     {saved.status === 'cancelled' ? <BookingCard title="ยกเลิกการจองแล้ว"><p>{saved.cancellation?.reason}</p><p>คืนการจองรถและคนขับแล้ว</p></BookingCard> : saved.status === 'rejected' ? <BookingCard title="ผลการพิจารณา"><p>ไม่อนุมัติคำขอนี้</p><p>เหตุผล: {saved.rejectionReason || 'ยังไม่มีเหตุผลที่บันทึกไว้'}</p><p>หากต้องการความช่วยเหลือ กรุณาติดต่อเทศบาล</p></BookingCard> : saved.status === 'completed' ? <BookingCard title="ผลการเดินทาง"><p>ผู้ป่วยเดินทางถึงโรงพยาบาลแล้ว</p><p>หมายเลขการจอง {saved.id}</p></BookingCard> : <><h2 className="booking-section-title">ความคืบหน้า</h2><BookingTripTimeline booking={saved} /></>}
-    {!['rejected', 'cancelled'].includes(saved.status) && <BookingCard icon="clock" title="เวลารับผู้ป่วย"><p>{saved.status === 'pending' ? 'จะแสดงหลังเจ้าหน้าที่จัดรถและยืนยันตาราง' : saved.status === 'completed' ? 'ถึงโรงพยาบาลแล้ว' : saved.schedule ? `${dispatchDate(saved.schedule.pickupAt)} · ${dispatchTime(saved.schedule.pickupAt)} น.` : 'รอจัดรถและคนขับ'}</p></BookingCard>}{citizenCanCancel(saved) && <BookingButton secondary danger onClick={() => { setCancelError(''); go(`cancel/${saved.id}`) }}>ยกเลิกการจอง</BookingButton>}<BookingButton secondary onClick={() => go('bookings')}>รายการจองของฉัน</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
+    {citizenCanCancel(saved) && <BookingButton secondary danger onClick={() => { setCancelError(''); go(`cancel/${saved.id}`) }}>ยกเลิกการจอง</BookingButton>}<BookingButton secondary onClick={() => go('bookings')}>รายการจองของฉัน</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
   </>
   else return <Navigate to="/booking" replace />
   return <div className="booking-shell"><a className="skip-link" href="#booking-main">ข้ามไปยังเนื้อหา</a><div className="booking-workspace"><main tabIndex={-1} ref={root} id="booking-main" className={`booking-screen booking-screen-${screen || 'entry'} ${screen === 'status' ? `booking-state-${saved?.status}` : ''} ${screen === 'patient' && draft.bookingFor === 'other' ? 'booking-caregiver' : ''}`}>

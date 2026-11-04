@@ -6,10 +6,9 @@ import type { BookingDetails } from '../services/booking'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import './pickup-map.css'
 
-type Pickup = NonNullable<BookingDetails['pickup']>
 const defaultCenter: [number, number] = [99.008456, 18.578321]
 
-export function PickupMap({ value, onChange }: { value: BookingDetails['pickup']; onChange?: (latitude: number, longitude: number) => void }) {
+export function PickupMap({ value, onChange }: { value: BookingDetails['pickup']; onChange?: (latitude: number, longitude: number, label?: string) => void }) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const marker = useRef<maplibregl.Marker | null>(null)
@@ -35,7 +34,7 @@ export function PickupMap({ value, onChange }: { value: BookingDetails['pickup']
         attributionControl: { compact: false }, dragRotate: false, pitchWithRotate: false,
       })
     } catch {
-      queueMicrotask(() => { setFailed(true); setMessage(callback.current ? 'อุปกรณ์นี้เปิดแผนที่ไม่ได้ กรุณากรอกพิกัดด้านล่าง' : 'อุปกรณ์นี้เปิดแผนที่ไม่ได้ กรุณาเปิดนำทางด้วย Google Maps') })
+      queueMicrotask(() => { setFailed(true); setMessage(callback.current ? 'อุปกรณ์นี้เปิดแผนที่ไม่ได้ กรุณาค้นหาสถานที่ด้านบน' : 'อุปกรณ์นี้เปิดแผนที่ไม่ได้ กรุณาเปิดนำทางด้วย Google Maps') })
       return
     }
     map.current = instance
@@ -55,7 +54,7 @@ export function PickupMap({ value, onChange }: { value: BookingDetails['pickup']
     instance.on('error', () => {
       hasError = true
       setFailed(true)
-      setMessage(callback.current ? 'โหลดแผนที่ไม่สำเร็จ กรุณาลองใหม่ หรือกรอกพิกัดด้านล่าง' : 'โหลดแผนที่ไม่สำเร็จ กรุณาลองใหม่ หรือเปิดนำทางด้วย Google Maps')
+      setMessage(callback.current ? 'โหลดแผนที่ไม่สำเร็จ กรุณาลองใหม่ หรือค้นหาสถานที่ด้านบน' : 'โหลดแผนที่ไม่สำเร็จ กรุณาลองใหม่ หรือเปิดนำทางด้วย Google Maps')
     })
     instance.on('moveend', event => {
       // Resizing or recentering the map must not select a pickup or clear GPS accuracy.
@@ -99,18 +98,10 @@ export function PickupMap({ value, onChange }: { value: BookingDetails['pickup']
       <div ref={container} className="pickup-map-canvas" />
       {onChange && <span className="pickup-map-center" aria-hidden="true">●</span>}
       {onChange && <span className="pickup-map-hint">เลื่อนแผนที่ให้หมุดตรงจุดรับ</span>}
-      {failed && <div className="pickup-map-retry"><div className="pickup-map-retry-card"><span className="pickup-map-retry-icon"><ServiceSymbol kind="pin" /></span><p className="pickup-map-retry-title">โหลดแผนที่ไม่สำเร็จ</p><p className="pickup-map-retry-description">กรุณาตรวจสอบอินเทอร์เน็ต แล้วลองอีกครั้ง</p><button type="button" className="booking-button" onClick={() => { setMessage('กำลังโหลดแผนที่…'); setFailed(false); setAttempt(previous => previous + 1) }}>ลองโหลดแผนที่อีกครั้ง</button></div><p role="status" className="pickup-map-error-caption">{onChange ? 'หรือกรอกพิกัดด้วยตนเอง' : message}</p></div>}
+      {failed && <div className="pickup-map-retry"><div className="pickup-map-retry-card"><span className="pickup-map-retry-icon"><ServiceSymbol kind="pin" /></span><p className="pickup-map-retry-title">โหลดแผนที่ไม่สำเร็จ</p><p className="pickup-map-retry-description">กรุณาตรวจสอบอินเทอร์เน็ต แล้วลองอีกครั้ง</p><button type="button" className="booking-button" onClick={() => { setMessage('กำลังโหลดแผนที่…'); setFailed(false); setAttempt(previous => previous + 1) }}>ลองโหลดแผนที่อีกครั้ง</button></div><p role="status" className="pickup-map-error-caption">{onChange ? 'หรือค้นหาชื่อสถานที่ด้านบน' : message}</p></div>}
     </div>
     {message && !failed && <p role="status" className="booking-info">{message}</p>}
-    {value?.latitude !== undefined && value.longitude !== undefined && <p className="pickup-map-coordinates">พิกัด {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}</p>}
-    {onChange && <><p className="booking-small">แตะบนแผนที่ หรือใช้ปุ่มลูกศรเพื่อปรับจุดรับ · กด Enter เพื่อเลือกจุดกึ่งกลาง</p><details className="pickup-map-manual"><summary>กรอกพิกัดด้วยตนเอง</summary><CoordinateForm value={value} onChange={onChange} /></details></>}
+    {!onChange && value?.latitude !== undefined && value.longitude !== undefined && <p className="pickup-map-coordinates">พิกัด {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}</p>}
+    {onChange && <p className="booking-small">ค้นหาชื่อสถานที่ หรือแตะบนแผนที่เพื่อเลือกจุดรับ</p>}
   </section>
-}
-
-function CoordinateForm({ value, onChange }: { value: Pickup | null; onChange: (latitude: number, longitude: number) => void }) {
-  return <form className="pickup-map-manual-fields" onSubmit={event => {
-    event.preventDefault()
-    const data = new FormData(event.currentTarget)
-    onChange(Number(data.get('latitude')), Number(data.get('longitude')))
-  }}><label className="booking-field">ละติจูด<input key={`lat-${value?.latitude}`} name="latitude" type="number" step="any" min="-85" max="85" required defaultValue={value?.latitude} /></label><label className="booking-field">ลองจิจูด<input key={`lon-${value?.longitude}`} name="longitude" type="number" step="any" min="-180" max="180" required defaultValue={value?.longitude} /></label><button className="booking-button booking-secondary">ใช้พิกัดนี้</button></form>
 }
