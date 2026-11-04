@@ -28,6 +28,8 @@ The tile URL must return 256px Web Mercator raster tiles. If replacing OpenStree
 
 GPS requires HTTPS or localhost and browser permission. Map tiles and search require internet access; coordinate entry remains available if WebGL or the network fails.
 
+The shared map retries failed loads automatically at most twice (1-second then 2-second delay), preserving the camera and saved pin. A 12-second initial loading timeout exposes recovery instead of leaving a stalled request loading indefinitely. Manual Retry starts a fresh retry budget. Successful tiles clear their own errors; one successful tile does not hide other failed tiles in the current view. This applies to booking, parking, dispatcher, and driver maps; it cannot guarantee public tile-provider availability.
+
 ## Shared car parking and departure estimates
 
 Admin → settings → CFG-01 → Manage lets the admin save one parking pin for all cars. The location is stored as optional `settings.parking` coordinates; older browser data remains valid without a pin. No default map center is saved as the parking location until the admin selects it.

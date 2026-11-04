@@ -185,7 +185,7 @@ test('work status shows only the started job and clears after completion', async
   await expect(page.locator('.driver-status-indicator')).toHaveCount(0)
 })
 
-for (const recovery of ['retry', 'zoom'] as const) test(`driver map recovers from tile failure via ${recovery} and keeps navigation available`, async ({ page, context }) => {
+for (const recovery of ['retry', 'zoom', 'automatic', 'automatic-twice'] as const) test(`driver map recovers from tile failure via ${recovery} and keeps navigation available`, async ({ page, context }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await seedDriver(page)
   const tile = await page.evaluate(() => {
@@ -200,7 +200,14 @@ for (const recovery of ['retry', 'zoom'] as const) test(`driver map recovers fro
     return canvas.toDataURL('image/png').split(',')[1]
   })
   let unavailable = true
-  await page.route('https://tile.openstreetmap.org/**', route => unavailable ? route.fulfill({ status: 503 }) : route.fulfill({ contentType: 'image/png', body: Buffer.from(tile, 'base64') }))
+  const requests = new Map<string, number>()
+  await page.route('https://tile.openstreetmap.org/**', route => {
+    const url = route.request().url()
+    const count = (requests.get(url) || 0) + 1
+    requests.set(url, count)
+    const fail = recovery === 'automatic-twice' ? count <= 2 : unavailable
+    return fail ? route.fulfill({ status: 503 }) : route.fulfill({ contentType: 'image/png', body: Buffer.from(tile, 'base64') })
+  })
   await page.goto('/driver/details?booking=BK-0001')
   await page.getByRole('button', { name: 'เปิดแผนที่ไปจุดรับ' }).click()
   const failure = page.getByText('โหลดแผนที่ไม่สำเร็จ กรุณาลองใหม่ หรือเปิดนำทางด้วย Google Maps', { exact: true })
@@ -233,11 +240,12 @@ for (const recovery of ['retry', 'zoom'] as const) test(`driver map recovers fro
   }
   unavailable = false
   if (recovery === 'retry') await page.getByRole('button', { name: 'ลองโหลดแผนที่อีกครั้ง' }).click()
-  else await page.locator('.maplibregl-ctrl-zoom-in').click()
+  else if (recovery === 'zoom') await page.locator('.maplibregl-ctrl-zoom-in').click()
   await expect(page.locator('.pickup-map-canvas')).toHaveAttribute('data-ready', 'true')
   await expect(failure).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'ลองโหลดแผนที่อีกครั้ง' })).toHaveCount(0)
   await expect(page.locator('.pickup-map-coordinates')).toHaveText('พิกัด 18.580000, 99.010000')
+  if (recovery === 'automatic-twice') expect(Math.max(...requests.values())).toBe(3)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await context.route('https://www.google.com/maps/dir/**', route => route.fulfill({ contentType: 'text/html', body: '<p>Maps handoff received</p>' }))
   const [mapsTab] = await Promise.all([context.waitForEvent('page'), navigation.click()])
