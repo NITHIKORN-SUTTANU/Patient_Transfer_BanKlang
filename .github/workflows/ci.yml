@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, lint, build, and core journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Booking, dispatch, and driver journeys
+        run: npx playwright test tests/dispatcher.spec.ts tests/driver.spec.ts --grep 'ACT-01 request|complete shared ACT' --workers=1 --trace=retain-on-failure
+      - name: Mobile resource selection in Chromium
+        run: npx playwright test tests/resource-picker.spec.ts --browser=chromium --workers=1 --trace=retain-on-failure
+      - name: Mobile resource selection in WebKit
+        run: npx playwright test tests/resource-picker.spec.ts --browser=webkit --workers=1 --trace=retain-on-failure
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: core-journey-results
+          path: test-results/
+          retention-days: 7

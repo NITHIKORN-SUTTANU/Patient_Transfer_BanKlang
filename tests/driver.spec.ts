@@ -68,28 +68,36 @@ test('complete shared ACT-01 → ACT-02 → ACT-03 journey across tabs and reloa
   await expect(driver.getByRole('region', { name: 'แผนที่จุดรับ' })).toBeVisible()
   await expect(driver.getByRole('link', { name: 'นำทางด้วย Google Maps' })).toHaveAttribute('href', /destination=/)
   await driver.getByRole('dialog').getByRole('button', { name: 'ปิด', exact: true }).click()
+  await expect(driver.getByRole('link', { name: 'โทรหาผู้ติดต่อ · 0800000000', exact: true })).toHaveAttribute('href', 'tel:0800000000')
   await driver.getByRole('button', { name: 'ไปเริ่มรับผู้ป่วย' }).click()
-  await expect(driver.getByRole('link', { name: 'โทรหาผู้ติดต่อ', exact: true })).toHaveAttribute('href', 'tel:0800000000')
-  await expect(driver.getByRole('button', { name: 'ดูจุดรับ', exact: true })).toBeVisible()
-  await driver.locator('.driver-action').getByRole('button').click()
   await expect(driver.getByRole('button', { name: 'ยกเลิก', exact: true })).toBeFocused()
   await driver.getByRole('button', { name: 'ยกเลิก', exact: true }).click()
   expect(await driver.evaluate(() => JSON.parse(localStorage.getItem('ban-klang-transit:demo:v1')!).bookings[0].status)).toBe('approved')
-  for (const stage of ['going_to_pickup', 'patient_onboard', 'going_to_hospital', 'delivered']) {
+  for (const [stage, label] of [
+    ['going_to_pickup', 'กำลังไปรับผู้ป่วย'],
+    ['patient_onboard', 'รับผู้ป่วยขึ้นรถแล้ว'],
+    ['going_to_hospital', 'กำลังเดินทางไปโรงพยาบาล'],
+    ['delivered', 'ส่งถึงโรงพยาบาล'],
+  ]) {
     await driver.locator('.driver-action').getByRole('button').click()
     await driver.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
     await expect(driver.getByRole('dialog')).toHaveCount(0)
     const saved = await driver.evaluate(() => JSON.parse(localStorage.getItem('ban-klang-transit:demo:v1')!).bookings[0])
     expect(saved.driverProgress.stage).toBe(stage)
     expect(saved.status).toBe(stage === 'delivered' ? 'completed' : 'in_transit')
-    await expect(page.getByRole('row').filter({ hasText: id })).toContainText(stage === 'delivered' ? 'เสร็จสิ้น' : 'กำลังเดินทาง')
+    if (stage === 'going_to_pickup') {
+      await expect(driver.getByRole('link', { name: 'โทรหาผู้ติดต่อ', exact: true })).toHaveAttribute('href', 'tel:0800000000')
+      await expect(driver.getByRole('button', { name: 'ดูจุดรับ', exact: true })).toBeVisible()
+    }
+    await expect(page.getByRole('row').filter({ hasText: id })).toContainText(label)
     await driver.reload()
     expect(await driver.evaluate(() => sessionStorage.getItem('ban-klang-transit:driver'))).toBe('demo-driver-A')
   }
   await expect(patient.getByText('เสร็จสิ้น', { exact: true }).first()).toBeVisible()
   await patient.reload()
   await expect(patient.getByText('เสร็จสิ้น', { exact: true }).first()).toBeVisible()
-  await driver.getByRole('link', { name: 'ดูประวัติงาน', exact: true }).click()
+  await expect(driver.getByRole('heading', { name: 'ยังไม่มีงานที่เริ่มแล้ว', exact: true })).toBeVisible()
+  await driver.getByRole('navigation', { name: 'เมนูคนขับ', exact: true }).getByRole('link', { name: 'ประวัติ', exact: true }).click()
   await expect(driver.locator('.driver-trip')).toContainText(id)
   await expect(driver.locator('.driver-trip')).toContainText('เสร็จสิ้น')
 })
