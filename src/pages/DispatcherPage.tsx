@@ -1,3 +1,4 @@
+import { exportBookingsToCSV } from "../utils/exportReport";
 import { MunicipalLogo } from '../components/MunicipalLogo'
 import { ResponsiveNavigation } from '../components/ResponsiveNavigation'
 import { RoleSelectionLink } from '../components/RoleSelectionLink'
