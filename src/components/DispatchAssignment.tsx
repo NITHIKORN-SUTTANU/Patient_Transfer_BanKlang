@@ -52,7 +52,7 @@ export function DispatchAssignment({ booking, state, onAssigned }: { booking: Bo
   return <section ref={root} className="dispatch-panel dispatch-assignment-form">
     <div className="dispatch-selected-job"><span>งานที่เลือก · {booking.id}</span><strong>{booking.patientName}</strong><p>{booking.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</p></div>
     <h2>2. ตารางเวลาเดินทางที่ระบบคำนวณ</h2>
-    <p className="dispatch-small">{state.settings?.parking ? `จุดเริ่มเดินทาง: ${state.settings.center} · จุดจอดรถร่วมทุกคัน` : 'ยังไม่ได้ตั้งพิกัดจุดจอดรถ ใช้เวลาเดินทางที่ระบุไว้'} <a className="dispatch-details-link" href="/admin/settings">ตั้งค่าจุดจอดรถ</a></p>
+    <p className="dispatch-small">{state.settings?.parking ? `จุดเริ่มเดินทาง: ${state.settings.center} · จุดจอดรถร่วมทุกคัน` : 'ยังไม่ได้ตั้งพิกัดจุดจอดรถ กรุณาติดต่อผู้ดูแลระบบ · ใช้เวลาเดินทางที่ระบุไว้'}</p>
     <p className="dispatch-small">{centerOverride !== null ? 'ใช้เวลาเดินทางที่เจ้าหน้าที่ระบุ' : parkingMinutes !== null ? `จุดจอดรถ → จุดรับ ประมาณ ${parkingMinutes} นาที · ประมาณจากระยะทาง ไม่ใช่เส้นทางถนนหรือสภาพจราจร` : 'ยังประมาณจากตำแหน่งไม่ได้ กรุณาตรวจสอบเวลาเดินทางด้วยตนเอง'}</p>
     {schedule ? <ScheduleSummary booking={booking} schedule={schedule} /> : <p className="dispatch-alert" role="alert">{scheduleIssue}</p>}
     <h2>3. เลือกรถและคนขับ</h2><div className="dispatch-resource-row"><ResourcePicker label="รถรับส่ง" placeholder="เลือกรถ" value={vehicleId} options={state.vehicles} onChange={changeVehicle} /><ResourcePicker label="คนขับ" placeholder="เลือกคนขับ" value={driverId} options={state.drivers.map(d => ({ ...d, label: d.name, active: driverAvailable(state, d) }))} onChange={changeDriver} /></div>
