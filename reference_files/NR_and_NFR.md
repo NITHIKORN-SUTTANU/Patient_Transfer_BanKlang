@@ -29,8 +29,8 @@
 
 ## 3. Data Governance & PDPA Specification (NFR-04 Detailed)
 
-### 3.1 Data Minimization Policy (Strict 4 Logistical Attributes)
-In strict accordance with the Thailand Personal Data Protection Act (PDPA B.E. 2562), the platform implements a strict data minimization policy by restricting personal data collection exclusively to **four operational transit attributes**:
+### 3.1 Data Minimization Policy (Transport Data Categories)
+The following are four transport-data categories, not an exhaustive four-column schema or a legal compliance certification. Appointment/destination, identity/consent, lifecycle, audit, and authorized report records also follow the current SRS minimization requirements. Municipal privacy approval remains a release prerequisite.
 1. **Patient & Requester Identity:** Full name of patient and primary contact person (for on-site identity verification upon vehicle arrival).
 2. **Contact Telephony:** Valid active mobile phone number (for ambulance driver coordination if the pickup spot is ambiguous).
 3. **Transit Geolocation:** Residential address and GPS latitude/longitude coordinates within the service area (for automated OSRM travel-time computation and driver navigation).
@@ -57,7 +57,9 @@ In strict accordance with the Thailand Personal Data Protection Act (PDPA B.E. 2
   * **Dispatcher (ACT-02):** Authorized to review booking details, trip origins, and contact numbers for scheduling verification.
   * **Driver (ACT-03):** Granted just-in-time access only to assigned passenger itineraries and pickup coordinates during active shifts.
 * **Third-Party AI Isolation:** No personal identifiable information (PII) or transit telemetry shall ever be transmitted to external public LLMs or unvetted external web APIs.
-* **Data Retention & Purging:** Operational coordinates are pseudonymized upon mission completion and purged from active routing caches after each operational cycle.
+* **Data Retention & Purging:** The former completion-time coordinate pseudonymization/cache-purge proposal is not an approved or implemented retention policy. Use the municipality-approved retention schedule required by SRS Sections 12 and 15.1. Do not claim deletion or pseudonymization until implemented and verified.
 
 
 > **Implementation note:** The fixed 48-hour booking lead time and fixed 20-minute hospital-arrival buffer are not configurable rules. Previously documented Seminar-only scope labels are retained where present for traceability; the agreed delivery baseline is a fully tested core four-actor implementation by December 2026.
+
+> **Current flow additions:** SRS Sections 16.10–16.12 supersede depot-only departure and return-within-turnaround assumptions. Trips may start at the previous hospital, with 30-minute turnaround there. Final assignment commits resources; recommendations do not. Failed pickup releases its reservation but retains a readiness hold. ABORTED, audited corrections, explicit pickup waiting, and admin-managed closures extend the original FR-01–FR-12 baseline. No maximum advance booking period applies.

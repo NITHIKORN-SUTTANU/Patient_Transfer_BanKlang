@@ -41,5 +41,8 @@ flowchart TD
     W --> X["Confirm Access Changes"]
     X --> XA["Revoke Affected Active Sessions Immediately"]
     XA --> C
+    D -->|Holiday calendar| HC["Maintain explicit service closure dates"]
+    HC --> HR["Flag affected assignments for dispatcher review; do not cancel automatically"]
+    HR --> C
 
 ```

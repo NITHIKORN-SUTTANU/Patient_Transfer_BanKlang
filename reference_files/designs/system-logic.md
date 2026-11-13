@@ -4,6 +4,8 @@
 **Associated Issue:** #3 ([week-1] Define System Logic)  
 **Primary Actors:** ACT-01 (Citizen/Caregiver), ACT-02 (Dispatcher), ACT-03 (Driver), ACT-04 (Administrator)
 
+**Current baseline:** SRS v1.3, Sections 16.10–16.12. This document retains original use-case IDs. Service operates 06:00–16:00 Bangkok time except configured closures; the whole planned interval must fit. Minimum notice is 48 hours with no maximum advance horizon.
+
 ---
 
 ## 1. End-to-End System Logic Flow
@@ -13,7 +15,7 @@ The booking and dispatch lifecycle follows a deterministic, human-in-the-loop pi
 1. **Intake & Consent:** ACT-01 accesses the LINE LIFF application, reviews and accepts the mandatory PDPA Consent Modal, and inputs booking parameters (patient name, contact phone, pickup map pin, destination hospital, appointment time, and mobility assistance requirement).
 2. **Lead-Time Verification (Rule R1):** The system automatically checks whether the submission occurs at least 48 hours prior to the hospital appointment time.
 3. **Travel Duration Estimation:** The routing engine queries OSRM to obtain deterministic drive times for two legs:
-   * Leg 1: Municipal Depot -> Patient Pickup Location (`t_depot`)
+   * Leg 1: Verified trip origin (depot or previous hospital) -> Patient Pickup Location (`t_origin`)
    * Leg 2: Patient Pickup Location -> Destination Hospital (`t_transit`)
 4. **Backward Scheduling Calculation:** The system computes the required patient pickup time and depot departure time backwards from the hospital appointment time, enforcing a mandatory 20-minute arrival buffer.
 5. **Fleet Conflict Verification (Rule R2):** The scheduling engine checks resource calendars for available EMS vehicles and drivers during the calculated operating interval `[T_depot_departure, T_available)`, ensuring zero interval overlaps (single occupancy: 1 vehicle : 1 patient).
@@ -45,13 +47,16 @@ The algorithm guarantees patient arrival at the medical facility 20 minutes befo
    `T_pickup = T_hospital_target - Travel_Time_to_Hospital`  
    *(where `Travel_Time_to_Hospital = OSRM_duration(Pickup_Location, Hospital)`)*
 
-3. **Depot Departure Time:**  
-   `T_depot_departure = T_pickup - Travel_Time_to_Pickup`  
-   *(where `Travel_Time_to_Pickup = OSRM_duration(Depot_Location, Pickup_Location)`)*
+3. **Origin Departure Time:**
+
+   `T_origin_departure = T_pickup - Travel_Time_to_Pickup`
+   *(where `Travel_Time_to_Pickup = OSRM_duration(Verified_Origin, Pickup_Location)`; a chained trip must validate both resources at the previous hospital.)*
 
 4. **Vehicle Next-Available Time:**  
    `T_available = T_hospital_target + Turnaround_Duration`  
-   *(where `Turnaround_Duration = 30 minutes` for patient handover, vehicle sanitation, and return transit)*
+   *(where `Turnaround_Duration = 30 minutes` at the hospital for readiness; return-to-depot travel is excluded.)*
+
+Earlier pickup uses explicit waiting at pickup: `T_pickup = T_hospital_target - Travel_Time_to_Hospital - Pickup_Waiting`. Waiting defaults to zero. It does not alter the verified route duration or hospital target, and it expands the reserved interval toward the earlier departure.
 
 ---
 
@@ -105,7 +110,7 @@ To eliminate the need for complex, error-prone continuous GPS streaming while ma
            | (Dispatcher confirms assignment)
            v
     [3. SCHEDULED] 
-           | (Shift begins)
+           | (Dispatcher confirms both resources after fresh validation)
            v
     [4. ASSIGNED] 
            | (Driver departs municipal depot)
@@ -123,14 +128,14 @@ To eliminate the need for complex, error-prone continuous GPS streaming while ma
 
 * **State 1 (`REQUESTED`):** Citizen successfully submits the intake form.
 * **State 2 (`APPROVED`):** Dispatcher explicitly approves a valid request; scheduling engine alone cannot approve.
-* **State 3 (`SCHEDULED`):** Following Dispatcher approval, the confirmed schedule locks the vehicle/driver interval.
-* **State 4 (`ASSIGNED`):** Trip manifest is dispatched to the driver's task queue.
-* **State 5 (`PICKING_UP`):** Driver taps "Depart Depot" to navigate toward the patient pickup pin.
+* **State 3 (`SCHEDULED`):** Dispatcher confirms the schedule; no resource reservation is committed yet.
+* **State 4 (`ASSIGNED`):** Dispatcher commits both resource reservations together and dispatches the manifest. Driver Start Trip records a separate event without advancing this status.
+* **State 5 (`PICKING_UP`):** Driver taps "Depart Origin" (depot or previous hospital) to navigate toward pickup.
 * **State 6 (`PICKED_UP`):** Driver uses Confirm Patient Pickup to confirm the patient has been picked up.
 * **State 7 (`IN_TRANSIT`):** Vehicle departs patient residence toward destination hospital.
 * **State 8 (`COMPLETED`):** Driver confirms hospital handover; subsequent vehicle readiness must still respect resource-availability constraints.
 
-**Exceptional terminal outcomes:** `CANCELLED` (Citizen cancellation before Driver Start Trip or automatic cancellation after Driver reports failed pickup) and `REJECTED` (Dispatcher manual rejection with reason) are separate from the eight normal milestones. Driver Start Trip confirms work without changing `ASSIGNED`; Depart Depot sets `PICKING_UP`. A cancellation caused by failed pickup notifies Citizen and Dispatcher and releases the resource reservation immediately.
+**Exceptional terminal outcomes:** `CANCELLED` (citizen cancellation before Start Trip, dispatcher cancellation before pickup, or failed pickup), `REJECTED` (dispatcher rejection with reason), and `ABORTED` (dispatcher-confirmed end after pickup without hospital handover) are separate from the eight normal milestones. Start Trip does not change ASSIGNED; Depart Origin sets PICKING_UP. Failed pickup releases its reservation and retains an operational readiness hold. Reassignment does not reset the citizen cancellation cutoff.
 
 ---
 
@@ -275,7 +280,9 @@ sequenceDiagram
         B->>S: Re-validate interval and departure time
         alt Valid
             S-->>B: Valid
-            B->>B: Status = APPROVED then SCHEDULED; lock resources; log modification reason if any
+            B->>B: Record APPROVED then schedule confirmation as SCHEDULED; no resource lock yet
+            P->>D: Confirm vehicle and driver assignment
+            D->>B: Revalidate and commit both reservations atomically; log modification reason if any
             B->>M: Send confirmation card
             M-->>C: Confirmation card with pickup time (UC-04, UC-05)
             B->>V: Dispatch manifest, status = ASSIGNED (UC-17, UC-18, UC-19)
@@ -291,6 +298,7 @@ sequenceDiagram
             P->>D: Reject as last resort with reason (UC-12, UC-13)
         D->>B: Submit rejection, justification logged
         Note over P,B: Manual rejection requires a recorded reason; otherwise review continues
+    end
     end
 ```
 
@@ -390,4 +398,8 @@ Phone verification is optional. The table below is updated to match the confirme
 - Define atomic handling of simultaneous Citizen Cancel and Driver Start Trip.
 - Define fallback if recalculated schedules fail conflict checks while prior schedules remain active.
 - Define safe transfer logistics for reassignment after Depart Depot but before pickup.
-- The existing 30-minute turnaround assumption remains in the original model; its coverage of return transit should be validated before deployment.
+- Confirmed: 30-minute turnaround is at the hospital and excludes return transit. Validate the route from that hospital to the next pickup.
+
+### Current incident and readiness rules
+
+Failed pickup releases the booking reservation but retains an operational hold until dispatcher readiness confirmation. After pickup, incidents keep the trip active while the dispatcher arranges assistance. Hospital handover ends as COMPLETED; transport ending without handover requires dispatcher-recorded ABORTED with actual end time/location and patient arrangement. Preserve old events and use dispatcher-only audited corrections. The full details are in SRS Sections 16.11–16.12.

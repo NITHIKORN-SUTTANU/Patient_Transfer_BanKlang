@@ -1,5 +1,7 @@
 # Scope Baseline (In-Scope vs. Out-of-Scope)
 
+> Historical seminar scope, superseded for delivery by `docs/requirements/SRS-Complete-Official-EN.md` and the user's production-build instruction. The matrix below is retained as provenance, not a restriction on current implementation. Current work includes full-stack development; live municipal use still requires the SRS release prerequisites. Existing exclusions for shared rides, return trips, clinical integration, payments, and continuous tracking remain.
+
 This document formalizes the scope boundary for the Seminar in Software Engineering course (Academic Year 2569), establishing clear demarcations between seminar research deliverables and future senior project implementations.
 
 ## 1. Scope Matrix

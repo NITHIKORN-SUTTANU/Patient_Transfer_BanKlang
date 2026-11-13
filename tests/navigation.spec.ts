@@ -1,5 +1,19 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
+import { emptyCatalog, enterAdmin, enterDispatcher, enterDriver, mockDispatcherLogin } from './helpers/dispatcher'
+
+test.beforeEach(async ({ page }) => {
+  await mockDispatcherLogin(page)
+  await page.route('**/api/catalog', route => route.fulfill({ json: emptyCatalog }))
+  await page.route('**/api/bookings', route => route.fulfill({ json: { bookings: [] } }))
+  await page.route('**/api/driver/history', route => route.fulfill({ json: { bookings: [] } }))
+  await page.route('**/api/admin/**', route => route.fulfill({ json: { failures: [], total: 0, pending: 0, nextCursor: null, accounts: [], events: [], statuses: [], hospitals: [], villages: [], closures: [], settings: null, pendingReviewCount: 0 } }))
+})
+
+async function enterAdministrator(page: Parameters<typeof enterAdmin>[0], path = '/admin') {
+  await mockDispatcherLogin(page, 'admin')
+  await enterAdmin(page, path)
+}
 
 const roles = [
   { route: '/dispatcher', label: 'เมนูเจ้าหน้าที่จัดรถ', link: 'ติดตามงานรับส่ง', destination: '/dispatcher/tracking' },
@@ -9,7 +23,7 @@ const roles = [
 
 test('admin sidebar keeps logo, navigation and bottom toggle in its collapsed rail', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  await page.goto('/admin')
+  await enterAdministrator(page)
   const sidebar = page.locator('#admin-sidebar')
   await sidebar.getByRole('button', { name: 'ย่อเมนูด้านข้าง', exact: true }).click()
   expect((await sidebar.boundingBox())!.width).toBe(80)
@@ -48,7 +62,7 @@ test('admin sidebar keeps logo, navigation and bottom toggle in its collapsed ra
 
 test('dispatcher desktop sidebar collapses to an accessible icon rail without affecting mobile navigation', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  await page.goto('/dispatcher')
+  await enterDispatcher(page)
   const sidebar = page.locator('#dispatcher-sidebar')
   const main = page.locator('#dispatcher-main')
   const initial = (await main.boundingBox())!
@@ -88,7 +102,9 @@ for (const role of roles) {
   test(`${role.route} navigation collapses, supports keyboard, and adapts to resizing`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.setViewportSize({ width: 320, height: 640 })
-    await page.goto(role.route)
+    if (role.route === '/dispatcher') await enterDispatcher(page)
+    else if (role.route === '/driver') { await mockDispatcherLogin(page, 'driver'); await enterDriver(page) }
+    else await enterAdministrator(page, role.route)
     const toggle = page.getByRole('button', { name: role.label, exact: true })
     const navigation = page.getByRole('navigation', { name: role.label, exact: true })
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -98,10 +114,12 @@ for (const role of roles) {
     const toggleBounds = (await toggle.boundingBox())!
     expect(toggleBounds.x).toBeGreaterThanOrEqual(headerBounds.x + headerBounds.width)
     expect(toggleBounds.y).toBeLessThan(headerBounds.y + headerBounds.height)
-    const shortcut = page.getByRole('link', { name: 'กลับเลือกบทบาท', exact: true })
-    const shortcutBounds = (await shortcut.boundingBox())!
-    expect(shortcutBounds.x).toBe(12)
-    expect(shortcutBounds.y + shortcutBounds.height).toBe(628)
+    if (role.route === '/admin') {
+      const shortcut = page.getByRole('link', { name: 'บัญชีเจ้าหน้าที่ / ออกจากระบบ', exact: true })
+      const shortcutBounds = (await shortcut.boundingBox())!
+      expect(shortcutBounds.x).toBe(12)
+      expect(shortcutBounds.y + shortcutBounds.height).toBe(628)
+    }
     await toggle.click()
     await expect(navigation).toBeVisible()
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
@@ -143,7 +161,9 @@ for (const role of roles) {
 
   test(`${role.route} desktop navigation stays on the left`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
-    await page.goto(role.route)
+    if (role.route === '/dispatcher') await enterDispatcher(page)
+    else if (role.route === '/driver') { await mockDispatcherLogin(page, 'driver'); await enterDriver(page) }
+    else await enterAdministrator(page, role.route)
     const navigation = page.getByRole('navigation', { name: role.label, exact: true })
     const links = await navigation.getByRole('link').all()
     const first = (await links[0].boundingBox())!

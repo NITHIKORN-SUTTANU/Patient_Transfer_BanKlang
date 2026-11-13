@@ -18,9 +18,9 @@ flowchart TD
     L --> LA{"GPS Available?"}
     LA -->|Yes| N
     LA -->|No| LB["GPS Error: Select Pin Manually"]
-    LB --> M["Pickup Location Preview"]
+    LB --> M
     M --> N
-    N --> O{"Confirm Location?"}
+    N["Pickup Location Preview"] --> O{"Confirm Location?"}
     O -->|No| J
     O -->|Yes| P["Booking Review Screen"]
     P --> Q{"Confirm Submission?"}
@@ -52,6 +52,7 @@ flowchart TD
     AC --> AD["Trip Status / Notifications"]
     AD --> AE([Trip Completed])
     AD -->|Failed Pickup / System Cancellation| CZ
+    AD -->|Transport ends after pickup without hospital handover| AX([ABORTED])
     AD -->|Citizen cancellation disabled after Start Trip| AD
     AB --> Z
 ```

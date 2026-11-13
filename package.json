@@ -9,11 +9,49 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "eslint .",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:domain": "node --experimental-strip-types --test tests/lifecycle.test.mjs tests/scheduling.test.mjs tests/dispatch.test.mjs",
+    "db:start": "docker compose up --detach --wait database",
+    "db:stop": "docker compose stop database",
+    "db:migrate": "node --env-file-if-exists=.env scripts/database/migrate.mjs up",
+    "db:status": "node --env-file-if-exists=.env scripts/database/migrate.mjs status",
+    "db:rollback": "node --env-file-if-exists=.env scripts/database/migrate.mjs down",
+    "db:seed": "node --env-file-if-exists=.env scripts/database/seed.mjs",
+    "test:database": "node --env-file-if-exists=.env --test tests/database.test.mjs",
+    "test:recovery": "node --experimental-strip-types --env-file-if-exists=.env --test tests/recovery.test.mjs",
+    "test:backup": "node --experimental-strip-types --env-file-if-exists=.env --test tests/backup-readiness.test.mjs tests/encrypted-backup.test.mjs tests/backup-anchor.test.mjs tests/trust-anchor-store.test.mjs tests/backup-postgres.test.mjs",
+    "test:performance": "node --experimental-strip-types --test tests/performance.test.mjs tests/booking-list.test.mjs",
+    "test:load": "node --experimental-strip-types --env-file-if-exists=.env --test tests/load.test.mjs",
+    "test:availability": "node --experimental-strip-types --env-file-if-exists=.env --test tests/availability-accounting.test.mjs tests/availability-probe.test.mjs tests/availability-postgres.test.mjs tests/probe-journal.test.mjs tests/probe-alerts.test.mjs tests/alert-store.test.mjs",
+    "dev:api": "node --experimental-strip-types --env-file-if-exists=.env server/index.mjs",
+    "db:create-staff": "node --env-file-if-exists=.env scripts/database/create-staff.mjs",
+    "test:api": "node --experimental-strip-types --env-file-if-exists=.env --test tests/api.test.mjs",
+    "test:intake": "node --experimental-strip-types --env-file-if-exists=.env --test tests/intake-publication.test.mjs",
+    "test:line": "node --env-file-if-exists=.env --test tests/line.test.mjs",
+    "test:ui": "playwright test tests/navigation.spec.ts tests/staff-login.spec.ts tests/dispatcher-api.spec.ts tests/driver-api.spec.ts tests/citizen-api.spec.ts tests/admin-api.spec.ts --workers=1",
+    "test:pagination:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/pagination-postgres.spec.ts --workers=1",
+    "test:citizen:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/citizen-postgres.spec.ts tests/citizen-pagination-postgres.spec.ts --workers=1",
+    "test:admin:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/admin-postgres.spec.ts --workers=1",
+    "notifications:send": "node --env-file-if-exists=.env scripts/database/send-notifications.mjs",
+    "test:configuration:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/configuration-postgres.spec.ts --workers=1",
+    "test:destination:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/destination-postgres.spec.ts --workers=1",
+    "test:notifications:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/notifications-postgres.spec.ts --workers=1",
+    "test:capacity:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/capacity-postgres.spec.ts --workers=1",
+    "test:review:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/review-postgres.spec.ts --workers=1",
+    "test:reports": "node --test tests/monthly-report.test.mjs",
+    "test:reports:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/reports-postgres.spec.ts tests/monthly-postgres.spec.ts --workers=1",
+    "test:messages": "node --experimental-strip-types --test tests/message-policy.test.mjs",
+    "test:messages:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/message-matrix-postgres.spec.ts --workers=1",
+    "test:reassignment:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/reassignment-postgres.spec.ts --workers=1"
   },
   "dependencies": {
     "@fontsource/noto-sans-thai": "^5.2.0",
+    "@line/liff": "^2.32.0",
+    "exceljs": "^4.4.0",
+    "fontkit": "^2.0.4",
     "maplibre-gl": "^6.16.0",
+    "pdfkit": "^0.20.2",
+    "pg": "^8.23.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.0.0"
@@ -31,6 +69,7 @@
     "eslint-plugin-react-hooks": "^7.0.0",
     "eslint-plugin-react-refresh": "^0.4.0",
     "globals": "^16.0.0",
+    "pdfjs-dist": "^6.5.438",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.0.0",
@@ -38,5 +77,10 @@
   },
   "engines": {
     "node": ">=22.12.0"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

@@ -1,5 +1,7 @@
 # System Architecture & Database Schema Specification
 
+> Historical draft. Current implementation contract: `database/migrations/`, `docs/guides/DATABASE.md`, and the current SRS. PostgreSQL/PostGIS with timezone-aware timestamps is selected. The vehicle-only count query below is illustrative history, not a concurrency guarantee; actual migrations use separate vehicle and driver exclusion constraints. Do not copy the draft schema over applied migrations.
+
 **Project:** Municipal Patient Transit Booking Platform (Takuk Takak)  
 **Associated Issue:** #5 ([week-2] Design System Architecture Flow and Draft Data Schema (R1/R2))  
 **Primary Architect:** ACT-04 / Lead Developer (Nithanthip Kulmong)  

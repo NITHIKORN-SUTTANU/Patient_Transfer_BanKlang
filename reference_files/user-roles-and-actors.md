@@ -2,6 +2,8 @@
 
 This document outlines the primary human actors and system roles interacting with the Ban Klang Municipal Patient Transit Booking Platform.
 
+**Current baseline:** SRS v1.3. Dispatcher alone confirms replacement schedules (UC-28), records corrections and ABORTED outcomes, and confirms resource readiness. Driver departure means departure from the verified origin, which may be the previous hospital. Admin maintains explicit closures; service hours are fixed at 06:00–16:00 Bangkok time. Failed pickup releases its reservation but does not automatically release an operational hold. Historical comparison placeholders below are research notes, not new mandatory requirements.
+
 ## 1. Actor Catalog
 
 ### ACT-01: Citizen / Caregiver (Requester)

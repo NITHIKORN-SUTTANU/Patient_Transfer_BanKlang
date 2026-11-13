@@ -37,7 +37,9 @@ flowchart TD
     T --> U["Confirm Modified Assignment"]
     O --> W["Save Approval"]
     U --> X["Assignment Result Screen"]
-    W --> X
+    W --> SC["Confirm Schedule: SCHEDULED; no resource reservation yet"]
+    SC --> AC["Confirm Vehicle and Driver: recheck and commit both reservations; ASSIGNED"]
+    AC --> X
     Q --> Y["Confirm Rejection (Reason Required)"]
     Y --> Z["Rejection Result Screen"]
     X --> C
@@ -58,5 +60,11 @@ flowchart TD
     HD -->|No| HA
     HD -->|Yes| HE["Update Assignment; Notify Old and New Drivers"]
     HE --> C
+    C -->|Incident or correction| IC["Review actual trip state and preserve original events"]
+    IC --> ID{"Before or after patient pickup?"}
+    ID -->|Before pickup| HA
+    ID -->|After pickup| IR["Resolve incident; resume or record ABORTED with patient disposition"]
+    IR --> RH["Keep resources held until readiness confirmed"]
+    RH --> C
 
 ```

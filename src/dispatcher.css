@@ -222,3 +222,6 @@
 .dispatch-tracking-scopes button[aria-pressed=true] { color: white; background: var(--color-primary); border-color: var(--color-primary); font-weight: 700; }
 .dispatch-tracking-scopes button:focus-visible { outline: 3px solid #276ac0; outline-offset: 3px; }
 .dispatch-tracking-secondary { display: block; margin-top: 5px; font-weight: 400; font-size: 14px; color: #52685f; }
+.dispatch-assignment-form > fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+.dispatch-detail-section fieldset, .dispatch-panel > form > fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+.dispatch-detail-section .booking-field textarea, .dispatch-panel .booking-field textarea { width: 100%; min-width: 0; min-height: 110px; padding: 16px; border: 1px solid var(--color-border); border-radius: 14px; background: white; color: var(--color-ink); font: inherit; font-weight: 400; resize: vertical; }

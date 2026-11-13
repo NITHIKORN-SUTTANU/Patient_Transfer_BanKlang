@@ -5,6 +5,8 @@
 **Purpose:** Practical screen checklist for designing a clickable Figma prototype  
 **Status:** Proposed UI inventory; screen names and layouts are design suggestions, not separately validated stakeholder requirements.
 
+**Current rules:** SRS v1.3 supersedes obsolete open decisions below. Approval needs no reason; modification/rejection do. Dispatcher owns UC-28. Include explicit pickup waiting, previous-hospital origins, ABORTED/incident/correction states, readiness holds, and closure review as variants within the 25 core screens. The historical PNG is superseded by `../use-case-diagram.md`.
+
 ## Prototype Summary
 
 | Actor | Interface | Core screens | Figma frame size (suggested) |
@@ -46,7 +48,7 @@
 | D-01 | Dispatcher Dashboard | Today's trips; pending requests; warnings; fleet summary |
 | D-02 | Booking Requests | Request list; filters/search; select booking |
 | D-03 | Booking Details | Patient/contact; pickup/destination; appointment; mobility needs |
-| D-04 | Schedule Recommendation | Proposed depot departure and pickup times; vehicle/driver recommendation; warnings |
+| D-04 | Schedule Recommendation | Verified origin departure and pickup times; explicit pickup waiting; vehicle/driver recommendation; warnings |
 | D-05 | Assignment Decision | Approve, modify, reject; justification; confirmation; revalidation of modified assignment |
 | D-06 | Fleet Calendar | Daily vehicle/driver schedules; occupied intervals; conflict visibility |
 | D-07 | Trip Operations | Cancellation and emergency reassignment entry points |
@@ -55,7 +57,7 @@
 
 **Variants / edge cases:** Feasible recommendation; vehicle conflict; driver conflict; no feasible assignment; approval success; modification success/failure; rejection; cancellation; emergency reassignment.
 
-**Open decisions:** Cancellation eligibility, reassignment rules, and exact status transitions require specification before implementation. Do not assume a successful modification without checking conflicts.
+**Confirmed decisions:** Citizen cancellation ends at Start Trip. Dispatcher reassignment is permitted before pickup with full revalidation and documented arrangements after Start Trip. Final assignment commits both resource reservations. Failed modifications retain the old confirmed schedule.
 
 ## ACT-03 — Ambulance Driver
 
@@ -123,7 +125,7 @@ Booking Management System
 
 1. Citizen opens LINE LIFF, accepts PDPA consent, and submits a valid booking using the hybrid 3-step form.
 2. System checks lead time, routing, backward scheduling, and vehicle/driver availability.
-3. Dispatcher reviews the recommendation, records justification, and approves the booking.
+3. Dispatcher approves without justification, confirms the schedule, then assigns both resources after revalidation. Modification/rejection requires justification.
 4. Citizen receives a confirmation/status update.
 5. Driver views the assigned trip and manually advances trip milestones.
 6. Citizen sees updated trip status through the LINE experience.
@@ -140,7 +142,7 @@ Booking Management System
 - [ ] Connect navigation and back/edit actions
 - [ ] Demonstrate booking → dispatcher decision → driver completion → citizen update
 - [ ] Validate accessibility and the ≤120-second citizen booking target
-- [ ] Resolve cancellation, reassignment, and lifecycle ownership gaps before implementation
+- [ ] Verify the confirmed cancellation, reassignment, incident, and lifecycle ownership rules
 
 ## Scope Notes
 

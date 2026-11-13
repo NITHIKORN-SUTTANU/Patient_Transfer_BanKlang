@@ -18,7 +18,7 @@ Naming convention: **Verb + Object**, using the verbs and objects of the specifi
 
 | UC-25 | Cancel Booking Request | Cancel own booking before Driver Start Trip; notify relevant actors and release reservation. | Confirmed User Flow Review 08, 11, 24 |
 
-## ACT-02: Municipal Dispatcher (Staff) — 11 use cases
+## ACT-02: Municipal Dispatcher (Staff) — 12 use cases
 
 | ID | Use Case | Description | Source in specification |
 |---|---|---|---|
@@ -34,6 +34,7 @@ Naming convention: **Verb + Object**, using the verbs and objects of the specifi
 | UC-16 | Handle Emergency Reassignment | Reassign before patient pickup; recheck conflicts; notify old and new drivers. | "handle ... emergency reassignments" |
 
 | UC-26 | Resolve Resource Conflict | Manage unavailable vehicles/drivers and recheck scheduling before manual rejection as a last resort. | Confirmed User Flow Review 10, 25 |
+| UC-28 | Review Recalculated Schedule | Dispatcher reviews and confirms proposed schedule changes; administrator initiates settings changes only. | SRS FR-043 and Section 16.10 |
 
 ## ACT-03: Ambulance Driver (Staff) — 5 use cases
 
@@ -42,20 +43,19 @@ Naming convention: **Verb + Object**, using the verbs and objects of the specifi
 | UC-17 | View Daily Schedule | View daily scheduled passenger runs. | "View daily scheduled passenger runs" |
 | UC-18 | View Patient Pickup Location | View patient pickup locations. | "patient pickup locations" |
 | UC-19 | View Required Mobility Aids | View required mobility aids. | "required mobility aids" |
-| UC-20 | Advance Trip Lifecycle Stage | Advance only driver-controlled execution milestones using Depart Depot, Confirm Patient Pickup, Depart for Hospital and Confirm Hospital Handover; Start Trip marks the cancellation cutoff. | "Advance the discrete 8-stage trip lifecycle state machine via manual milestone buttons" |
+| UC-20 | Advance Trip Lifecycle Stage | Use Depart Origin, Confirm Patient Pickup, Depart for Hospital and Confirm Hospital Handover. Start Trip marks the cancellation cutoff; incidents/corrections follow dispatcher rules. | SRS Sections 16.10–16.12 |
 
-| UC-27 | Report Failed Pickup | Report inability to pick up a patient, triggering automatic cancellation, notifications and immediate resource release. | Confirmed User Flow Review 17, 27, 30 |
+| UC-27 | Report Failed Pickup | Report inability to pick up a patient, triggering cancellation, notifications and reservation release; retain an operational hold until readiness confirmation. | Confirmed User Flow Review 17, 27, 30; SRS Section 16.10 |
 
-## ACT-04: System Administrator (Admin) — 6 use cases
+## ACT-04: System Administrator (Admin) — 5 use cases
 
 | ID | Use Case | Description | Source in specification |
 |---|---|---|---|
 | UC-21 | Maintain Fleet Master Data | Maintain fleet master data (EMS vehicle assets, wheelchair lift capabilities, driver rosters). | "Maintain fleet master data (EMS vehicle assets, wheelchair lift capabilities, driver rosters)" |
-| UC-22 | Configure Geospatial Parameters | Configure depot, service area and operating hours; fixed 20-minute buffer remains unchanged. | "Configure municipal geospatial parameters (depot location, default buffers, operating hours)" |
+| UC-22 | Configure Geospatial Parameters | Maintain depot, service area and explicit closures; view fixed 06:00–16:00 hours and fixed 20-minute buffer. | SRS Sections 16.10–16.11 |
 | UC-23 | Audit System Transaction Logs | Audit Admin and Dispatcher transaction logs. | "Audit system transaction logs" |
 | UC-24 | Enforce Role-Based Access Control (PDPA) | Enforce Thai PDPA role-based access control (RBAC). | "enforce Thai PDPA role-based access control (RBAC)" |
 
-| UC-28 | Review Recalculated Schedule | Review and confirm proposed changes to not-yet-started bookings after Admin geospatial changes; previous schedule stays active until confirmation. | Confirmed User Flow Review 20, 26, 31 |
 | UC-29 | Safeguard Fleet and Account Changes | Block deactivation with unfinished work and revoke reduced/suspended access immediately. | Confirmed User Flow Review 19, 21 |
 
 ## Relationships
@@ -71,4 +71,4 @@ The specification does not use the terms include / extend / generalization. The 
 | «extend» | UC-09 Evaluate Potential Scheduling Warnings | UC-08 Review Automated Vehicle-Driver Assignment | ACT-02: "Review automated vehicle-driver assignments and evaluate potential scheduling warnings" |
 | Generalization | — | — | Not applicable: the specification contains none |
 
-**Review note:** UC-25–UC-29 are newly added IDs, preserving existing UC-01–UC-24. The existing diagram must be updated to reflect these use cases and the removed UC-10 → UC-13 `«include»` relationship.
+**Diagram source:** `use-case-diagram.md` is the maintained diagram. The PNG is historical and must not be used to infer approval justification or ownership. UC-01–UC-29 remain stable; incident/correction/holiday responsibilities are documented as extensions of their owning flows in SRS Sections 16.11–16.12.
