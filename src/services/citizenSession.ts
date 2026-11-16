@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { apiRequest, ApiError } from './api'
+import { LineConnectionError } from './lineAuthentication'
 
 export interface CitizenConfig { liffId: string; lineEnabled: boolean; noticeVersion: string; noticeText: string; contactPhone: string }
 export interface CitizenIdentity { id: string; role: 'citizen'; name: string }
@@ -11,6 +12,7 @@ const listeners = new Set<() => void>()
 function publish(next: Session) { state = next; listeners.forEach(listener => listener()) }
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
 export function citizenError(error: unknown) {
+  if (error instanceof LineConnectionError) return error.message
   if (error instanceof ApiError) {
     if (error.status === 401) return 'เซสชันหมดอายุ กรุณายืนยันตัวตนผ่าน LINE อีกครั้ง'
     if (error.status === 403 || error.status === 404) return 'ไม่มีสิทธิ์เข้าถึงรายการนี้ หรือไม่พบรายการ'
@@ -39,7 +41,7 @@ export async function refreshCitizenConfig() {
   publish({ ...state, config })
   return config
 }
-export function initializeCitizen() {
+export function initializeCitizen(reconnect = false) {
   if (initialization) return initialization
   if (state.user) return Promise.resolve()
   publish({ ...state, busy: true, error: '' })
@@ -51,8 +53,11 @@ export function initializeCitizen() {
         publish({ ...state, busy: false, error: 'บริการจองผ่าน LINE ยังไม่พร้อม กรุณาติดต่อเทศบาล' }); return
       }
       const { lineIdToken } = await import('./lineClient')
-      const idToken = await lineIdToken(config.liffId)
-      const result = await apiRequest<{ token: string }>('/auth/line', { body: { idToken } })
+      const idToken = await lineIdToken(config.liffId, reconnect)
+      const result = await apiRequest<{ token: string }>('/auth/line', { body: { idToken } }).catch(error => {
+        if (error instanceof ApiError && error.status === 401) throw new LineConnectionError()
+        throw error
+      })
       token = result.token
       const user = await citizenRequest<CitizenIdentity>('/auth/me')
       if (user.role !== 'citizen') throw new ApiError(403)

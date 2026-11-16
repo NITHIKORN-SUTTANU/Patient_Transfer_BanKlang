@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { transitionTrip } from '../src/domain/lifecycle.ts'
 import { assignProductionTrip, modifyProductionTrip } from '../src/domain/assignment.ts'
 import { confirmReservation } from '../src/domain/scheduling.ts'
@@ -313,8 +313,21 @@ export async function schedulingAction(client,row,user,body,mode,route,now) {
 
 export async function createBooking(client,user,body,now,noticeVersion) {
   check(user.role==='citizen',403,'Citizen identity required')
-  fields(body,['consentId','patientName','requesterName','contactPhone','pickupAddress','latitude','longitude','landmark','villageId','hospitalId','mobility','appointmentAt','patientProfileId','bookingFor','assistance'],
+  fields(body,['requestId','consentId','patientName','requesterName','contactPhone','pickupAddress','latitude','longitude','landmark','villageId','hospitalId','mobility','appointmentAt','patientProfileId','bookingFor','assistance'],
     ['consentId','patientName','requesterName','contactPhone','pickupAddress','latitude','longitude','villageId','hospitalId','mobility','appointmentAt','bookingFor'])
+  const requestId=body.requestId===undefined?null:uuid(body.requestId)
+  const requestHash=requestId?createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.keys(body).filter(key=>key!=='requestId').sort().map(key=>[key,body[key]])))).digest('hex'):null
+  if(requestId) {
+    // The transaction's operational lock serializes concurrent API submissions;
+    // the unique index independently prevents two rows for one owner/request.
+    const {rows:[existing]}=await client.query('SELECT id,intake_request_hash FROM patient_transfer.bookings WHERE requester_id=$1 AND intake_request_id=$2',[user.id,requestId])
+    if(existing) {
+      check(existing.intake_request_hash===requestHash,409,'Request identity already used with different booking data')
+      // This is a read of an earlier committed request, not fresh intake. Return
+      // current owner-authorized state even after consent/lead-time has changed.
+      return bookingRow(client,existing.id)
+    }
+  }
   const normalized=citizenFields(body)
   const requesterName=citizenText(body.requesterName,'requesterName',120)
   check(['self','other'].includes(body.bookingFor),400,'Invalid booking relationship',{field:'bookingFor'})
@@ -335,10 +348,10 @@ export async function createBooking(client,user,body,now,noticeVersion) {
   check(!closures.length,422,'Service closed on appointment date')
   const id=randomUUID()
   await client.query(`INSERT INTO patient_transfer.bookings(id,reference,requester_id,patient_profile_id,consent_id,patient_name,requester_name,contact_phone,
-    pickup_address,pickup_point,landmark,village_id,hospital_id,mobility,submitted_at,appointment_at,booking_for,assistance)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,ST_SetSRID(ST_MakePoint($10,$11),4326)::geography,$12,$13,$14,$15,$16,$17,$18,$19)`,
+    pickup_address,pickup_point,landmark,village_id,hospital_id,mobility,submitted_at,appointment_at,booking_for,assistance,intake_request_id,intake_request_hash)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,ST_SetSRID(ST_MakePoint($10,$11),4326)::geography,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
   [id,`BK-${id}`,user.id,body.patientProfileId?uuid(body.patientProfileId):null,body.consentId,normalized.patientName,requesterName,normalized.contactPhone,
-    normalized.pickupAddress,body.longitude,body.latitude,normalized.landmark,body.villageId,body.hospitalId,body.mobility,now,body.appointmentAt,body.bookingFor,normalized.assistance])
+    normalized.pickupAddress,body.longitude,body.latitude,normalized.landmark,body.villageId,body.hospitalId,body.mobility,now,body.appointmentAt,body.bookingFor,normalized.assistance,requestId,requestHash])
   // Publication leaves this fresh booking unchanged; return only after its writes succeed.
   return enqueue(client,{id},[{recipient:'citizen',recipientId:user.id,event:'REQUEST_RECEIVED'}],null,now)
 }

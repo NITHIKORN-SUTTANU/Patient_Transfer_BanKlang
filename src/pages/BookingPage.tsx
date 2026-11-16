@@ -54,10 +54,13 @@ export function BookingPage() {
   const locationRequest = useRef(0)
   const gpsActive = draft.pickup?.accuracy !== undefined
   const [sending, setSending] = useState(false)
+  const [intakeUncertain, setIntakeUncertain] = useState(false)
   const [saveError, setSaveError] = useState('')
   const sendingRef = useRef(false)
   const submittedId = useRef<string | null>(null)
+  const pendingIntake = useRef<(ReturnType<typeof intakeFields> & { requestId: string }) | null>(null)
   const root = useRef<HTMLElement>(null)
+  const errorFocusPending = useRef(false)
   const saved = state.bookings.find(b => b.id === path[1])
   const savedRow = rows.find(row => row.id === path[1])
   const citizenCanCancel = () => canCitizenCancel(savedRow)
@@ -67,7 +70,7 @@ export function BookingPage() {
   useEffect(() => {
     if (!session.user) return
     if (previousOwner.current && previousOwner.current !== session.user.id) {
-      setDraft(initialBookingForm()); setConsent(null); submittedId.current = null
+      setDraft(initialBookingForm()); setConsent(null); submittedId.current = null; pendingIntake.current = null; setIntakeUncertain(false)
     }
     previousOwner.current = session.user.id
   }, [session.user])
@@ -90,6 +93,12 @@ export function BookingPage() {
     setErrors(e => { const next = { ...e }; delete next[key]; return next })
   }
   useEffect(() => { window.scrollTo(0, 0); root.current?.querySelector<HTMLHeadingElement>('h1')?.focus() }, [pathname])
+  useEffect(() => {
+    if (!sending && errorFocusPending.current) {
+      const invalid = root.current?.querySelector<HTMLElement>('[aria-invalid="true"]')
+      if (invalid) { errorFocusPending.current = false; invalid.focus() }
+    }
+  }, [errors, sending, pathname])
   useEffect(() => {
     return () => { locationRequest.current += 1 }
   }, [pathname])
@@ -115,8 +124,15 @@ export function BookingPage() {
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })
   }
   function showErrors(next: Record<string, string>) {
+    errorFocusPending.current = true
     setErrors(next)
-    requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
+  }
+  function showFieldError(error: unknown) {
+    if (error instanceof ApiError && error.field) {
+      const field = ({ contactPhone: 'phone', requesterName: 'contactName', latitude: 'pickup', longitude: 'pickup', hospitalId: 'hospital', mobility: 'assistance', assistance: 'extras' } as Record<string, string>)[error.field] ?? error.field
+      go(['patientName', 'contactName', 'phone', 'hospital'].includes(field) ? 'patient' : 'assistance')
+      showErrors({ [field]: 'กรุณาตรวจสอบข้อมูลในช่องนี้อีกครั้ง' })
+    }
   }
   function patientNext() {
     const next = validatePatient(draft)
@@ -131,52 +147,61 @@ export function BookingPage() {
   async function submit() {
     if (sendingRef.current) return
     if (submittedId.current) { go(`submitted/${submittedId.current}`); return }
-    const next = validatePatient(draft)
-    if (Object.keys(next).length) { go('patient'); showErrors(next); return }
-    if (!currentConsent) { go('privacy'); return }
-    const pickupErrors = validatePickup(draft)
-    if (Object.keys(pickupErrors).length) { go('assistance'); showErrors(pickupErrors); return }
+    if (!pendingIntake.current) {
+      const next = validatePatient(draft)
+      if (Object.keys(next).length) { go('patient'); showErrors(next); return }
+      if (!currentConsent) { go('privacy'); return }
+      const pickupErrors = validatePickup(draft)
+      if (Object.keys(pickupErrors).length) { go('assistance'); showErrors(pickupErrors); return }
+    }
     sendingRef.current = true
     setSending(true)
     setSaveError('')
     // Yield a paint so the reference's submitting state is announced before the local save.
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
     try {
-      const latestErrors = validatePatient(draft)
-      if (Object.keys(latestErrors).length) { go('patient'); showErrors(latestErrors); return }
-      const config = await refreshCitizenConfig()
-      if (config.noticeVersion !== currentConsent.version) { setConsent(null); update('acknowledged', false); go('privacy'); return }
-      let submission = draft
-      if (saveProfile) {
-        const profile = await citizenRequest<PatientProfile>(draft.patientProfileId ? `/profiles/${draft.patientProfileId}` : '/profiles', { ...profileFields(draft), consentId: currentConsent.id })
-        setProfiles(current => [...current.filter(row => row.id !== profile.id), profile])
-        update('patientProfileId', profile.id); setSaveProfile(false)
-        submission = { ...draft, patientProfileId: profile.id }
+      if (!pendingIntake.current) {
+        if (!currentConsent) { go('privacy'); return }
+        const latestErrors = validatePatient(draft)
+        if (Object.keys(latestErrors).length) { go('patient'); showErrors(latestErrors); return }
+        const config = await refreshCitizenConfig()
+        if (config.noticeVersion !== currentConsent.version) { setConsent(null); update('acknowledged', false); go('privacy'); return }
+        let submission = draft
+        if (saveProfile) {
+          const profile = await citizenRequest<PatientProfile>(draft.patientProfileId ? `/profiles/${draft.patientProfileId}` : '/profiles', { ...profileFields(draft), consentId: currentConsent.id })
+          setProfiles(current => [...current.filter(row => row.id !== profile.id), profile])
+          update('patientProfileId', profile.id); setSaveProfile(false)
+          submission = { ...draft, patientProfileId: profile.id }
+        }
+        pendingIntake.current = { ...intakeFields(submission, currentConsent.id), requestId: crypto.randomUUID() }
       }
-      const booking = await citizenRequest<CitizenBooking>('/bookings', intakeFields(submission, currentConsent.id))
+      const booking = await citizenRequest<CitizenBooking>('/bookings', pendingIntake.current)
+      pendingIntake.current = null; setIntakeUncertain(false)
       setRows(current => [...current.filter(row => row.id !== booking.id), booking])
       submittedId.current = booking.id
       go(`submitted/${booking.id}`)
     } catch (error) {
+      if (error instanceof ApiError && [400,403,404,409,415,422].includes(error.status)) pendingIntake.current = null
+      setIntakeUncertain(!!pendingIntake.current)
       setSaveError(citizenError(error))
       if (error instanceof ApiError && error.field === 'consentId') {
-        setConsent(null); update('acknowledged', false); setConsentError('กรุณาอ่านประกาศและบันทึกการตัดสินใจล่าสุดอีกครั้ง'); go('privacy'); return
+        setConsent(null); update('acknowledged', false); setConsentError('กรุณาอ่านประกาศและบันทึกการตัดสินใจล่าสุดอีกครั้ง')
+        await refreshCitizenConfig().catch(() => undefined)
+        go('privacy'); return
       }
-      if (error instanceof ApiError && error.field) {
-        const field = ({ contactPhone: 'phone', requesterName: 'contactName', latitude: 'pickup', longitude: 'pickup', hospitalId: 'hospital' } as Record<string, string>)[error.field] ?? error.field
-        go(['patientName', 'contactName', 'phone', 'hospital'].includes(field) ? 'patient' : 'assistance')
-        showErrors({ [field]: 'กรุณาตรวจสอบข้อมูลในช่องนี้อีกครั้ง' })
-      }
+      showFieldError(error)
     }
     finally { setSending(false); sendingRef.current = false }
   }
   const field = (key: 'patientName' | 'contactName' | 'phone', label: string, placeholder: string) => <div className="booking-field"><label htmlFor={key}>{label} *</label><input id={key} name={key} required value={draft[key]} type={key === 'phone' ? 'tel' : 'text'} inputMode={key === 'phone' ? 'tel' : 'text'} autoComplete={key === 'phone' ? 'tel' : key === 'contactName' || draft.bookingFor === 'self' ? 'name' : 'off'} placeholder={placeholder}  aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `${key}-error` : undefined} onChange={e => update(key, e.target.value)} />{error(key)}</div>
   const error = (key: string) => errors[key] ? <span className="booking-error" id={`${key}-error`} role="alert">{errors[key]}</span> : null
   const selection = (key: 'hospital' | 'relationship', label: string, placeholder: string, values: string[]) => <div className="booking-field"><label htmlFor={key}>{label} *</label><select id={key} required value={draft[key]} aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `${key}-error` : undefined} onChange={e => update(key, e.target.value)}><option value="">{placeholder}</option>{values.map(value => <option key={value}>{value}</option>)}</select>{error(key)}</div>
-  const edit = (target: string, label: string) => <button type="button" disabled={profileBusy || sending} className="booking-edit" aria-label={`แก้ไข ${label}`} onClick={() => go(target)}>แก้ไข</button>
+  const edit = (target: string, label: string) => <button type="button" disabled={profileBusy || sending || intakeUncertain} className="booking-edit" aria-label={`แก้ไข ${label}`} onClick={() => go(target)}>แก้ไข</button>
   function start() {
     const next = initialBookingForm()
     submittedId.current = null
+    pendingIntake.current = null
+    setIntakeUncertain(false)
     setDraft(next)
     setLocationError('')
     setConsent(null); setSaveProfile(false); setProfileError(''); setSaveError('')
@@ -210,10 +235,11 @@ export function BookingPage() {
       setProfiles(current => [...current.filter(row => row.id !== profile.id), profile]); update('patientProfileId', profile.id)
       setSaveProfile(false)
     } catch (error) {
-      setProfileError(citizenError(error))
+      setProfileError(`บันทึกข้อมูลผู้ป่วยไม่สำเร็จ: ${citizenError(error)}`)
       if (error instanceof ApiError && error.field === 'consentId') {
-        setConsent(null); update('acknowledged', false); go('privacy')
+        setConsent(null); update('acknowledged', false); go('privacy'); return
       }
+      showFieldError(error)
     }
     finally { setProfileBusy(false) }
   }
@@ -227,7 +253,7 @@ export function BookingPage() {
     finally { setCancelling(false) }
   }
   let content: ReactNode
-  if (!session.user || session.busy) return <div className="booking-shell"><main className="booking-screen"><BookingHeader title="จองรถไปโรงพยาบาล" /><p role="status">{session.busy ? 'กำลังยืนยันตัวตนผ่าน LINE…' : session.error}</p><p className="booking-notice">บริการรับส่งตามนัดหมาย ไม่ใช่บริการฉุกเฉิน</p><EmergencyLink />{!session.busy && <BookingButton onClick={() => void initializeCitizen()}>ลองเชื่อมต่อ LINE อีกครั้ง</BookingButton>}{session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>}</main></div>
+  if (!session.user || session.busy) return <div className="booking-shell"><main className="booking-screen"><BookingHeader title="จองรถไปโรงพยาบาล" /><p role="status">{session.busy ? 'กำลังยืนยันตัวตนผ่าน LINE…' : session.error}</p><p className="booking-notice">บริการรับส่งตามนัดหมาย ไม่ใช่บริการฉุกเฉิน</p><EmergencyLink />{!session.busy && <BookingButton onClick={() => void initializeCitizen(true)}>ลองเชื่อมต่อ LINE อีกครั้ง</BookingButton>}{session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>}</main></div>
   if (['patient', 'assistance', 'pickup', 'review'].includes(screen) && !currentConsent) return <Navigate to="/booking/privacy" replace />
   if (['submitted', 'status', 'cancel'].includes(screen) && !saved && !loading && !loadError) return <Navigate to="/booking/bookings" replace />
   if (loading || loadError) content = <><BookingHeader title="รายการจองรถ" /><p role={loadError ? 'alert' : 'status'}>{loadError || 'กำลังโหลดข้อมูล…'}</p><BookingButton disabled={loading} onClick={() => setVersion(value => value + 1)}>โหลดข้อมูลล่าสุด</BookingButton></>
@@ -264,9 +290,9 @@ export function BookingPage() {
   </>
   else if (screen === 'assistance') content = <>
     <BookingHeader title="การช่วยเหลือและจุดรับ" subtitle="ผู้ป่วยเดินทางแบบไหน?" /><BookingProgress step={2} /><h2 className="booking-section-title">การช่วยเหลือ</h2>
-    <div className="booking-assistance" role="group" aria-label="การช่วยเหลือ">{(['เดินได้', 'รถเข็น', 'เปลนอน'] as const).map((label, i) => <button type="button" key={label} aria-pressed={draft.assistance === label} onClick={() => update('assistance', label)}><BookingIcon name={(['walk', 'wheel', 'bed'] as const)[i]} />{label}</button>)}</div>
+    <div className="booking-assistance" role="group" aria-label="การช่วยเหลือ" tabIndex={errors.assistance ? -1 : undefined} aria-invalid={!!errors.assistance} aria-describedby={errors.assistance ? 'assistance-error' : undefined}>{(['เดินได้', 'รถเข็น', 'เปลนอน'] as const).map((label, i) => <button type="button" key={label} aria-pressed={draft.assistance === label} onClick={() => update('assistance', label)}><BookingIcon name={(['walk', 'wheel', 'bed'] as const)[i]} />{label}</button>)}</div>{error('assistance')}
     <h2 className="booking-section-title">ต้องการให้ช่วยอะไรอีก?</h2>
-    <div className="booking-extras"><label className="booking-checkbox"><input type="checkbox" checked={draft.extras.length === 0} onChange={() => update('extras', [])} />ไม่ต้องการความช่วยเหลือเพิ่มเติม</label>{['ต้องการผู้ช่วยพยุงขึ้น-ลงรถ', 'มีผู้ดูแลเดินทางไปด้วย'].map(label => <label className="booking-checkbox" key={label}><input type="checkbox" checked={draft.extras.includes(label)} onChange={e => update('extras', e.target.checked ? [...draft.extras, label] : draft.extras.filter(x => x !== label))} />{label}</label>)}</div>
+    <div className="booking-extras" role="group" aria-label="ความช่วยเหลือเพิ่มเติม" tabIndex={errors.extras ? -1 : undefined} aria-invalid={!!errors.extras} aria-describedby={errors.extras ? 'extras-error' : undefined}><label className="booking-checkbox"><input type="checkbox" checked={draft.extras.length === 0} onChange={() => update('extras', [])} />ไม่ต้องการความช่วยเหลือเพิ่มเติม</label>{['ต้องการผู้ช่วยพยุงขึ้น-ลงรถ', 'มีผู้ดูแลเดินทางไปด้วย'].map(label => <label className="booking-checkbox" key={label}><input type="checkbox" checked={draft.extras.includes(label)} onChange={e => update('extras', e.target.checked ? [...draft.extras, label] : draft.extras.filter(x => x !== label))} />{label}</label>)}</div>{error('extras')}
     <h2 className="booking-section-title">จุดรับผู้ป่วย</h2>
     <div className="booking-location-controls"><PickupMap value={draft.pickup} onChange={selectPoint} />
     <BookingButton secondary className="booking-location-button" aria-pressed={gpsActive} disabled={locating} onClick={useCurrentLocation}>{locating ? 'กำลังค้นหาตำแหน่ง…' : gpsActive ? '✓ ใช้ตำแหน่งปัจจุบันแล้ว' : 'ใช้ตำแหน่งปัจจุบัน'}</BookingButton>
@@ -301,7 +327,8 @@ export function BookingPage() {
     {saveProfile && <BookingButton secondary disabled={profileBusy} onClick={() => void persistProfile()}>{profileBusy ? 'กำลังบันทึก…' : draft.patientProfileId ? 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' : 'บันทึกข้อมูลผู้ป่วย'}</BookingButton>}
     {profileError && <p role="alert" className="booking-error-box">{profileError}</p>}
     {saveError && <><p role="alert" className="booking-error-box">{saveError}</p><BookingButton secondary onClick={() => go('bookings')}>ตรวจสอบรายการจองล่าสุดก่อนส่งซ้ำ</BookingButton></>}
-    <BookingButton disabled={profileBusy} onClick={() => void submit()}>{saveError ? 'ลองส่งคำขออีกครั้ง' : 'ยืนยันและส่งคำขอ'}</BookingButton><BookingButton secondary disabled={profileBusy} onClick={() => go('assistance')}>ย้อนกลับ</BookingButton>
+    {intakeUncertain && <p role="status" className="booking-small">กำลังตรวจสอบคำขอก่อนหน้า การลองอีกครั้งจะใช้คำขอเดิมเพื่อป้องกันรายการซ้ำ</p>}
+    <BookingButton disabled={profileBusy} onClick={() => void submit()}>{saveError ? 'ลองส่งคำขออีกครั้ง' : 'ยืนยันและส่งคำขอ'}</BookingButton><BookingButton secondary disabled={profileBusy || intakeUncertain} onClick={() => go('assistance')}>ย้อนกลับ</BookingButton>
   </>
   else if (screen === 'submitted' && saved) content = <>
     <BookingHeader title="ส่งคำขอแล้ว" subtitle="เก็บหมายเลขคำขอไว้เพื่อติดตามสถานะ" />

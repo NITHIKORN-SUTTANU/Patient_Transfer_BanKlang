@@ -10,9 +10,13 @@ export const ids = { citizen:'00000000-0000-4000-8000-000000000001', hospital:'4
 export async function startOperationalTestApi(providers: { liffId?: string; verifyLine?: (token: string) => Promise<{ subject: string; name: string }> } = {}) {
   const adminUrl=process.env.DATABASE_TEST_ADMIN_URL
   if (!adminUrl) throw new Error('Local DATABASE_TEST_ADMIN_URL required')
-  const control={ now:'2030-01-12T00:00:00Z', unavailable:false, minutes:35, remainingMinutes:35 }
+  const control={ now:'2030-01-12T00:00:00Z', unavailable:false, minutes:35, remainingMinutes:35,
+    failedLeg:null as 'origin' | 'hospital' | null, routeCalls:[] as {leg: 'origin' | 'hospital' | 'continuation'; failed: boolean}[] }
   const api=await startAdminTestApi(adminUrl, {...providers, clock:()=>control.now, route:async (from: {kind?: string})=>{
-    if(control.unavailable) throw new ApiError(503,'Injected routing outage')
+    const leg=from.kind==='continuation'?'continuation':from.kind?'origin':'hospital'
+    const failed=control.unavailable||control.failedLeg===leg
+    control.routeCalls.push({leg,failed})
+    if(failed) throw new ApiError(503,'Injected routing outage')
     return {minutes:from.kind==='continuation'?control.remainingMinutes:from.kind?15:control.minutes,source:'synthetic-configuration-test'}
   }})
   const tokens: Record<string,string>={citizen:newToken()}
@@ -36,7 +40,7 @@ export async function startOperationalTestApi(providers: { liffId?: string; veri
   const command=(booking:ApiBooking,type:string,extra={},role='dispatcher',status=200)=>request(`/bookings/${booking.id}/commands`,role,{eventId:randomUUID(),expectedRevision:booking.revision,expectedExecutionVersion:booking.executionVersion,command:{type,...extra}},status)
   async function requested(clock='09:00') {
     const consent=await request('/consents','citizen',{accepted:true,noticeVersion:'development-v1'},201)
-    return request('/bookings','citizen',{consentId:consent.id,bookingFor:'self',patientName:'ผู้ป่วยทดสอบการตั้งค่า',requesterName:'ผู้ขอทดสอบ',contactPhone:'0800000000',pickupAddress:'จุดรับสังเคราะห์',latitude:18.59,longitude:99.05,villageId:ids.village,hospitalId:ids.hospital,mobility:'standard',appointmentAt:`2030-01-15T${clock}:00+07:00`},201) as Promise<ApiBooking>
+    return request('/bookings','citizen',{consentId:consent.id,bookingFor:'self',patientName:'ผู้ป่วยทดสอบการตั้งค่า',requesterName:'ผู้ขอทดสอบ',contactPhone:'0800000000',pickupAddress:'จุดรับสังเคราะห์',latitude:18.59,longitude:99.05,villageId:ids.village,hospitalId:ids.hospital,mobility:'standard',appointmentAt:`2030-01-15T${clock}${clock.length === 5 ? ':00' : ''}+07:00`},201) as Promise<ApiBooking>
   }
   async function assigned(clock='09:00',extra={}) {
     let booking=await requested(clock)

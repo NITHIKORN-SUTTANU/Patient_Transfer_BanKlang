@@ -160,18 +160,20 @@ test('submission failure preserves draft; a newer notice requires a fresh record
   await expect(page.getByText('ผู้ป่วยที่บันทึกไว้', { exact: true })).toBeVisible()
   fixture.controls.failSubmit = false
   fixture.config.noticeVersion = 'test-v2'; fixture.config.noticeText = 'ประกาศฉบับใหม่'
+  fixture.controls.fieldError = 'consentId'
   await page.getByRole('button', { name: 'ลองส่งคำขออีกครั้ง', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'ข้อมูลส่วนบุคคล', exact: true })).toBeVisible()
   await expect(page.getByText('ประกาศฉบับใหม่')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ })).not.toBeChecked()
-  expect(fixture.writes.length).toBe(1)
+  expect(fixture.writes.length).toBe(2)
+  expect(fixture.writes[1]).toEqual(fixture.writes[0])
   await page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ }).check()
   await page.getByRole('button', { name: 'รับทราบและถัดไป', exact: true }).click()
   await expect(page.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('ผู้ป่วยที่บันทึกไว้')
   fixture.controls.fieldError = 'consentId'
   await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
   await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
-  await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ', exact: true }).click()
+  await page.getByRole('button', { name: 'ลองส่งคำขออีกครั้ง', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'ข้อมูลส่วนบุคคล', exact: true })).toBeVisible()
   await expect(page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ })).not.toBeChecked()
 })

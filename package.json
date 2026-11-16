@@ -26,11 +26,11 @@
     "dev:api": "node --experimental-strip-types --env-file-if-exists=.env server/index.mjs",
     "db:create-staff": "node --env-file-if-exists=.env scripts/database/create-staff.mjs",
     "test:api": "node --experimental-strip-types --env-file-if-exists=.env --test tests/api.test.mjs",
-    "test:intake": "node --experimental-strip-types --env-file-if-exists=.env --test tests/intake-publication.test.mjs",
+    "test:intake": "node --experimental-strip-types --env-file-if-exists=.env --test tests/intake-publication.test.mjs tests/intake-identity.test.mjs",
     "test:line": "node --env-file-if-exists=.env --test tests/line.test.mjs",
     "test:ui": "playwright test tests/navigation.spec.ts tests/staff-login.spec.ts tests/dispatcher-api.spec.ts tests/driver-api.spec.ts tests/citizen-api.spec.ts tests/admin-api.spec.ts --workers=1",
     "test:pagination:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/pagination-postgres.spec.ts --workers=1",
-    "test:citizen:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/citizen-postgres.spec.ts tests/citizen-pagination-postgres.spec.ts --workers=1",
+    "test:citizen:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/citizen-postgres.spec.ts tests/citizen-pagination-postgres.spec.ts tests/citizen-cutoff-postgres.spec.ts tests/citizen-location-postgres.spec.ts tests/citizen-profile-postgres.spec.ts tests/citizen-validation-postgres.spec.ts tests/citizen-retry-postgres.spec.ts --workers=1",
     "test:admin:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/admin-postgres.spec.ts --workers=1",
     "notifications:send": "node --env-file-if-exists=.env scripts/database/send-notifications.mjs",
     "test:configuration:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/configuration-postgres.spec.ts --workers=1",
@@ -42,7 +42,8 @@
     "test:reports:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/reports-postgres.spec.ts tests/monthly-postgres.spec.ts --workers=1",
     "test:messages": "node --experimental-strip-types --test tests/message-policy.test.mjs",
     "test:messages:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/message-matrix-postgres.spec.ts --workers=1",
-    "test:reassignment:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/reassignment-postgres.spec.ts --workers=1"
+    "test:reassignment:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/reassignment-postgres.spec.ts --workers=1",
+    "test:collision:integration": "node --experimental-strip-types --env-file-if-exists=.env node_modules/@playwright/test/cli.js test tests/collision-postgres.spec.ts --workers=1"
   },
   "dependencies": {
     "@fontsource/noto-sans-thai": "^5.2.0",

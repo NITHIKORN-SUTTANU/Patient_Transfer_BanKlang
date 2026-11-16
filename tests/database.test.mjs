@@ -72,9 +72,10 @@ test('PostgreSQL/PostGIS migrations and persistence rules', async t => {
       assert.equal((await client.query('SELECT count(*)::int AS count FROM public.patient_transfer_migrations')).rows[0].count, 0)
     })
     await t.test('apply, repeat, empty rollback, and reapply succeed', async () => {
-      assert.deepEqual(await migrate(client), ['001_foundation', '002_dispatch_changes', '003_api_support', '004_citizen_fields', '005_consent_decisions', '006_admin_accounts', '007_admin_resources', '008_service_administration', '009_destination_continuation', '010_notification_review', '011_notification_messages', '012_assignment_labels', '013_dispatch_review', '014_capacity_evidence'])
+      assert.deepEqual(await migrate(client), ['001_foundation', '002_dispatch_changes', '003_api_support', '004_citizen_fields', '005_consent_decisions', '006_admin_accounts', '007_admin_resources', '008_service_administration', '009_destination_continuation', '010_notification_review', '011_notification_messages', '012_assignment_labels', '013_dispatch_review', '014_capacity_evidence', '015_intake_identity'])
       assert.deepEqual(await migrate(client), [])
-      assert.deepEqual(await migrate(client, 'status'), [{ id: '001_foundation', applied: true }, { id: '002_dispatch_changes', applied: true }, { id: '003_api_support', applied: true }, { id: '004_citizen_fields', applied: true }, { id: '005_consent_decisions', applied: true }, { id: '006_admin_accounts', applied: true }, { id: '007_admin_resources', applied: true }, { id: '008_service_administration', applied: true }, { id: '009_destination_continuation', applied: true }, { id: '010_notification_review', applied: true }, { id: '011_notification_messages', applied: true }, { id: '012_assignment_labels', applied: true }, { id: '013_dispatch_review', applied: true }, { id: '014_capacity_evidence', applied: true }])
+      assert.deepEqual(await migrate(client, 'status'), [{ id: '001_foundation', applied: true }, { id: '002_dispatch_changes', applied: true }, { id: '003_api_support', applied: true }, { id: '004_citizen_fields', applied: true }, { id: '005_consent_decisions', applied: true }, { id: '006_admin_accounts', applied: true }, { id: '007_admin_resources', applied: true }, { id: '008_service_administration', applied: true }, { id: '009_destination_continuation', applied: true }, { id: '010_notification_review', applied: true }, { id: '011_notification_messages', applied: true }, { id: '012_assignment_labels', applied: true }, { id: '013_dispatch_review', applied: true }, { id: '014_capacity_evidence', applied: true }, { id: '015_intake_identity', applied: true }])
+      assert.deepEqual(await migrate(client, 'down'), ['015_intake_identity'])
       assert.deepEqual(await migrate(client, 'down'), ['014_capacity_evidence'])
       assert.deepEqual(await migrate(client, 'down'), ['013_dispatch_review'])
       assert.deepEqual(await migrate(client, 'down'), ['012_assignment_labels'])
@@ -90,12 +91,25 @@ test('PostgreSQL/PostGIS migrations and persistence rules', async t => {
       assert.deepEqual(await migrate(client, 'down'), ['002_dispatch_changes'])
       assert.deepEqual(await migrate(client, 'down'), ['001_foundation'])
       assert.equal((await client.query("SELECT to_regnamespace('patient_transfer') AS schema")).rows[0].schema, null)
-      assert.deepEqual(await migrate(client), ['001_foundation', '002_dispatch_changes', '003_api_support', '004_citizen_fields', '005_consent_decisions', '006_admin_accounts', '007_admin_resources', '008_service_administration', '009_destination_continuation', '010_notification_review', '011_notification_messages', '012_assignment_labels', '013_dispatch_review', '014_capacity_evidence'])
+      assert.deepEqual(await migrate(client), ['001_foundation', '002_dispatch_changes', '003_api_support', '004_citizen_fields', '005_consent_decisions', '006_admin_accounts', '007_admin_resources', '008_service_administration', '009_destination_continuation', '010_notification_review', '011_notification_messages', '012_assignment_labels', '013_dispatch_review', '014_capacity_evidence', '015_intake_identity'])
     })
     const seed = await readFile(new URL('../database/seeds/development.sql', import.meta.url), 'utf8')
     for (let i = 0; i < 2; i++) {
       await client.query('BEGIN'); await client.query(seed); await client.query('COMMIT')
     }
+    await t.test('intake identity upgrade leaves existing booking data and unknown identities intact', async () => {
+      const down=await readFile(new URL('../database/migrations/015_intake_identity.down.sql',import.meta.url),'utf8')
+      const up=await readFile(new URL('../database/migrations/015_intake_identity.up.sql',import.meta.url),'utf8')
+      await client.query('BEGIN')
+      try {
+        await booking(client)
+        await client.query('SET CONSTRAINTS ALL IMMEDIATE')
+        const before=(await client.query('SELECT * FROM patient_transfer.bookings ORDER BY id')).rows
+        assert.ok(before.length>0)
+        await client.query(down);await client.query(up)
+        assert.deepEqual((await client.query('SELECT * FROM patient_transfer.bookings ORDER BY id')).rows,before)
+      } finally {await client.query('ROLLBACK')}
+    })
     await t.test('synthetic seed repeats safely; populated rollback is refused', async () => {
       assert.equal((await client.query('SELECT count(*)::int AS count FROM patient_transfer.service_villages')).rows[0].count, 12)
       await assert.rejects(migrate(client, 'down'), /Rollback refused/)
