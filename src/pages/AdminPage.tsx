@@ -53,10 +53,12 @@ export function AdminPage() {
   const [notice, setNotice] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const overlay = useSeedOverlay()
-  const [tablePage, setTablePage] = useState(1)
+  const filterKey = `${pathname}|${search}|${status}|${role}|${category}`
+  const [pageState, setPageState] = useState({ key: filterKey, page: 1 })
+  const tablePage = pageState.key === filterKey ? pageState.page : 1
+  const setTablePage = (nextPage: number) => setPageState({ key: filterKey, page: nextPage })
   const main = useRef<HTMLElement>(null)
   useEffect(() => { window.scrollTo(0, 0); main.current?.querySelector('h1')?.focus() }, [pathname])
-  useEffect(() => { setTablePage(1) }, [pathname, search, status, role, category])
   const accounts = state.accounts || []
   const events = state.auditEvents || []
   const matches = (...values: (string | undefined)[]) => values.join(' ').toLowerCase().includes(search.trim().toLowerCase())

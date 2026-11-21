@@ -32,14 +32,15 @@ export function ExecutiveAnalyticsDashboard({
   const bookings = overlay.active ? overlay.bookings : []
 
   const analytics = useMemo(() => {
+    const activeBookings = overlay.active ? overlay.bookings : []
     const statusMap = new Map<string, number>()
     for (const row of summaryStatuses) {
       statusMap.set(row.status, row.count)
     }
 
     const totalFromStatuses = Array.from(statusMap.values()).reduce((sum, n) => sum + n, 0)
-    const total = Math.max(totalFromStatuses, bookings.length)
-    const completed = statusMap.get('COMPLETED') ?? bookings.filter(b => (b.apiStatus || b.status) === 'COMPLETED' || b.status === 'completed').length
+    const total = Math.max(totalFromStatuses, activeBookings.length)
+    const completed = statusMap.get('COMPLETED') ?? activeBookings.filter(b => (b.apiStatus || b.status) === 'COMPLETED' || b.status === 'completed').length
     const cancelled = (statusMap.get('CANCELLED') ?? 0)
     const rejected = (statusMap.get('REJECTED') ?? 0)
     const aborted = (statusMap.get('ABORTED') ?? 0)
@@ -62,7 +63,7 @@ export function ExecutiveAnalyticsDashboard({
 
     let blockedMinutesTotal = 0
 
-    for (const b of bookings) {
+    for (const b of activeBookings) {
       const apptMs = Date.parse(b.appointmentAt)
       if (Number.isFinite(apptMs)) {
         const bkkDate = bangkokDateFromMs(apptMs)
@@ -106,7 +107,7 @@ export function ExecutiveAnalyticsDashboard({
     const activeServiceDays = Math.max(1, daySet.size)
     // 10 operating hours (06:00-16:00) per active vehicle per active service day
     const availableCapacityMinutes = fleetDenominator * activeServiceDays * 10 * 60
-    const utilizationRate = bookings.length > 0
+    const utilizationRate = activeBookings.length > 0
       ? Math.min(100, Math.round((blockedMinutesTotal / availableCapacityMinutes) * 1000) / 10)
       : 0
 
@@ -128,7 +129,7 @@ export function ExecutiveAnalyticsDashboard({
         number: v.number,
         name: v.name,
         count,
-        pct: bookings.length > 0 ? Math.round((count / bookings.length) * 1000) / 10 : 0,
+        pct: activeBookings.length > 0 ? Math.round((count / activeBookings.length) * 1000) / 10 : 0,
       }
     })
     const maxVillage = Math.max(1, ...villages.map(v => v.count))
@@ -152,7 +153,7 @@ export function ExecutiveAnalyticsDashboard({
       dropoutRate,
       utilizationRate,
       activeDays: daySet.size,
-      dailyAverage: daySet.size > 0 ? Math.round((bookings.length / daySet.size) * 10) / 10 : 0,
+      dailyAverage: daySet.size > 0 ? Math.round((activeBookings.length / daySet.size) * 10) / 10 : 0,
       monthlySeries,
       maxMonth,
       peakHours,
@@ -163,7 +164,7 @@ export function ExecutiveAnalyticsDashboard({
       mobilityBreakdown,
       topHospitals,
     }
-  }, [activeVehicles, bookings, overlay.vehicles, summaryStatuses, totalVehicles])
+  }, [activeVehicles, overlay, summaryStatuses, totalVehicles])
 
   return (
     <section className="admin-panel admin-analytics-panel" aria-labelledby="exec-analytics-title">

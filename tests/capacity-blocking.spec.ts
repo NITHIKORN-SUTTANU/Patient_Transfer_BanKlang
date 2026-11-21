@@ -235,6 +235,10 @@ function createSharedBackendState(vehiclesOverride?: MockVehicle[]) {
         })
       }
 
+      if ((path === '/api/admin/seed-import' || path === '/api/admin/seed-reset') && method === 'POST') {
+        return route.fulfill({ json: { ok: true } })
+      }
+
       if (path.startsWith('/api/admin/resources/vehicles/') && method === 'POST') {
         const vehicleId = path.split('/').pop()!
         const body = req.postDataJSON() as { active?: boolean; capabilities?: string[] }
@@ -644,4 +648,70 @@ test('<48h lead time is blocked with 1669 notice and 4-actor Happy Path reaches 
 
   expect(shared.bookings[0]?.status).toBe('COMPLETED')
   await drvCtx.close()
+})
+
+test('admin 320+ seed load, analytics 12-village dashboard, pagination, reset, dispatcher timeline, and daily map view work end-to-end', async ({ browser }) => {
+  const shared = createSharedBackendState()
+  const context = await browser.newContext()
+
+  // 1. Admin loads 320 realistic seed bookings, inspects Executive Analytics + paginated preview, tests reset, then reloads seed.
+  const adminPage = await context.newPage()
+  await shared.attachRoutes(adminPage, 'admin')
+  await adminPage.goto('/staff/login?next=%2Fadmin')
+  await adminPage.getByLabel('ชื่อผู้ใช้').fill('admin')
+  await adminPage.getByLabel('รหัสผ่าน').fill('pass')
+  await adminPage.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
+  await adminPage.getByRole('link', { name: 'เปิดหน้าผู้ดูแลระบบ' }).click()
+  await expect(adminPage.locator('#admin-main')).toBeVisible()
+
+  await adminPage.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  await expect(adminPage.getByText('ข้อมูลจำลองในระบบ: 320 รายการ')).toBeVisible()
+
+  // Phase 4: Executive Analytics Dashboard shows KPIs and all 12 Ban Klang villages without PII.
+  const analytics = adminPage.locator('.admin-analytics-panel')
+  await expect(analytics).toContainText('อัตราเดินทางสำเร็จ')
+  await expect(analytics).toContainText('หมู่ 1 บ้านกลาง')
+  await expect(analytics).toContainText('หมู่ 12 บ้านใหม่สันป่ายาง')
+  await expect(analytics).toContainText('เปลนอน (Stretcher)')
+
+  // Phase 1: Paginated preview table (50 rows per page).
+  await adminPage.getByRole('button', { name: /ดูตารางตรวจสอบชุดข้อมูล/ }).click()
+  await expect(adminPage.getByText(/แสดง 1–50 จาก 320 รายการ/)).toBeVisible()
+  await adminPage.getByRole('button', { name: 'ถัดไป →' }).click()
+  await expect(adminPage.getByText(/แสดง 51–100 จาก 320 รายการ/)).toBeVisible()
+
+  // Test Reset / Clear Mock Data and confirm clean wipe.
+  await adminPage.getByRole('button', { name: 'ล้างข้อมูลจำลอง / รีเซ็ตระบบ' }).click()
+  await adminPage.getByRole('button', { name: 'ยืนยันล้างข้อมูลจำลอง' }).click()
+  await expect(adminPage.getByText('ยังไม่มีชุดข้อมูลจำลอง')).toBeVisible()
+
+  // Reload 320 records for Dispatcher inspection in same browser context.
+  await adminPage.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  await expect(adminPage.getByText('ข้อมูลจำลองในระบบ: 320 รายการ')).toBeVisible()
+
+  // 2. Dispatcher verifies Phase 3 fleet bar, inline mobility/window badges, timeline, compact refresh, and Phase 5 Daily Map View.
+  const dispPage = await context.newPage()
+  await shared.attachRoutes(dispPage, 'dispatcher')
+  await dispPage.goto('/staff/login?next=%2Fdispatcher')
+  await dispPage.getByLabel('ชื่อผู้ใช้').fill('dispatcher')
+  await dispPage.getByLabel('รหัสผ่าน').fill('pass')
+  await dispPage.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
+  await dispPage.getByRole('link', { name: 'เปิดหน้าจัดรถ' }).click()
+  await expect(dispPage.locator('#dispatcher-main')).toBeVisible()
+
+  // Phase 3: Fleet status bar, compact refresh icon, inline badges, and Vehicle Timeline.
+  await expect(dispPage.locator('.dispatch-fleet-bar')).toContainText('รถทั้งหมด / เปิดใช้งาน')
+  await expect(dispPage.locator('.dispatch-fleet-bar')).toContainText('ว่างพร้อมจัด')
+  await expect(dispPage.getByRole('button', { name: 'โหลดข้อมูลล่าสุด' })).toBeVisible()
+  await expect(dispPage.locator('.dispatch-window-chip').first()).toContainText('รถออก')
+  await expect(dispPage.locator('.dispatch-timeline-panel')).toContainText('ไทม์ไลน์รถและช่วงเวลาว่าง')
+
+  // Phase 5: Switch to Daily Dispatch Map View and inspect selected pin details.
+  await dispPage.getByRole('button', { name: /มุมมองแผนที่รายวัน/ }).click()
+  const mapView = dispPage.locator('.dispatch-map-view')
+  await expect(mapView).toBeVisible()
+  await expect(mapView.locator('.dispatch-map-popup-card')).toContainText('ช่วงเวลาปิดรถ')
+  await mapView.getByRole('button', { name: 'ดูรายละเอียด →' }).click()
+  await expect(dispPage.getByRole('dialog')).toBeVisible()
+  await context.close()
 })

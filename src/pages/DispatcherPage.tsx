@@ -23,6 +23,7 @@ import { ServiceTable } from '../components/ServiceTable'
 import { ServiceSymbol } from '../components/ServiceSymbol'
 import { PaginationControls } from '../components/PaginationControls'
 import { VehicleTimelineView } from '../components/VehicleTimelineView'
+import { DailyDispatchMapView } from '../components/DailyDispatchMapView'
 import {
   bangkokDateFromMs,
   checkCitizenSlotCapacity,
@@ -59,11 +60,14 @@ export function DispatcherPage() {
   const [filter, setFilter] = useState('')
   const [queuePage, setQueuePage] = useState(1)
   const [waitingPage, setWaitingPage] = useState(1)
-  const [monitoringPage, setMonitoringPage] = useState(1)
+  const monitoringFilterKey = `${search}|${date}|${trackingScope}|${filter}`
+  const [monitoringPageState, setMonitoringPageState] = useState({ key: monitoringFilterKey, page: 1 })
+  const monitoringPage = monitoringPageState.key === monitoringFilterKey ? monitoringPageState.page : 1
+  const setMonitoringPage = (nextPage: number) => setMonitoringPageState({ key: monitoringFilterKey, page: nextPage })
+  const [dashboardView, setDashboardView] = useState<'board' | 'map'>('board')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const main = useRef<HTMLElement>(null)
-  useEffect(() => { setMonitoringPage(1) }, [search, date, trackingScope, filter])
   useEffect(() => {
     if (!notice) return
     const timeout = window.setTimeout(() => setNotice(''), 5000)
@@ -273,6 +277,33 @@ export function DispatcherPage() {
       )}
 
       {screen === 'dashboard' && <>
+        <div className="dispatch-view-switcher" role="group" aria-label="รูปแบบการแสดงผลงานจัดรถ">
+          <button
+            type="button"
+            className={`dispatch-view-btn ${dashboardView === 'board' ? 'active' : ''}`}
+            aria-pressed={dashboardView === 'board'}
+            onClick={() => setDashboardView('board')}
+          >
+            มุมมองตารางงาน
+          </button>
+          <button
+            type="button"
+            className={`dispatch-view-btn ${dashboardView === 'map' ? 'active' : ''}`}
+            aria-pressed={dashboardView === 'map'}
+            onClick={() => setDashboardView('map')}
+          >
+            มุมมองแผนที่รายวัน ({state.bookings.length})
+          </button>
+        </div>
+
+        {dashboardView === 'map' ? (
+          <DailyDispatchMapView
+            bookings={state.bookings}
+            defaultDate={focusDate}
+            onOpenDetails={openDetails}
+            onGoAssign={b => navigate(`/dispatcher/assignment?booking=${encodeURIComponent(b.id)}`)}
+          />
+        ) : <>
         <section className="dispatch-metrics" aria-label="ภาพรวมคำขอ"><article><p>คำขอรอตรวจสอบ</p><strong>{state.bookings.filter(b => b.status === 'pending').length}</strong><button type="button" onClick={() => { document.getElementById('dispatch-queue')?.scrollIntoView(); document.getElementById('queue-title')?.focus() }}>ตรวจสอบคำขอ →</button></article><article><p>รอจัดรถและคนขับ</p><strong>{waiting.length}</strong><Link to="/dispatcher/assignment">จัดตาราง →</Link></article><article><p>งานรับส่งวันนี้</p><strong>{todaysJobs.length}</strong><Link to="/dispatcher/tracking">ดูงานรับส่งทั้งหมด →</Link></article></section>
         <div className="dispatch-dashboard-queues">
           {[
@@ -292,6 +323,7 @@ export function DispatcherPage() {
           </section>)}
         </div>
         <VehicleTimelineView bookings={state.bookings} vehicles={state.vehicles} catalogVehicles={remote.data?.catalog.vehicles} defaultDate={focusDate} onSelectBooking={openDetails} />
+        </>}
       </>}
       {screen === 'assignment' && <><div className="dispatch-assignment-grid"><section className="dispatch-panel dispatch-waiting"><h2>1. เลือกงานที่รอจัดตาราง</h2><p>เลือกงาน แล้วจัดรถและคนขับ</p><div className="dispatch-waiting-list">{pagedWaiting.map(b => <article key={b.id} className={selected?.id === b.id ? 'selected' : ''}><button type="button" aria-pressed={selected?.id === b.id} onClick={() => { setError(''); setParams({ booking: b.id }) }}><div className="dispatch-job-card-heading"><strong>{b.id}</strong><span>{selected?.id === b.id ? '✓ เลือกแล้ว' : 'เลือกงานนี้ →'}</span></div><span className="dispatch-job-patient">{b.patientName}</span><b>{dispatchDate(b.appointmentAt)} · นัด {dispatchTime(b.appointmentAt)} น.</b><span>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</span>{renderDecisionBadges(b)}<span className="dispatch-status approved">รอจัดตาราง</span></button><button type="button" className="dispatch-details-link" onClick={() => openDetails(b)}>ดูรายละเอียด</button></article>)}</div><PaginationControls totalItems={waiting.length} pageSize={DISPATCHER_PAGE_SIZE} page={waitingPage} onPageChange={setWaitingPage} label="แบ่งหน้างานที่รอจัดตาราง" />{!waiting.length && <p className="dispatch-empty">ไม่มีงานรอจัดตาราง กรุณาอนุมัติคำขอจากแดชบอร์ดก่อน</p>}<p className="dispatch-small">แสดงเฉพาะงานที่ยังไม่ได้จัดรถ</p></section>{selected ? <ApiDispatchAssignment key={`${selected.id}:${selected.revision}`} booking={remote.data!.rows.find(row => row.id === selected.id)!} catalog={remote.data!.catalog} previousJobs={remote.data!.rows} reload={remote.reload} onAssigned={() => { remote.reload(); setNotice(`มอบหมายงาน ${selected.id} แล้ว`); navigate('/dispatcher/tracking') }} /> : <section className="dispatch-panel dispatch-empty"><h2>{selectedId ? 'ไม่พบงานที่รอจัดตารางนี้' : 'เลือกงานที่รอจัดตาราง'}</h2><p>งานอาจถูกมอบหมายแล้ว หรือยังไม่ได้รับอนุมัติ</p><Link to="/dispatcher">กลับแดชบอร์ด</Link></section>}</div><VehicleTimelineView bookings={state.bookings} vehicles={state.vehicles} catalogVehicles={remote.data?.catalog.vehicles} defaultDate={selected ? bangkokDateFromMs(Date.parse(selected.appointmentAt)) : focusDate} onSelectBooking={openDetails} /></>}
       {screen === 'tracking' && <>{remote.data && <ResourceReadiness key={remote.data.rows.map(row => row.revision).join(':') + remote.data.catalog.vehicles.filter(v => v.held).length + ':' + remote.data.catalog.drivers.filter(d => d.held).length} catalog={remote.data.catalog} onSaved={() => { remote.reload(); setNotice('ยืนยันความพร้อมทรัพยากรแล้ว') }} />}

@@ -117,7 +117,7 @@ export function useDispatcherData(bookingId?: string) {
       })
     }).catch(error => { if (active) { setData(null); setError(dispatcherError(error)) } }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [session.user?.id, version, bookingId, pages, overlay.active, overlay.importedAt, overlay.bookings])
+  }, [session.user?.id, version, bookingId, pages, overlay.active, overlay.importedAt, overlay.bookings, overlay.vehicles, overlay.drivers])
   return { data, error, loading, hasMore, loadMore: () => { if (!loading) { setLoading(true); setError(''); setPages(p => p + 1) } }, reload: () => { setLoading(true); setError(''); setVersion(v => v + 1) } }
 }
 export function bookingCommand(row: Booking, command: Record<string, unknown>) {
