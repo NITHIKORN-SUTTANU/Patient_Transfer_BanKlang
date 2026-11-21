@@ -39,6 +39,27 @@ export function validatePatient(d: BookingDetails, now = Date.now()) {
   if (d.date && d.time && !meetsLeadTime(d.date, d.time, now)) errors.time = 'กรุณาจองล่วงหน้าอย่างน้อย 48 ชั่วโมง'
   return errors
 }
+const GENERIC_PICKUP_LABELS = new Set(['จุดรับที่เลือกบนแผนที่', 'จุดรับที่ระบุพิกัดเอง'])
+
+function cleanPickupSegment(text?: string | null): string {
+  return (text ?? '')
+    .trim()
+    .replace(/\s*,\s*,+/g, ', ')
+    .replace(/^[\s,·]+|[\s,·]+$/g, '')
+    .replace(/\s+/g, ' ')
+}
+
+export function formatPickupSummary(address?: string | null, label?: string | null): string {
+  const cleanAddr = cleanPickupSegment(address)
+  const cleanLabel = cleanPickupSegment(label)
+  if (cleanAddr && cleanLabel) {
+    if (GENERIC_PICKUP_LABELS.has(cleanLabel) || cleanAddr === cleanLabel || cleanAddr.includes(cleanLabel)) return cleanAddr
+    if (cleanLabel.includes(cleanAddr)) return cleanLabel
+    return `${cleanAddr} · ${cleanLabel}`
+  }
+  return cleanAddr || cleanLabel
+}
+
 export function validatePickup(d: BookingDetails) {
   const errors: Record<string, string> = {}
   if (!Number.isFinite(d.pickup?.latitude) || Math.abs(d.pickup!.latitude!) > 90 || !Number.isFinite(d.pickup?.longitude) || Math.abs(d.pickup!.longitude!) > 180) errors.pickup = 'กรุณาเลือกพิกัดจุดรับบนแผนที่ หรือระบุพิกัดด้วยตนเอง'

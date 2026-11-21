@@ -104,13 +104,21 @@ export const seedOverlay = {
   addBooking: (booking: Booking) => {
     if (!overlayState.active) return
     const next = [...overlayState.bookings.filter(b => b.id !== booking.id), booking]
-    demoStore.importSeedBookings(next, { replace: true, vehicles: overlayState.vehicles, drivers: overlayState.drivers })
+    try {
+      demoStore.importSeedBookings(next, { replace: true, vehicles: overlayState.vehicles, drivers: overlayState.drivers })
+    } catch {
+      // Preserve overlay state even if legacy prototype validator rejects API-shaped details.
+    }
     saveOverlay({ ...overlayState, bookings: next })
   },
   updateBooking: (booking: Booking) => {
     if (!overlayState.active) return
     const next = overlayState.bookings.map(b => b.id === booking.id ? booking : b)
-    demoStore.importSeedBookings(next, { replace: true, vehicles: overlayState.vehicles, drivers: overlayState.drivers })
+    try {
+      demoStore.importSeedBookings(next, { replace: true, vehicles: overlayState.vehicles, drivers: overlayState.drivers })
+    } catch {
+      // Preserve overlay state cleanly.
+    }
     saveOverlay({ ...overlayState, bookings: next })
   },
   setVehicles: (vehicles: Vehicle[]) => {

@@ -135,3 +135,122 @@ test('staff login page offers 1-click demo role entry when backend is not runnin
   await expect(page).toHaveURL(/\/dispatcher$/)
   await expect(page.locator('#dispatcher-main')).toBeVisible()
 })
+
+test('UI/UX polish: DemoRoleBar offset/collapse, Admin layout, bounded lists, citizen review/sort & driver notice', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  // 1. Admin layout alignment, DemoRoleBar non-overlap + collapse/expand, and /admin vs /admin/history focus
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-04"]').click()
+  await expect(page).toHaveURL(/\/admin$/)
+  const demoBar = page.locator('.demo-role-bar')
+  const adminSidebar = page.locator('#admin-sidebar')
+  const adminMain = page.locator('#admin-main')
+
+  const expandedBarBox = (await demoBar.boundingBox())!
+  const expandedSidebarBox = (await adminSidebar.boundingBox())!
+  const expandedMainBox = (await adminMain.boundingBox())!
+  expect(expandedSidebarBox.y).toBeGreaterThanOrEqual(expandedBarBox.y + expandedBarBox.height - 1)
+  expect(expandedSidebarBox.width).toBe(250)
+  expect(expandedMainBox.x).toBeGreaterThanOrEqual(250)
+
+  // Collapse & expand DemoRoleBar
+  await demoBar.getByRole('button', { name: /ย่อแถบ/ }).click()
+  await expect(page.locator('#demo-role-nav')).toBeHidden()
+  const collapsedBarBox = (await demoBar.boundingBox())!
+  expect(collapsedBarBox.height).toBeLessThanOrEqual(expandedBarBox.height)
+  await demoBar.getByRole('button', { name: /ขยายแถบสลับบทบาท/ }).click()
+  await expect(page.locator('#demo-role-nav')).toBeVisible()
+
+  // Load 320 seed rows on /admin, then verify /admin/history avoids duplicating analytics/seed panels
+  await page.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  await expect(page.getByText('ข้อมูลจำลองในระบบ: 320 รายการ')).toBeVisible()
+  await adminSidebar.getByRole('link', { name: 'ประวัติการรับ–ส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/history$/)
+  await expect(page.locator('.admin-analytics-panel')).toHaveCount(0)
+  await expect(page.locator('.admin-seed-panel')).toHaveCount(0)
+  // Collapse Admin sidebar and verify main content realigns cleanly without collision
+  await adminSidebar.getByRole('button', { name: 'ย่อเมนูด้านข้าง', exact: true }).click()
+  expect((await adminSidebar.boundingBox())!.width).toBe(80)
+  expect((await adminMain.boundingBox())!.x).toBe(80)
+
+  // 2. Dispatcher bounded scroll containers with 320 seeded bookings
+  await demoBar.getByRole('button', { name: 'เจ้าหน้าที่จัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  const queueWrapBox = (await page.locator('#dispatch-queue .service-table-wrap').boundingBox())!
+  expect(queueWrapBox.height).toBeLessThanOrEqual(485)
+  const assignQueueBox = (await page.locator('#dispatch-assignment-queue .service-table-wrap').boundingBox())!
+  expect(assignQueueBox.height).toBeLessThanOrEqual(485)
+
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  const waitingListBox = (await page.locator('.dispatch-waiting-list').boundingBox())!
+  expect(waitingListBox.height).toBeLessThanOrEqual(485)
+
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'ติดตามงานรับส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking$/)
+  const monitoringWrapBox = (await page.locator('.dispatch-monitoring .service-table-wrap').boundingBox())!
+  expect(monitoringWrapBox.height).toBeLessThanOrEqual(545)
+
+  // 3. Citizen /booking/review profile update stays checked + clean pickup formatting + newest-first booking sort
+  await demoBar.getByRole('button', { name: 'ผู้ป่วย / จองรถ' }).click()
+  await expect(page).toHaveURL(/\/booking$/)
+  await page.getByRole('button', { name: 'เริ่มจองรถ →' }).click()
+  await page.getByLabel(/รับทราบการใช้ข้อมูล/).check()
+  await page.getByRole('button', { name: 'รับทราบและถัดไป' }).click()
+  await page.getByLabel(/ชื่อผู้ป่วย/).fill('นายทดสอบ จัดเรียงล่าสุด')
+  await page.getByLabel(/เบอร์โทรศัพท์ของคุณ/).fill('0891112233')
+  await page.getByLabel(/โรงพยาบาล/).selectOption('hospital-lamphun')
+  await page.locator('button.booking-input-trigger').first().click()
+  await page.getByRole('button', { name: 'เดือนถัดไป', exact: true }).click()
+  await page.locator('.booking-calendar button:not([disabled])', { hasText: /^\s*(?:[\u0E00-\u0E7F]+\.\s*)?20$/ }).first().click()
+  await page.getByRole('button', { name: 'ยืนยันวันที่', exact: true }).click()
+  await page.locator('button.booking-input-trigger').nth(1).click()
+  await setPickerTime(page, 'ชั่วโมง', '10')
+  await setPickerTime(page, 'นาที', '00')
+  await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
+  await page.getByRole('button', { name: 'ถัดไป →' }).click()
+  await page.getByRole('button', { name: 'เดินได้', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'ไม่ต้องการความช่วยเหลือเพิ่มเติม' }).check()
+  await page.getByLabel(/หมู่บ้านในเขตบริการ/).selectOption('village-01')
+  await page.getByLabel(/ที่อยู่จุดรับ/).fill('82, 13,')
+  await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง').click()
+  await page.getByLabel('ละติจูด').fill('18.5835')
+  await page.getByLabel('ลองจิจูด').fill('99.0422')
+  await page.getByRole('button', { name: 'ถัดไป →' }).click()
+
+  // Pickup summary should strip trailing comma and avoid generic map label
+  await expect(page.locator('.booking-review-section').last()).toContainText('82, 13')
+  await expect(page.locator('.booking-review-section').last()).not.toContainText('82, 13,')
+  await expect(page.locator('.booking-review-section').last()).not.toContainText('จุดรับที่ระบุพิกัดเอง')
+
+  // Save/update profile keeps checkbox checked and shows Thai confirmation
+  const saveCheckbox = page.getByLabel('บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป')
+  await saveCheckbox.check()
+  await page.getByRole('button', { name: 'บันทึกข้อมูลผู้ป่วย' }).click()
+  await expect(saveCheckbox).toBeChecked()
+  await expect(page.locator('.booking-success-notice')).toContainText('✓ บันทึกข้อมูลผู้ป่วยเรียบร้อยแล้ว')
+  await page.getByRole('button', { name: 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' }).click()
+  await expect(saveCheckbox).toBeChecked()
+  await expect(page.locator('.booking-success-notice')).toContainText('✓ อัปเดตข้อมูลผู้ป่วยเรียบร้อยแล้ว')
+
+  // Submit and verify newest booking appears first in รายการจองของฉัน
+  await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ' }).click()
+  await expect(page.getByRole('heading', { name: 'ส่งคำขอแล้ว', exact: true })).toBeVisible()
+  const newBookingRef = (await page.locator('.booking-summary-id').textContent())?.trim() ?? ''
+  expect(newBookingRef.length).toBeGreaterThan(0)
+  await page.getByRole('link', { name: 'กลับหน้าหลัก' }).click()
+  await page.getByRole('button', { name: 'ดูสถานะการจอง' }).click()
+  await expect(page.locator('.booking-summary-id').first()).toHaveText(newBookingRef)
+
+  // 4. Driver toolbar compact refresh button & spacing next to account link
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  const driverRefreshBtn = page.locator('.driver-refresh-button')
+  const driverAccountLink = page.locator('.driver-account-link')
+  const refreshBox = (await driverRefreshBtn.boundingBox())!
+  const accountBox = (await driverAccountLink.boundingBox())!
+  expect(refreshBox.width).toBeLessThan(260)
+  expect(accountBox.x).toBeGreaterThanOrEqual(refreshBox.x + refreshBox.width)
+})

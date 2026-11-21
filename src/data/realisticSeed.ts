@@ -221,7 +221,8 @@ export function generateRealisticSeedBookings(count = 320, anchorDate = '2026-11
     const appointmentAt = new Date(`${apptDayStr}T${slotTime}:00+07:00`).toISOString()
     const appointmentMs = Date.parse(appointmentAt)
     const leadHours = 50 + Math.floor(rand() * 120)
-    const createdAt = new Date(appointmentMs - leadHours * 3600000).toISOString()
+    const latestAllowedCreatedMs = Math.min(anchorMs, Date.now()) - (i + 1) * 60000
+    const createdAt = new Date(Math.min(appointmentMs - leadHours * 3600000, latestAllowedCreatedMs)).toISOString()
 
     // Choose realistic lifecycle status
     let apiStatus: SeedApiStatus

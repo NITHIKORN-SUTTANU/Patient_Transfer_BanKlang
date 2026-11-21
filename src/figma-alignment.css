@@ -272,7 +272,7 @@ body:has(.driver-shell) { background:var(--color-canvas); }
 
 
 /* Persistent role shortcut: outside page stacking contexts and scrolling content. */
-.role-selection-shortcut { position:fixed; top:max(12px,env(safe-area-inset-top)); right:max(12px,env(safe-area-inset-right)); z-index:20; display:grid; place-items:center; width:48px; height:48px; border:1px solid #5b8a7f; border-radius:50%; background:white; color:var(--color-primary); box-shadow:0 2px 10px #132d2c14; }
+.role-selection-shortcut { position:fixed; top:calc(var(--demo-bar-height, 0px) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); z-index:20; display:grid; place-items:center; width:48px; height:48px; border:1px solid #5b8a7f; border-radius:50%; background:white; color:var(--color-primary); box-shadow:0 2px 10px #132d2c14; }
 .role-selection-shortcut svg { width:24px; height:24px; }
 .role-selection-shortcut:hover { background:var(--color-accent); border-color:var(--color-primary); }
 .role-selection-shortcut:active { background:var(--color-accent-strong); }
@@ -304,18 +304,20 @@ body:has(.driver-shell) { background:var(--color-canvas); }
 .admin-sidebar nav a.active:active, .navigation-drawer:has(#admin-navigation) nav a.active:active { background:#c7e4d9; color:var(--color-primary); }
 .admin-sidebar .dispatch-sidebar-toggle:active { background:#ffffff30; }
 @media(min-width:768px) {
- .admin-shell .admin-sidebar { position:fixed; display:flex; flex-direction:column; top:0; left:0; width:250px; height:100dvh; padding:30px 14px; overflow-y:auto; }
- .admin-shell main { margin-left:250px; }
+ .admin-shell { --admin-sidebar-w:250px; }
+ .admin-shell.admin-sidebar-collapsed { --admin-sidebar-w:80px; }
+ .admin-shell .admin-sidebar { position:fixed; display:flex; flex-direction:column; top:var(--demo-bar-height, 0px); left:0; width:var(--admin-sidebar-w, 250px); height:calc(100dvh - var(--demo-bar-height, 0px)); padding:30px 14px; overflow-y:auto; z-index:15; }
+ .admin-shell main { margin-left:var(--admin-sidebar-w, 250px); }
  .admin-sidebar nav.responsive-navigation { margin-top:40px; margin-bottom:24px; }
  .admin-shell.admin-sidebar-collapsed .admin-sidebar { width:80px; padding-inline:16px; }
- .admin-sidebar-collapsed main { margin-left:80px; }
+ .admin-shell.admin-sidebar-collapsed main { margin-left:80px; }
  .admin-sidebar-collapsed .admin-brand, .admin-sidebar-collapsed .responsive-navigation a > span { display:none; }
  .admin-sidebar-collapsed .admin-sidebar .dispatch-sidebar-tools { margin-bottom:0; }
  .admin-sidebar-collapsed .admin-sidebar nav.responsive-navigation { margin-top:24px; }
  .admin-sidebar-collapsed .responsive-navigation a { width:48px; min-height:48px; padding:12px; justify-content:center; }
  .admin-sidebar-collapsed .dispatch-sidebar-toggle { align-self:center; }
  .admin-sidebar a:focus-visible { outline:3px solid #ffdc8d; outline-offset:2px; }
- .dispatch-sidebar { position:sticky; top:0; height:100dvh; overflow-y:auto; }
+ .dispatch-sidebar { position:sticky; top:var(--demo-bar-height, 0px); height:calc(100dvh - var(--demo-bar-height, 0px)); overflow-y:auto; }
  .dispatch-sidebar .dispatch-sidebar-tools { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0; margin-bottom:20px; }
  .dispatch-sidebar > .dispatch-sidebar-tools:first-child { padding-inline:0; margin-inline:0; }
  .dispatch-sidebar-toggle { display:grid; place-items:center; align-self:flex-end; flex-shrink:0; width:48px; min-width:48px; height:48px; margin-top:auto; border:0; border-radius:12px; background:transparent; color:white; }
@@ -380,7 +382,7 @@ body:has(.driver-shell) { background:var(--color-canvas); }
 @media(prefers-reduced-motion:reduce) { .navigation-drawer[open] { animation:none; } }
 @media(min-width:768px) {
  .driver-shell { max-width:none; padding-left:250px; }
- .driver-shell .driver-nav { position:fixed; inset:0 auto 0 0; display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:8px; width:250px; height:100dvh; margin:0; padding:30px 14px; overflow-y:auto; border:0; border-radius:0; background:var(--color-primary); }
+ .driver-shell .driver-nav { position:fixed; top:var(--demo-bar-height, 0px); right:auto; bottom:0; left:0; display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:8px; width:250px; height:calc(100dvh - var(--demo-bar-height, 0px)); margin:0; padding:30px 14px; overflow-y:auto; border:0; border-radius:0; background:var(--color-primary); }
  .driver-shell .driver-nav a { flex-direction:row; justify-content:flex-start; gap:12px; min-height:52px; padding:12px; color:white; }
  .driver-shell .driver-nav a.active { background:#eaf7f3; color:var(--color-primary); }
  .driver-shell .driver-nav a:focus-visible { outline-color:#ffdc8d; }

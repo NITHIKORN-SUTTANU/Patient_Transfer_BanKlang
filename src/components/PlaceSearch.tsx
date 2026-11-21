@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
 type Place = { geometry: { coordinates: [number, number] }; properties: Record<string, string> }
-const placeName = (place: Place) => [...new Set([place.properties.name, place.properties.street, place.properties.city, place.properties.state, place.properties.country].filter(Boolean))].join(' · ') || 'เลือกสถานที่นี้'
+const placeName = (place: Place) => [...new Set([place.properties.name, place.properties.street, place.properties.city, place.properties.state, place.properties.country].map(value => (value ?? '').trim().replace(/^[\s,·]+|[\s,·]+$/g, '')).filter(Boolean))].join(' · ') || 'เลือกสถานที่นี้'
 
 export function PlaceSearch({ latitude, longitude, onSelect }: { latitude: number; longitude: number; onSelect: (latitude: number, longitude: number, label?: string) => void }) {
   const listId = useId()

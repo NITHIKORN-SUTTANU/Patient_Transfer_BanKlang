@@ -75,7 +75,8 @@ export function useDispatcherData(bookingId?: string) {
   useEffect(() => {
     let active = true
     Promise.all([bookingPages<ApiBooking>(staffRequest, '/bookings', pages), staffRequest<Catalog>('/catalog')]).then(async ([result, catalog]) => {
-      if (bookingId && !result.bookings.some(row => row.id === bookingId)) {
+      const inOverlay = Boolean(bookingId && overlay.active && overlay.bookings.some(b => b.id === bookingId))
+      if (bookingId && !inOverlay && !result.bookings.some(row => row.id === bookingId)) {
         const focused = await staffRequest<ApiBooking>(`/bookings/${encodeURIComponent(bookingId)}`)
         if (focused.id !== bookingId) throw new ApiError(404)
         result.bookings.push(focused)
