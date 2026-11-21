@@ -24,7 +24,7 @@ export interface ApiBooking {
 export interface DestinationRevision { version: number; arrivalAt: string; readyAt: string; latenessSeconds: number; appointmentLatenessSeconds: number; originalHospitalName: string; originalArrivalAt: string; recordedAt: string }
 export interface Catalog {
   hospitals: { id: string; name: string; location_id?: string }[];
-  vehicles: { id: string; name: string; plate: string; active: boolean; held: boolean }[];
+  vehicles: { id: string; name: string; plate: string; active: boolean; held: boolean; capabilities?: string[] }[];
   drivers: { id: string; name: string; active: boolean; held: boolean }[];
   locations: { id: string; name: string; kind: string }[]; depotLocationId: string | null;
   configurationRevision?: number;
@@ -92,7 +92,12 @@ export function useDispatcherData(bookingId?: string) {
       const overlayViewBookings = overlay.active && overlay.bookings.length > 0
         ? overlay.bookings.filter(b => !apiIds.has(b.id))
         : []
-      const catalogVehicles = catalog.vehicles.map(v => ({ id: v.id, label: `${v.name} · ${v.plate}`, active: v.active && !v.held }))
+      const catalogVehicles = catalog.vehicles.map(v => ({
+        id: v.id,
+        label: `${v.name} · ${v.plate}`,
+        active: v.active && !v.held,
+        support: v.capabilities?.map(c => c === 'wheelchair' ? 'รถเข็น' : c === 'stretcher' ? 'เปลนอน' : 'เดินได้').join(' / '),
+      }))
       const overlayVehicles = overlay.active
         ? overlay.vehicles.filter(ov => !catalogVehicles.some(cv => cv.id === ov.id)).map(ov => ({ ...ov }))
         : []
