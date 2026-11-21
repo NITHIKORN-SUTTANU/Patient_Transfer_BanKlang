@@ -30,5 +30,16 @@
   .actor-number { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--color-accent-strong); color: var(--color-primary); font-weight: 600; font-size: 20px; }
   .skip-link { position: absolute; left: 16px; top: -100px; z-index: 10; background: white; padding: 16px; border-radius: 14px; }
   .skip-link:focus { top: 16px; }
+  .demo-role-bar { position: sticky; top: 0; z-index: 60; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; background: #0f3e38; color: white; border-bottom: 1px solid #1b5e54; }
+  .demo-role-bar + .admin-shell .admin-sidebar { top: 53px; }
+  @media (max-width: 767px) { .demo-role-bar + .admin-shell .admin-sidebar { top: 0; } }
+  .demo-role-pill-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #fef3c7; color: #78350f; font-size: 12px; font-weight: 700; }
+  .demo-role-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .demo-role-btn { min-height: 36px; min-width: 44px; padding: 6px 12px; border-radius: 10px; border: 1px solid #3f7e74; background: #14534b; color: white; font: inherit; font-size: 13px; font-weight: 600; }
+  .demo-role-btn.active { background: white; color: #0f3e38; border-color: white; font-weight: 700; }
+  .demo-role-btn.ghost { background: transparent; border-color: #6ea79d; color: #e6faf6; }
+  .staff-demo-panel { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-border); display: flex; flex-direction: column; gap: 10px; }
+  .staff-demo-panel h2 { font-size: 18px; font-weight: 700; color: var(--color-primary); margin: 0; }
+  .staff-demo-buttons { display: flex; flex-direction: column; gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }

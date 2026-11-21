@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { apiRequest, ApiError } from './api'
+import { activateInteractiveDemo, isInteractiveDemoActive } from './interactiveDemo'
 import { LineConnectionError } from './lineAuthentication'
 
 export interface CitizenConfig { liffId: string; lineEnabled: boolean; noticeVersion: string; noticeText: string; contactPhone: string }
@@ -50,6 +51,12 @@ export function initializeCitizen(reconnect = false) {
     try {
       const config = await apiRequest<CitizenConfig>('/config')
       publish({ ...state, config })
+      if (isInteractiveDemoActive()) {
+        token = 'demo-token-citizen'
+        const user = await citizenRequest<CitizenIdentity>('/auth/me')
+        publish({ config, user, busy: false, error: '' })
+        return
+      }
       if (!config.lineEnabled || !config.liffId) {
         publish({ ...state, busy: false, error: 'บริการจองผ่าน LINE ยังไม่พร้อม กรุณาติดต่อเทศบาล' }); return
       }
@@ -69,5 +76,12 @@ export function initializeCitizen(reconnect = false) {
     }
   })().finally(() => { initialization = undefined })
   return initialization
+}
+export function enterDemoCitizen() {
+  activateInteractiveDemo('citizen')
+  if (state.user && token === 'demo-token-citizen') return Promise.resolve()
+  token = undefined
+  publish({ ...state, user: null, busy: true, error: '' })
+  return initializeCitizen()
 }
 export function useCitizenSession() { return useSyncExternalStore(subscribe, () => state) }

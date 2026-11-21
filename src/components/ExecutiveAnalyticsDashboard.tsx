@@ -6,7 +6,9 @@ import {
   computeBackwardBlockedWindow,
   normalizeMobilityCode,
 } from '../domain/capacity'
+import { isInteractiveDemoActive } from '../services/interactiveDemo'
 import { seedOverlay, useSeedOverlay } from '../services/seedOverlay'
+import { staffRequest } from '../services/staffSession'
 import { AdminButton } from './AdminForms'
 
 const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
@@ -178,8 +180,14 @@ export function ExecutiveAnalyticsDashboard({
         {!bookings.length && (
           <AdminButton
             onClick={() => {
-              seedOverlay.loadRealisticSeed(320)
-              onLoadedSeed?.()
+              const generated = seedOverlay.loadRealisticSeed(320)
+              if (isInteractiveDemoActive()) {
+                void staffRequest('/admin/seed-import', { bookings: generated, replace: true })
+                  .catch(() => undefined)
+                  .finally(() => onLoadedSeed?.())
+              } else {
+                onLoadedSeed?.()
+              }
             }}
           >
             โหลดข้อมูลจำลอง 320 รายการเพื่อดูแนวโน้ม

@@ -8,7 +8,8 @@ import { DispatcherPage } from './pages/DispatcherPage'
 import { DriverPage } from './pages/DriverPage'
 import { StaffLoginPage } from './pages/StaffLoginPage'
 import { RequireStaff } from './components/RequireStaff'
+import { DemoRoleBar } from './components/DemoRoleBar'
 
 export function App() {
-  return <Routes><Route path="staff/login" element={<StaffLoginPage />} /><Route path="admin/*" element={<RequireStaff role="admin"><AdminPage /></RequireStaff>} /><Route path="driver/*" element={<RequireStaff role="driver"><DriverPage /></RequireStaff>} /><Route path="dispatcher/*" element={<RequireStaff role="dispatcher"><DispatcherPage /></RequireStaff>} /><Route path="booking/*" element={<BookingPage />} /><Route element={<DemoLayout />}><Route index element={<LandingPage />} /><Route path="*" element={<NotFoundPage />} /></Route></Routes>
+  return <><DemoRoleBar /><Routes><Route path="staff/login" element={<StaffLoginPage />} /><Route path="admin/*" element={<RequireStaff role="admin"><AdminPage /></RequireStaff>} /><Route path="driver/*" element={<RequireStaff role="driver"><DriverPage /></RequireStaff>} /><Route path="dispatcher/*" element={<RequireStaff role="dispatcher"><DispatcherPage /></RequireStaff>} /><Route path="booking/*" element={<BookingPage />} /><Route element={<DemoLayout />}><Route index element={<LandingPage />} /><Route path="*" element={<NotFoundPage />} /></Route></Routes></>
 }

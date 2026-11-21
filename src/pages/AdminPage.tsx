@@ -19,6 +19,7 @@ import { BookingModal } from '../components/BookingUI'
 import { useAdminData } from '../services/adminApi'
 import { statusLabels } from '../services/dispatcherApi'
 import { useSeedOverlay } from '../services/seedOverlay'
+import { isInteractiveDemoActive } from '../services/interactiveDemo'
 import type { DemoState, AdminAccount } from '../data/seed'
 import { dispatchDate, dispatchTime } from '../services/dispatch'
 import { driverAvailable } from '../services/resources'
@@ -74,7 +75,7 @@ export function AdminPage() {
   const pagedAuditRows = auditRows.slice((tablePage - 1) * ADMIN_PAGE_SIZE, tablePage * ADMIN_PAGE_SIZE)
   const summaryStatuses = (() => {
     const base = remote.data?.summary.statuses ?? []
-    if (!overlay.active || overlay.bookings.length === 0) return base
+    if (isInteractiveDemoActive() || !overlay.active || overlay.bookings.length === 0) return base
     const counts = new Map<string, number>()
     for (const row of base) counts.set(row.status, row.count)
     for (const b of overlay.bookings) {

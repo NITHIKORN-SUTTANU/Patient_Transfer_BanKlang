@@ -1,12 +1,7 @@
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly field?: string,
-    public readonly code?: string,
-    public readonly serverMessage?: string,
-    public readonly alternativeTimes?: string[],
-  ) { super(`API request failed (${status})`) }
-}
+import { ApiError } from './apiError'
+import { isInteractiveDemoActive } from './interactiveDemo'
+
+export { ApiError }
 
 // Same-origin API; prototype records and browser cookies are never submitted.
 async function request(path: string, options: { token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<Response> {
@@ -29,9 +24,17 @@ async function request(path: string, options: { token?: string; body?: unknown; 
   return response
 }
 export async function apiRequest<T>(path: string, options: { token?: string; body?: unknown } = {}): Promise<T> {
+  if (isInteractiveDemoActive()) {
+    const { handleDemoApiRequest } = await import('./demoApiBackend')
+    return handleDemoApiRequest<T>(path, options)
+  }
   return (await request(path,options)).json() as Promise<T>
 }
 export async function apiDownload(path: string, options: {token: string; body: unknown}): Promise<{blob:Blob;filename:string}> {
+  if (isInteractiveDemoActive()) {
+    const { handleDemoApiDownload } = await import('./demoApiBackend')
+    return handleDemoApiDownload(path, options.body)
+  }
   const response=await request(path,{...options,timeoutMs:60000})
   const filename=/filename="([A-Za-z0-9_.-]+)"/.exec(response.headers.get('content-disposition')??'')?.[1]
   if(!filename)throw new ApiError(502)

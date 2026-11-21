@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { apiRequest, apiDownload, ApiError } from './api'
+import { activateInteractiveDemo } from './interactiveDemo'
 
 export interface StaffIdentity { id: string; role: 'admin' | 'dispatcher' | 'driver'; name: string; driverId: string | null }
 interface Session { user: StaffIdentity | null; busy: boolean; error: string }
@@ -34,6 +35,19 @@ export async function staffDownload(path:string,body:unknown) {
   catch(error){if(error instanceof ApiError&&error.status===401&&token===requestToken)clear(message(error));throw error}
 }
 export const staffSession = {
+  enterDemoRole(role: 'admin' | 'dispatcher' | 'driver') {
+    activateInteractiveDemo(role)
+    token = `demo-token-${role}`
+    const user: StaffIdentity = role === 'admin'
+      ? { id: 'USR-ADM-1', role: 'admin', name: 'ผู้ดูแลระบบ (โหมดสาธิต)', driverId: null }
+      : role === 'driver'
+      ? { id: 'USR-DRV-1', role: 'driver', name: 'นายสมชาย ใจดี (คนขับ A)', driverId: 'demo-driver-A' }
+      : { id: 'USR-DSP-1', role: 'dispatcher', name: 'เจ้าหน้าที่จัดรถ (โหมดสาธิต)', driverId: null }
+    publish({ user, busy: false, error: '' })
+  },
+  clearLocal() {
+    clear()
+  },
   async login(username: string, password: string) {
     if (state.busy || state.user) return
     publish({ user: null, busy: true, error: '' })
