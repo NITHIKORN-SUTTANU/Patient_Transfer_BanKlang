@@ -1,8 +1,14 @@
 import type { BookingDetails } from './booking'
 import { appointmentTimestamp } from './booking'
 import { viewBooking, type ApiBooking, type Catalog } from './dispatcherApi'
+import type { CapacityBookingInput, CapacityVehicleInput } from '../domain/capacity'
 
-export interface CitizenCatalog { hospitals: { id: string; name: string }[]; villages: { id: string; name: string; number: number }[] }
+export interface CitizenCatalog {
+  hospitals: { id: string; name: string }[];
+  villages: { id: string; name: string; number: number }[];
+  vehicles?: CapacityVehicleInput[];
+  activeBookings?: CapacityBookingInput[];
+}
 export interface PatientProfile { id: string; patientName: string; contactPhone: string; mobility: string; villageId: string; pickupAddress: string; latitude: number; longitude: number; assistance: string[]; landmark: string }
 export const extras = ['ต้องการผู้ช่วยพยุงขึ้น-ลงรถ', 'มีผู้ดูแลเดินทางไปด้วย']
 const codes = ['boarding_support', 'caregiver_accompanies']

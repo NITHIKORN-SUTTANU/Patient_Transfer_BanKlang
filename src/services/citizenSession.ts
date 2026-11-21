@@ -14,6 +14,7 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 export function citizenError(error: unknown) {
   if (error instanceof LineConnectionError) return error.message
   if (error instanceof ApiError) {
+    if (error.code === 'CAPACITY_FULL') return error.serverMessage || 'ช่วงเวลาเต็ม / รถไม่ว่าง สำหรับอุปกรณ์หรือเวลานัดหมายนี้ กรุณาเลือกเวลาอื่น'
     if (error.status === 401) return 'เซสชันหมดอายุ กรุณายืนยันตัวตนผ่าน LINE อีกครั้ง'
     if (error.status === 403 || error.status === 404) return 'ไม่มีสิทธิ์เข้าถึงรายการนี้ หรือไม่พบรายการ'
     if (error.status === 409) return 'สถานะเปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดก่อนทำรายการอีกครั้ง'

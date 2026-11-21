@@ -6,13 +6,15 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { BookingTripTimeline } from '../components/BookingTripTimeline'
 import { AppointmentPicker } from '../components/AppointmentPicker'
 import { BookingButton, BookingCard, BookingHeader, BookingIcon, BookingModal, BookingProgress, EmergencyLink } from '../components/BookingUI'
-import { emptyBooking, thaiDate, validatePatient, validatePickup } from '../services/booking'
+import { appointmentTimestamp, emptyBooking, meetsLeadTime, thaiDate, validatePatient, validatePickup } from '../services/booking'
 import type { BookingDetails } from '../services/booking'
 import { statusLabels } from '../services/dispatcherApi'
 import { bookingPages } from '../services/bookingPages'
 import { citizenRequest, citizenError, initializeCitizen, refreshCitizenConfig, useCitizenSession } from '../services/citizenSession'
 import { ApiError } from '../services/api'
 import { applyProfile, canCitizenCancel, citizenBooking, intakeFields, profileFields, type CitizenBooking, type CitizenCatalog, type PatientProfile } from '../services/citizenApi'
+import { checkCitizenSlotCapacity, type CapacityBookingInput, type CapacityCheckResult } from '../domain/capacity'
+import { seedOverlay, useSeedOverlay } from '../services/seedOverlay'
 import '../booking.css'
 
 const initialBookingForm = (): BookingDetails => ({ ...emptyBooking(), pickupAddress: '', villageId: '', landmark: '' })
@@ -22,8 +24,10 @@ export function BookingPage() {
   const path = pathname.replace(/^\/booking\/?/, '').split('/')
   const screen = path[0]
   const session = useCitizenSession()
+  const overlay = useSeedOverlay()
   const [catalog, setCatalog] = useState<CitizenCatalog>({ hospitals: [], villages: [] })
   const [rows, setRows] = useState<CitizenBooking[]>([])
+  const [capacitySuggestionTimes, setCapacitySuggestionTimes] = useState<string[]>([])
   const [profiles, setProfiles] = useState<PatientProfile[]>([])
   const [loadedKey, setLoadedKey] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -66,6 +70,58 @@ export function BookingPage() {
   const citizenCanCancel = () => canCitizenCancel(savedRow)
   const currentConsent = consent?.owner === session.user?.id && consent?.version === session.config?.noticeVersion ? consent : null
   const previousOwner = useRef<string | null>(null)
+  const hasFleetCatalog = catalog.vehicles !== undefined || overlay.active
+  const effectiveVehicles = catalog.vehicles !== undefined ? catalog.vehicles : overlay.vehicles
+  const effectiveHospitalName = catalog.hospitals.find(h => h.id === draft.hospital)?.name
+  const effectiveBookings: CapacityBookingInput[] = (() => {
+    const byId = new Map<string, CapacityBookingInput>()
+    for (const b of catalog.activeBookings ?? []) {
+      if (b.id) byId.set(b.id, b)
+    }
+    for (const b of overlay.active ? overlay.bookings : []) {
+      byId.set(b.id, {
+        id: b.id,
+        appointmentAt: b.appointmentAt,
+        status: b.apiStatus || b.status,
+        mobility: b.details?.assistance,
+        hospitalName: b.details?.hospital,
+        vehicleId: b.vehicleId,
+        schedule: b.schedule,
+      })
+    }
+    for (const r of rows) {
+      byId.set(r.id, {
+        id: r.id,
+        appointmentAt: r.appointmentAt,
+        status: r.status,
+        hospitalId: r.hospitalId,
+        hospitalName: r.hospitalName,
+        mobility: r.mobility,
+        vehicleId: r.vehicleId,
+        schedule: r.schedule,
+      })
+    }
+    return Array.from(byId.values())
+  })()
+  const validClockSelection = Boolean(
+    draft.date &&
+    draft.time &&
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.date) &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(draft.time) &&
+    draft.time >= '06:20' &&
+    draft.time <= '15:50' &&
+    meetsLeadTime(draft.date, draft.time),
+  )
+  const slotCapacity: CapacityCheckResult | null = hasFleetCatalog && validClockSelection
+    ? checkCitizenSlotCapacity({
+        appointmentAt: new Date(appointmentTimestamp(draft.date, draft.time)).toISOString(),
+        hospitalId: draft.hospital,
+        hospitalName: effectiveHospitalName,
+        mobility: draft.assistance || 'เดินได้',
+        vehicles: effectiveVehicles,
+        existingBookings: effectiveBookings,
+      })
+    : null
   useEffect(() => { void initializeCitizen() }, [])
   useEffect(() => {
     if (!session.user) return
@@ -137,11 +193,13 @@ export function BookingPage() {
   function patientNext() {
     const next = validatePatient(draft)
     if (Object.keys(next).length) showErrors(next)
+    else if (slotCapacity && !slotCapacity.available) showErrors({ time: slotCapacity.message })
     else go('assistance')
   }
   function assistanceNext() {
     const next = validatePickup(draft)
     if (Object.keys(next).length) { showErrors(next); return }
+    if (slotCapacity && !slotCapacity.available) { showErrors({ assistance: slotCapacity.message }); return }
     go('review')
   }
   async function submit() {
@@ -153,10 +211,16 @@ export function BookingPage() {
       if (!currentConsent) { go('privacy'); return }
       const pickupErrors = validatePickup(draft)
       if (Object.keys(pickupErrors).length) { go('assistance'); showErrors(pickupErrors); return }
+      if (slotCapacity && !slotCapacity.available) {
+        setSaveError(slotCapacity.message)
+        setCapacitySuggestionTimes(slotCapacity.alternativeTimes)
+        return
+      }
     }
     sendingRef.current = true
     setSending(true)
     setSaveError('')
+    setCapacitySuggestionTimes([])
     // Yield a paint so the reference's submitting state is announced before the local save.
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
     try {
@@ -178,12 +242,18 @@ export function BookingPage() {
       const booking = await citizenRequest<CitizenBooking>('/bookings', pendingIntake.current)
       pendingIntake.current = null; setIntakeUncertain(false)
       setRows(current => [...current.filter(row => row.id !== booking.id), booking])
+      if (overlay.active) {
+        seedOverlay.addBooking(citizenBooking(booking, catalog))
+      }
       submittedId.current = booking.id
       go(`submitted/${booking.id}`)
     } catch (error) {
       if (error instanceof ApiError && [400,403,404,409,415,422].includes(error.status)) pendingIntake.current = null
       setIntakeUncertain(!!pendingIntake.current)
       setSaveError(citizenError(error))
+      if (error instanceof ApiError && error.code === 'CAPACITY_FULL') {
+        setCapacitySuggestionTimes(error.alternativeTimes ?? slotCapacity?.alternativeTimes ?? [])
+      }
       if (error instanceof ApiError && error.field === 'consentId') {
         setConsent(null); update('acknowledged', false); setConsentError('กรุณาอ่านประกาศและบันทึกการตัดสินใจล่าสุดอีกครั้ง')
         await refreshCitizenConfig().catch(() => undefined)
@@ -285,12 +355,14 @@ export function BookingPage() {
       {draft.bookingFor === 'other' && selection('relationship', 'ความสัมพันธ์กับผู้ป่วย', 'เลือกความสัมพันธ์ เช่น บุตร / ญาติ / ผู้ดูแล', ['บุตร', 'ญาติ', 'ผู้ดูแล'])}
       <div className="booking-field"><label htmlFor="hospital">โรงพยาบาล *</label><select id="hospital" value={draft.hospital} required aria-invalid={!!errors.hospital} onChange={event => update('hospital', event.target.value)}><option value="">เลือกโรงพยาบาล</option>{catalog.hospitals.map(hospital => <option key={hospital.id} value={hospital.id}>{hospital.name}</option>)}</select>{error('hospital')}</div>
       {(['date', 'time'] as const).map(kind => <div className="booking-field" key={kind}><label id={`${kind}-label`}>{kind === 'date' ? 'วันนัดหมาย' : 'เวลานัดหมาย'} *</label><button type="button" className="booking-input-trigger" aria-labelledby={`${kind}-label ${kind}-value`} aria-haspopup="dialog" aria-invalid={!!errors[kind]} aria-describedby={errors[kind] ? `${kind}-error` : undefined} onClick={() => setPicker(kind)}><span id={`${kind}-value`}>{kind === 'date' ? draft.date ? thaiDate(draft.date, true) : '📅 เลือกวันนัดหมาย' : draft.time ? `${draft.time} น.` : '◷ เลือกชั่วโมงและนาที'}</span><span aria-hidden="true">›</span></button>{error(kind)}</div>)}
+      {slotCapacity && !slotCapacity.available && <div className="booking-capacity-alert" role="alert"><strong>ช่วงเวลาเต็ม / รถไม่ว่าง</strong><p>{slotCapacity.message}</p><p className="booking-capacity-window">ช่วงเวลาทำงานของรถที่คำนวณ: {slotCapacity.window.windowLabel} (เวลารับประมาณ {slotCapacity.window.pickupClock} น.)</p>{slotCapacity.alternativeTimes.length > 0 && <div className="booking-capacity-suggestions"><span>เลือกเวลานัดอื่นที่ว่าง:</span><div className="booking-capacity-alt-buttons">{slotCapacity.alternativeTimes.map(timeSlot => <button type="button" key={timeSlot} className="booking-capacity-alt-btn" onClick={() => { update('time', timeSlot); setSaveError(''); setCapacitySuggestionTimes([]) }}>เลือกเวลา {timeSlot} น.</button>)}</div></div>}</div>}
       <p className="booking-notice">จองล่วงหน้า 2 วัน (48 ชั่วโมง)</p><BookingButton type="submit">ถัดไป →</BookingButton>
     </form><BookingButton secondary onClick={() => go('privacy')}>ย้อนกลับ</BookingButton>
   </>
   else if (screen === 'assistance') content = <>
     <BookingHeader title="การช่วยเหลือและจุดรับ" subtitle="ผู้ป่วยเดินทางแบบไหน?" /><BookingProgress step={2} /><h2 className="booking-section-title">การช่วยเหลือ</h2>
     <div className="booking-assistance" role="group" aria-label="การช่วยเหลือ" tabIndex={errors.assistance ? -1 : undefined} aria-invalid={!!errors.assistance} aria-describedby={errors.assistance ? 'assistance-error' : undefined}>{(['เดินได้', 'รถเข็น', 'เปลนอน'] as const).map((label, i) => <button type="button" key={label} aria-pressed={draft.assistance === label} onClick={() => update('assistance', label)}><BookingIcon name={(['walk', 'wheel', 'bed'] as const)[i]} />{label}</button>)}</div>{error('assistance')}
+    {slotCapacity && !slotCapacity.available && <div className="booking-capacity-alert" role="alert"><strong>ช่วงเวลาเต็ม / รถไม่ว่าง</strong><p>{slotCapacity.message}</p><p className="booking-capacity-window">ช่วงเวลาทำงานของรถที่คำนวณ: {slotCapacity.window.windowLabel}</p><div className="booking-capacity-suggestions">{slotCapacity.alternativeTimes.length > 0 && <div className="booking-capacity-alt-buttons">{slotCapacity.alternativeTimes.map(timeSlot => <button type="button" key={timeSlot} className="booking-capacity-alt-btn" onClick={() => { update('time', timeSlot); setSaveError(''); setCapacitySuggestionTimes([]) }}>เลือกเวลา {timeSlot} น.</button>)}</div>}<button type="button" className="booking-capacity-alt-btn secondary" onClick={() => go('patient')}>เปลี่ยนวัน/เวลานัดหมาย</button></div></div>}
     <h2 className="booking-section-title">ต้องการให้ช่วยอะไรอีก?</h2>
     <div className="booking-extras" role="group" aria-label="ความช่วยเหลือเพิ่มเติม" tabIndex={errors.extras ? -1 : undefined} aria-invalid={!!errors.extras} aria-describedby={errors.extras ? 'extras-error' : undefined}><label className="booking-checkbox"><input type="checkbox" checked={draft.extras.length === 0} onChange={() => update('extras', [])} />ไม่ต้องการความช่วยเหลือเพิ่มเติม</label>{['ต้องการผู้ช่วยพยุงขึ้น-ลงรถ', 'มีผู้ดูแลเดินทางไปด้วย'].map(label => <label className="booking-checkbox" key={label}><input type="checkbox" checked={draft.extras.includes(label)} onChange={e => update('extras', e.target.checked ? [...draft.extras, label] : draft.extras.filter(x => x !== label))} />{label}</label>)}</div>{error('extras')}
     <h2 className="booking-section-title">จุดรับผู้ป่วย</h2>
@@ -326,7 +398,8 @@ export function BookingPage() {
     <label className="booking-checkbox"><input type="checkbox" checked={saveProfile} onChange={event => setSaveProfile(event.target.checked)} />บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป</label>
     {saveProfile && <BookingButton secondary disabled={profileBusy} onClick={() => void persistProfile()}>{profileBusy ? 'กำลังบันทึก…' : draft.patientProfileId ? 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' : 'บันทึกข้อมูลผู้ป่วย'}</BookingButton>}
     {profileError && <p role="alert" className="booking-error-box">{profileError}</p>}
-    {saveError && <><p role="alert" className="booking-error-box">{saveError}</p><BookingButton secondary onClick={() => go('bookings')}>ตรวจสอบรายการจองล่าสุดก่อนส่งซ้ำ</BookingButton></>}
+    {slotCapacity && !slotCapacity.available && !saveError && <div className="booking-capacity-alert" role="alert"><strong>ช่วงเวลาเต็ม / รถไม่ว่าง</strong><p>{slotCapacity.message}</p>{slotCapacity.alternativeTimes.length > 0 && <div className="booking-capacity-alt-buttons">{slotCapacity.alternativeTimes.map(timeSlot => <button type="button" key={timeSlot} className="booking-capacity-alt-btn" onClick={() => { update('time', timeSlot); setSaveError(''); setCapacitySuggestionTimes([]) }}>เลือกเวลา {timeSlot} น.</button>)}</div>}</div>}
+    {saveError && <><div role="alert" className="booking-error-box"><p>{saveError}</p>{capacitySuggestionTimes.length > 0 && <div className="booking-capacity-alt-buttons">{capacitySuggestionTimes.map(timeSlot => <button type="button" key={timeSlot} className="booking-capacity-alt-btn" onClick={() => { update('time', timeSlot); setSaveError(''); setCapacitySuggestionTimes([]) }}>เปลี่ยนเป็นเวลา {timeSlot} น.</button>)}</div>}</div><BookingButton secondary onClick={() => go('bookings')}>ตรวจสอบรายการจองล่าสุดก่อนส่งซ้ำ</BookingButton></>}
     {intakeUncertain && <p role="status" className="booking-small">กำลังตรวจสอบคำขอก่อนหน้า การลองอีกครั้งจะใช้คำขอเดิมเพื่อป้องกันรายการซ้ำ</p>}
     <BookingButton disabled={profileBusy} onClick={() => void submit()}>{saveError ? 'ลองส่งคำขออีกครั้ง' : 'ยืนยันและส่งคำขอ'}</BookingButton><BookingButton secondary disabled={profileBusy || intakeUncertain} onClick={() => go('assistance')}>ย้อนกลับ</BookingButton>
   </>

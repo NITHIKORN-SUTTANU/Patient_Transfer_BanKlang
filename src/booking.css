@@ -141,3 +141,10 @@
 @media (min-width: 600px) { .booking-shell { padding-block: 24px; background: #eaf1ee; } .booking-screen { background: var(--color-canvas); border-radius: 22px; box-shadow: 0 6px 30px #132d2c0a; } .booking-modal { bottom: 24px; } }
 @media (max-width: 359px) { .booking-screen { padding: 18px; } .booking-card { gap: 10px; padding: 12px; } .booking-icon-tile { padding: 8px; } .booking-modal-inner { padding-inline: 14px; } }
 .booking-location-button.booking-button[aria-pressed=true] { background: #eaf7f3; color: #14543d; border: 2px solid #176448; }
+.booking-capacity-alert { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1.5px solid #d9827e; border-radius: 14px; background: #fff1f0; color: #7a1714; font-size: 15px; line-height: 1.5; }
+.booking-capacity-alert strong { font-size: 16px; }
+.booking-capacity-window { font-size: 14px; font-weight: 600; color: #5b1815; }
+.booking-capacity-suggestions { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.booking-capacity-alt-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.booking-capacity-alt-btn { min-height: 44px; min-width: 44px; padding: 8px 14px; border: 1.5px solid #165a43; border-radius: 10px; background: white; color: #124936; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.booking-capacity-alt-btn.secondary { border-color: #7a1714; color: #7a1714; }
