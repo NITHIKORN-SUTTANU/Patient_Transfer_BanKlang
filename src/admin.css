@@ -122,3 +122,19 @@
   .admin-form-grid, .admin-form-actions { gap: 12px; }
 }
 @media (max-width: 374px) { .admin-filters, .admin-form-grid { grid-template-columns: minmax(0, 1fr); } .admin-metrics { grid-template-columns: minmax(0, 1fr); } .admin-metrics article { min-height: auto; display: flex; justify-content: space-between; gap: 12px; align-items: center; } .admin-metrics strong { margin-top: 0; } .admin-form-actions { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
+
+/* Phase 1: Seed Import, Reset Utility & Pagination */
+.admin-seed-panel { margin-top: 24px; }
+.admin-seed-count-badge { display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 999px; background: #eaf7f3; border: 1px solid #b5d6cb; color: #0f4739; font-weight: 700; font-size: 14px; max-width: 100%; }
+.admin-seed-actions { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.admin-seed-upload-wrap input[type="file"] { width: 100%; max-width: 100%; min-height: 44px; padding: 10px 12px; border: 1px dashed #82b3a3; border-radius: 12px; background: #f4fbf8; color: var(--color-ink); font: inherit; font-size: 14px; box-sizing: border-box; cursor: pointer; }
+.admin-seed-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.admin-seed-reset-btn { color: #8c1d18; border-color: #d9827e; background: #fff5f5; }
+.admin-seed-reset-btn:hover:not(:disabled) { background: #fde8e7; }
+.admin-seed-preview-wrap { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e1ece8; display: flex; flex-direction: column; gap: 12px; }
+.admin-seed-preview-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.service-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e3ece9; }
+.service-pagination-summary { font-size: 14px; color: #365248; font-weight: 600; }
+.service-pagination-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.service-pagination-btn { min-height: 44px; min-width: 44px; padding: 8px 14px; font-size: 14px; }
+@media (max-width: 600px) { .admin-seed-buttons > * { width: 100%; } }

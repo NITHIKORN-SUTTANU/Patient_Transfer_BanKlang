@@ -3,6 +3,8 @@ import { createSeedState, type Booking, type DemoState } from '../data/seed'
 import { ApiError } from './api'
 import { staffRequest, useStaffSession } from './staffSession'
 import { bookingPages } from './bookingPages'
+import { bookingToApiBooking } from '../utils/seedCsvImport'
+import { useSeedOverlay } from './seedOverlay'
 
 export interface Schedule { departureAt: string; pickupAt: string; arrivalAt: string; readyAt: string; pickupWaitingMinutes: number; originLocationId: string; originKind: string; previousBookingId?: string }
 export interface ApiBooking {
@@ -63,6 +65,7 @@ export function viewBooking(row: ApiBooking, catalog: Catalog): Booking {
 }
 export function useDispatcherData(bookingId?: string) {
   const session = useStaffSession()
+  const overlay = useSeedOverlay()
   const [data, setData] = useState<{ state: DemoState; catalog: Catalog; rows: ApiBooking[] } | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -79,12 +82,37 @@ export function useDispatcherData(bookingId?: string) {
       }
       if (!active) return
       setHasMore(result.hasMore)
-      setData({ catalog, rows: result.bookings, state: { ...createSeedState(), bookings: result.bookings.map(row => viewBooking(row, catalog)),
-        vehicles: catalog.vehicles.map(v => ({ id: v.id, label: `${v.name} · ${v.plate}`, active: v.active && !v.held })),
-        drivers: catalog.drivers.map(d => ({ id: d.id, name: d.name, active: d.active && !d.held })) } })
+      const apiRows = result.bookings
+      const apiIds = new Set(apiRows.map(r => r.id))
+      const overlayRows = overlay.active && overlay.bookings.length > 0
+        ? overlay.bookings.filter(b => !apiIds.has(b.id)).map(b => bookingToApiBooking(b))
+        : []
+      const mergedRows = [...apiRows, ...overlayRows]
+      const apiViewBookings = apiRows.map(row => viewBooking(row, catalog))
+      const overlayViewBookings = overlay.active && overlay.bookings.length > 0
+        ? overlay.bookings.filter(b => !apiIds.has(b.id))
+        : []
+      const catalogVehicles = catalog.vehicles.map(v => ({ id: v.id, label: `${v.name} · ${v.plate}`, active: v.active && !v.held }))
+      const overlayVehicles = overlay.active
+        ? overlay.vehicles.filter(ov => !catalogVehicles.some(cv => cv.id === ov.id)).map(ov => ({ ...ov }))
+        : []
+      const catalogDrivers = catalog.drivers.map(d => ({ id: d.id, name: d.name, active: d.active && !d.held }))
+      const overlayDrivers = overlay.active
+        ? overlay.drivers.filter(od => !catalogDrivers.some(cd => cd.id === od.id)).map(od => ({ ...od }))
+        : []
+      setData({
+        catalog,
+        rows: mergedRows,
+        state: {
+          ...createSeedState(),
+          bookings: [...apiViewBookings, ...overlayViewBookings],
+          vehicles: [...catalogVehicles, ...overlayVehicles],
+          drivers: [...catalogDrivers, ...overlayDrivers],
+        },
+      })
     }).catch(error => { if (active) { setData(null); setError(dispatcherError(error)) } }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [session.user?.id, version, bookingId, pages])
+  }, [session.user?.id, version, bookingId, pages, overlay.active, overlay.importedAt, overlay.bookings])
   return { data, error, loading, hasMore, loadMore: () => { if (!loading) { setLoading(true); setError(''); setPages(p => p + 1) } }, reload: () => { setLoading(true); setError(''); setVersion(v => v + 1) } }
 }
 export function bookingCommand(row: Booking, command: Record<string, unknown>) {

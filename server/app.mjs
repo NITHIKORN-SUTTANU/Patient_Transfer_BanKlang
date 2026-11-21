@@ -19,16 +19,17 @@ import {dailyManifest,manifestRequest,auditManifest} from './daily-manifest.mjs'
 import {manifestFile} from './manifest-files.mjs'
 import {monthlyRequest,monthlyReport,monthlyFile,auditMonthlyReport} from './monthly-report.mjs'
 import {dispatchReview,saveVerification} from './dispatch-review.mjs'
-import {checkCapacity} from './capacity-evidence.mjs'
+import { checkCapacity } from './capacity-evidence.mjs'
 import { bookingList } from './booking-lists.mjs'
+import { importSeedBookings, resetSeedBookings, adminAnalytics } from './seed-admin.mjs'
 
-async function jsonBody(request) {
+async function jsonBody(request, maxBytes = 32768) {
   check(request.headers['content-type']?.split(';')[0]==='application/json',415,'Content-Type application/json required')
   let size=0
   const chunks=[]
   for await(const chunk of request) {
     size+=chunk.length
-    check(size<=32768,413,'Request body too large')
+    check(size<=maxBytes,413,'Request body too large')
     chunks.push(chunk)
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) }
@@ -126,7 +127,7 @@ export function createApi({pool,clock=()=>new Date().toISOString(),route=osrmRou
         })
         attempts.delete(key);send(200,{token,expiresInSeconds:28800});return
       }
-      const body=request.method==='POST'?await jsonBody(request):undefined
+      const body=request.method==='POST'?await jsonBody(request, path==='/api/admin/seed-import'?2097152:32768):undefined
       if(request.method==='POST'&&(path==='/api/reports/daily'||path==='/api/reports/monthly')) {
         const monthly=path==='/api/reports/monthly'
         const permitted=user=>monthly?['admin','dispatcher'].includes(user.role):user.role==='dispatcher'
@@ -178,6 +179,8 @@ export function createApi({pool,clock=()=>new Date().toISOString(),route=osrmRou
           if(path==='/api/profiles') return saveProfile(client,user,body,now,noticeVersion)
           const profileMatch=path.match(/^\/api\/profiles\/([^/]+)$/)
           if(profileMatch) return saveProfile(client,user,body,now,noticeVersion,profileMatch[1])
+          if(path==='/api/admin/seed-import') return importSeedBookings(client,user,body,now)
+          if(path==='/api/admin/seed-reset') return resetSeedBookings(client,user,body,now)
           if(path==='/api/admin/closures') return saveClosure(client,user,body,now)
           if(path==='/api/admin/depot') return saveDepot(client,user,body,now)
           const hospitalMatch=path.match(/^\/api\/admin\/hospitals(?:\/([^/]+))?$/)
@@ -265,6 +268,7 @@ export function createApi({pool,clock=()=>new Date().toISOString(),route=osrmRou
         if(request.method==='GET'&&path==='/api/catalog') {send(200,await catalog(client,user));return}
         if(request.method==='GET'&&path==='/api/admin/accounts') {send(200,await adminAccounts(client,user));return}
         if(request.method==='GET'&&path==='/api/admin/summary') {send(200,await adminSummary(client,user));return}
+        if(request.method==='GET'&&path==='/api/admin/analytics') {send(200,await adminAnalytics(client,user));return}
         if(request.method==='GET'&&path==='/api/admin/availability') {send(200,await listWindows(client,user));return}
         if(request.method==='GET'&&path==='/api/admin/service-data') {send(200,await serviceData(client,user));return}
         if(request.method==='GET'&&path==='/api/profiles') {send(200,await listProfiles(client,user));return}

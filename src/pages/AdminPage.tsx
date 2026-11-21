@@ -11,10 +11,13 @@ import { AdminServiceSettings } from '../components/AdminServiceSettings'
 import { NotificationFailures } from '../components/NotificationFailures'
 import { MonthlyReportExport } from '../components/MonthlyReportExport'
 import { AdminAvailability } from '../components/AdminAvailability'
+import { AdminSeedDataUtility } from '../components/AdminSeedDataUtility'
+import { PaginationControls } from '../components/PaginationControls'
 import type { AdminEditor } from '../components/AdminForms'
 import { BookingModal } from '../components/BookingUI'
 import { useAdminData } from '../services/adminApi'
 import { statusLabels } from '../services/dispatcherApi'
+import { useSeedOverlay } from '../services/seedOverlay'
 import type { DemoState, AdminAccount } from '../data/seed'
 import { dispatchDate, dispatchTime } from '../services/dispatch'
 import { driverAvailable } from '../services/resources'
@@ -48,8 +51,11 @@ export function AdminPage() {
   const [auditId, setAuditId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const overlay = useSeedOverlay()
+  const [tablePage, setTablePage] = useState(1)
   const main = useRef<HTMLElement>(null)
   useEffect(() => { window.scrollTo(0, 0); main.current?.querySelector('h1')?.focus() }, [pathname])
+  useEffect(() => { setTablePage(1) }, [pathname, search, status, role, category])
   const accounts = state.accounts || []
   const events = state.auditEvents || []
   const matches = (...values: (string | undefined)[]) => values.join(' ').toLowerCase().includes(search.trim().toLowerCase())
@@ -58,6 +64,29 @@ export function AdminPage() {
   const vehicleRows = state.vehicles.filter(v => matches(v.id, v.label, v.vehicleType, v.support) && statusMatch(v.active))
   const driverRows = state.drivers.filter(d => matches(d.id, d.name, d.phone) && statusMatch(driverAvailable(state, d)))
   const auditRows = events.filter(e => matches(e.recordId, e.action, e.actor, e.reason) && (!category || category === e.category))
+  const ADMIN_PAGE_SIZE = 50
+  const pagedAccountRows = accountRows.slice((tablePage - 1) * ADMIN_PAGE_SIZE, tablePage * ADMIN_PAGE_SIZE)
+  const pagedVehicleRows = vehicleRows.slice((tablePage - 1) * ADMIN_PAGE_SIZE, tablePage * ADMIN_PAGE_SIZE)
+  const pagedDriverRows = driverRows.slice((tablePage - 1) * ADMIN_PAGE_SIZE, tablePage * ADMIN_PAGE_SIZE)
+  const pagedAuditRows = auditRows.slice((tablePage - 1) * ADMIN_PAGE_SIZE, tablePage * ADMIN_PAGE_SIZE)
+  const summaryStatuses = (() => {
+    const base = remote.data?.summary.statuses ?? []
+    if (!overlay.active || overlay.bookings.length === 0) return base
+    const counts = new Map<string, number>()
+    for (const row of base) counts.set(row.status, row.count)
+    for (const b of overlay.bookings) {
+      const code = b.apiStatus || (
+        b.status === 'pending' ? 'REQUESTED'
+        : b.status === 'completed' ? 'COMPLETED'
+        : b.status === 'cancelled' ? 'CANCELLED'
+        : b.status === 'rejected' ? 'REJECTED'
+        : b.status === 'in_transit' ? 'IN_TRANSIT'
+        : b.schedule ? 'ASSIGNED' : 'APPROVED'
+      )
+      counts.set(code, (counts.get(code) ?? 0) + 1)
+    }
+    return Array.from(counts.entries()).map(([status, count]) => ({ status, count }))
+  })()
   const selectedEvent = events.find(e => e.id === auditId)
   function openEditor(value: AdminEditor) {
     if (value.category === 'settings') { setNotice('ข้อมูลส่วนนี้อ่านได้เท่านั้น การแก้ไขจะเชื่อมต่อในขั้นถัดไป'); return }
@@ -81,20 +110,21 @@ export function AdminPage() {
       {screen === 'dashboard' && <>
         <Metrics icons={['people', 'vehicle', 'person']} values={[[ 'บัญชีผู้ใช้งาน', accounts.length], ['รถในระบบ', state.vehicles.length], ['คนขับ', state.drivers.length]]} />
         <section className="admin-panel"><h2>งานดูแลระบบ</h2><p className="admin-muted">เลือกหมวดงานที่ต้องการจัดการ</p><Table headings={['หมวด', 'รายละเอียด', 'ดำเนินการ']}>{[['ผู้ใช้งานและสิทธิ์', 'จัดการบัญชีและสิทธิ์', 'จัดการผู้ใช้งาน', 'accounts'], ['รถรับส่ง', 'จัดการข้อมูลและสถานะรถรับส่ง', 'จัดการรถ', 'vehicles'], ['คนขับ', 'จัดการรายชื่อและสถานะคนขับ', 'จัดการคนขับ', 'drivers'], ['ตั้งค่าการให้บริการ', 'ตำแหน่งศูนย์รถและพื้นที่บริการ', 'ดูการตั้งค่า', 'settings'], ['ประวัติการทำรายการ', 'ตรวจสอบกิจกรรมและการเปลี่ยนแปลง', 'ดูประวัติการทำรายการ', 'audit']].map(([label, description, action, path]) => <tr key={path}><th scope="row"><span className="admin-dashboard-category"><span className="admin-dashboard-icon" aria-hidden="true"><ServiceSymbol kind={path === 'accounts' ? 'people' : path === 'vehicles' ? 'vehicle' : path === 'drivers' ? 'person' : path === 'settings' ? 'settings' : 'history'} /></span><span>{label}</span></span></th><td>{description}</td><td><AdminButton secondary onClick={() => go(path)}>{action}</AdminButton></td></tr>)}</Table></section>
-
+        <AdminSeedDataUtility onChanged={remote.reload} />
       </>}
-      {screen === 'accounts' && <><Metrics values={[[ 'บัญชีทั้งหมด', accounts.length], ['ใช้งานอยู่', accounts.filter(a => a.active).length], ['ระงับการใช้งาน', accounts.filter(a => !a.active).length]]} /><section className="admin-panel"><div className="admin-panel-heading"><div><h2>รายชื่อผู้ใช้งาน</h2><p className="admin-muted">ค้นหาบัญชี เลือกดูสิทธิ์ และจัดการสถานะ</p></div><AdminButton onClick={() => openEditor({ category: 'accounts' })}>+ เพิ่มบัญชี</AdminButton></div>{searchFilter()}<Table headings={['รหัส', 'ชื่อ', 'บทบาท', 'สถานะ', 'การดำเนินการ']} empty={!accountRows.length}>{accountRows.map(a => <tr key={a.id}><th scope="row">{a.id}</th><td>{a.name}<small>{a.username}</small></td><td>{accountRoleLabels[a.role]}</td><td><Badge active={a.active} /></td><td><AdminButton secondary onClick={() => openEditor({ category: 'accounts', previous: a })}>จัดการบัญชี</AdminButton></td></tr>)}</Table></section></>}
+      {screen === 'accounts' && <><Metrics values={[[ 'บัญชีทั้งหมด', accounts.length], ['ใช้งานอยู่', accounts.filter(a => a.active).length], ['ระงับการใช้งาน', accounts.filter(a => !a.active).length]]} /><section className="admin-panel"><div className="admin-panel-heading"><div><h2>รายชื่อผู้ใช้งาน</h2><p className="admin-muted">ค้นหาบัญชี เลือกดูสิทธิ์ และจัดการสถานะ</p></div><AdminButton onClick={() => openEditor({ category: 'accounts' })}>+ เพิ่มบัญชี</AdminButton></div>{searchFilter()}<Table headings={['รหัส', 'ชื่อ', 'บทบาท', 'สถานะ', 'การดำเนินการ']} empty={!accountRows.length}>{pagedAccountRows.map(a => <tr key={a.id}><th scope="row">{a.id}</th><td>{a.name}<small>{a.username}</small></td><td>{accountRoleLabels[a.role]}</td><td><Badge active={a.active} /></td><td><AdminButton secondary onClick={() => openEditor({ category: 'accounts', previous: a })}>จัดการบัญชี</AdminButton></td></tr>)}</Table><PaginationControls totalItems={accountRows.length} pageSize={ADMIN_PAGE_SIZE} page={tablePage} onPageChange={setTablePage} label="แบ่งหน้าตารางผู้ใช้งาน" /></section></>}
       {(screen === 'vehicles' || screen === 'drivers') && <>
         {screen === 'vehicles' && <Metrics values={[[ 'รถทั้งหมด', state.vehicles.length], ['เปิดใช้งาน', state.vehicles.filter(v => v.active).length], ['ปิดใช้งาน', state.vehicles.filter(v => !v.active).length]]} />}
         {screen === 'drivers' && <Metrics values={[[ 'คนขับทั้งหมด', state.drivers.length], ['เปิดใช้งาน', state.drivers.filter(d => driverAvailable(state, d)).length], ['ไม่พร้อมใช้งาน', state.drivers.filter(d => !driverAvailable(state, d)).length]]} />}
         <section className="admin-panel"><div className="admin-panel-heading"><div><h2>{screen === 'vehicles' ? 'รายการรถรับส่ง' : 'รายชื่อคนขับ'}</h2><p className="admin-muted">จัดการข้อมูลและสถานะการใช้งาน</p></div><AdminButton onClick={() => openEditor({ category: screen })}>{screen === 'vehicles' ? '+ เพิ่มรถ' : '+ เพิ่มคนขับ'}</AdminButton></div>{searchFilter()}
-          {screen === 'vehicles' ? <Table headings={['รหัส', 'ชื่อ', 'ประเภท / รองรับ', 'สถานะ', 'การดำเนินการ']} empty={!vehicleRows.length}>{vehicleRows.map(v => <tr key={v.id}><th scope="row">{v.id}</th><td>{v.label}</td><td>{v.vehicleType || 'ไม่ได้ระบุ'}<small>{v.support}</small></td><td><Badge active={v.active} yes="เปิดใช้งาน" no="ปิดใช้งาน" /></td><td><AdminButton secondary onClick={() => openEditor({ category: 'vehicles', previous: v })}>จัดการรถ</AdminButton><AdminButton secondary onClick={() => setWindowEditor({ kind: 'vehicles', id: v.id })}>ช่วงเวลารถ</AdminButton></td></tr>)}</Table> : <Table headings={['รหัส', 'ชื่อคนขับ', 'สถานะบัญชี', 'สถานะเปิดใช้งาน', 'การดำเนินการ']} empty={!driverRows.length}>{driverRows.map(d => <tr key={d.id}><th scope="row">{d.id}</th><td>{d.name}<small>{d.phone}</small></td><td>{d.accountId ? <Badge active={!!accounts.find(a => a.id === d.accountId && a.role === 'Driver')?.active} /> : 'บัญชีเดิม (ยังไม่เชื่อม)'}</td><td><Badge active={driverAvailable(state, d)} yes="เปิดใช้งาน" no="ไม่พร้อมใช้งาน" /></td><td><AdminButton secondary onClick={() => openEditor({ category: 'drivers', previous: d })}>จัดการคนขับ</AdminButton><AdminButton secondary onClick={() => setWindowEditor({ kind: 'drivers', id: d.id })}>ช่วงเวลาคนขับ</AdminButton></td></tr>)}</Table>}
+          {screen === 'vehicles' ? <Table headings={['รหัส', 'ชื่อ', 'ประเภท / รองรับ', 'สถานะ', 'การดำเนินการ']} empty={!vehicleRows.length}>{pagedVehicleRows.map(v => <tr key={v.id}><th scope="row">{v.id}</th><td>{v.label}</td><td>{v.vehicleType || 'ไม่ได้ระบุ'}<small>{v.support}</small></td><td><Badge active={v.active} yes="เปิดใช้งาน" no="ปิดใช้งาน" /></td><td><AdminButton secondary onClick={() => openEditor({ category: 'vehicles', previous: v })}>จัดการรถ</AdminButton><AdminButton secondary onClick={() => setWindowEditor({ kind: 'vehicles', id: v.id })}>ช่วงเวลารถ</AdminButton></td></tr>)}</Table> : <Table headings={['รหัส', 'ชื่อคนขับ', 'สถานะบัญชี', 'สถานะเปิดใช้งาน', 'การดำเนินการ']} empty={!driverRows.length}>{pagedDriverRows.map(d => <tr key={d.id}><th scope="row">{d.id}</th><td>{d.name}<small>{d.phone}</small></td><td>{d.accountId ? <Badge active={!!accounts.find(a => a.id === d.accountId && a.role === 'Driver')?.active} /> : 'บัญชีเดิม (ยังไม่เชื่อม)'}</td><td><Badge active={driverAvailable(state, d)} yes="เปิดใช้งาน" no="ไม่พร้อมใช้งาน" /></td><td><AdminButton secondary onClick={() => openEditor({ category: 'drivers', previous: d })}>จัดการคนขับ</AdminButton><AdminButton secondary onClick={() => setWindowEditor({ kind: 'drivers', id: d.id })}>ช่วงเวลาคนขับ</AdminButton></td></tr>)}</Table>}
+          <PaginationControls totalItems={screen === 'vehicles' ? vehicleRows.length : driverRows.length} pageSize={ADMIN_PAGE_SIZE} page={tablePage} onPageChange={setTablePage} label={screen === 'vehicles' ? 'แบ่งหน้าตารางรถรับส่ง' : 'แบ่งหน้าตารางคนขับ'} />
           <p className="admin-muted admin-footnote">ตรวจสอบตารางรถและคนขับก่อนมอบหมายงาน</p>
         </section>
       </>}
-      {screen === 'history' && <><Metrics values={[[ 'งานรับ–ส่งทั้งหมด', remote.data?.summary.statuses.reduce((sum, row) => sum + row.count, 0) ?? 0], ['เสร็จสิ้น', remote.data?.summary.statuses.find(row => row.status === 'COMPLETED')?.count ?? 0], ['ยุติการเดินทาง', remote.data?.summary.statuses.find(row => row.status === 'ABORTED')?.count ?? 0]]} /><section className="admin-panel"><h2>ประวัติการเดินรถแบบสรุป</h2><p className="admin-muted">สิทธิ์ผู้ดูแลระบบแสดงเฉพาะยอดรวม ไม่มีชื่อผู้ป่วย เบอร์ติดต่อ จุดรับ หรือรายละเอียดรายงาน</p><Table headings={['สถานะ', 'จำนวน']} empty={!remote.data?.summary.statuses.length}>{remote.data?.summary.statuses.map(row => <tr key={row.status}><th scope="row">{statusLabels[row.status] ?? row.status}</th><td>{row.count}</td></tr>)}</Table></section></>}
+      {screen === 'history' && <><Metrics values={[[ 'งานรับ–ส่งทั้งหมด', summaryStatuses.reduce((sum, row) => sum + row.count, 0)], ['เสร็จสิ้น', summaryStatuses.find(row => row.status === 'COMPLETED')?.count ?? 0], ['ยุติการเดินทาง', summaryStatuses.find(row => row.status === 'ABORTED')?.count ?? 0]]} /><section className="admin-panel"><h2>ประวัติการเดินรถแบบสรุป</h2><p className="admin-muted">สิทธิ์ผู้ดูแลระบบแสดงเฉพาะยอดรวม ไม่มีชื่อผู้ป่วย เบอร์ติดต่อ จุดรับ หรือรายละเอียดรายงาน</p><Table headings={['สถานะ', 'จำนวน']} empty={!summaryStatuses.length}>{summaryStatuses.map(row => <tr key={row.status}><th scope="row">{statusLabels[row.status] ?? row.status}</th><td>{row.count}</td></tr>)}</Table></section><AdminSeedDataUtility onChanged={remote.reload} /></>}
       {screen === 'settings' && <><Metrics values={[[ 'จองล่วงหน้า', '48 ชั่วโมง'], ['เวลาเตรียมรถ', '20 นาที'], ['ศูนย์รถ', '1 จุด']]} /><AdminServiceSettings onChanged={remote.reload} /></>}
-      {screen === 'audit' && <section className="admin-panel"><div className="admin-filters"><AdminField label="ค้นหากิจกรรม"><input type="search" value={search} onChange={e => setSearch(e.target.value)} /></AdminField><AdminField label="ประเภทกิจกรรม"><select value={category} onChange={e => setCategory(e.target.value)}><option value="">ทุกประเภทกิจกรรม</option>{[['accounts', 'บัญชี'], ['vehicles', 'รถ'], ['drivers', 'คนขับ'], ['settings', 'การตั้งค่า']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></AdminField></div><Table headings={['เวลา', 'ผู้ดำเนินการ', 'กิจกรรม', 'ผลลัพธ์']} empty={!auditRows.length}>{auditRows.map(e => <tr key={e.id}><td>{dispatchDate(e.at)} {dispatchTime(e.at)}</td><td>{e.actor}</td><td><button className="admin-text-button" onClick={() => setAuditId(e.id)}>{e.action} {e.recordId}</button>{e.reason && <small>{e.reason}</small>}</td><td><Badge active yes="สำเร็จ" /></td></tr>)}</Table></section>}
+      {screen === 'audit' && <section className="admin-panel"><div className="admin-filters"><AdminField label="ค้นหากิจกรรม"><input type="search" value={search} onChange={e => setSearch(e.target.value)} /></AdminField><AdminField label="ประเภทกิจกรรม"><select value={category} onChange={e => setCategory(e.target.value)}><option value="">ทุกประเภทกิจกรรม</option>{[['accounts', 'บัญชี'], ['vehicles', 'รถ'], ['drivers', 'คนขับ'], ['settings', 'การตั้งค่า']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></AdminField></div><Table headings={['เวลา', 'ผู้ดำเนินการ', 'กิจกรรม', 'ผลลัพธ์']} empty={!auditRows.length}>{pagedAuditRows.map(e => <tr key={e.id}><td>{dispatchDate(e.at)} {dispatchTime(e.at)}</td><td>{e.actor}</td><td><button className="admin-text-button" onClick={() => setAuditId(e.id)}>{e.action} {e.recordId}</button>{e.reason && <small>{e.reason}</small>}</td><td><Badge active yes="สำเร็จ" /></td></tr>)}</Table><PaginationControls totalItems={auditRows.length} pageSize={ADMIN_PAGE_SIZE} page={tablePage} onPageChange={setTablePage} label="แบ่งหน้าบันทึกกิจกรรม" /></section>}
       </div><Link className="role-selection-shortcut" to="/staff/login" aria-label="บัญชีเจ้าหน้าที่ / ออกจากระบบ" title="บัญชีเจ้าหน้าที่ / ออกจากระบบ"><ServiceSymbol kind="people" /></Link></main>
     {editor?.category === 'accounts' && <AdminAccountForm previous={editor.previous as AdminAccount | undefined} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); setNotice('บันทึกข้อมูลและกิจกรรมแล้ว'); remote.reload() }} />}
     {(editor?.category === 'vehicles' || editor?.category === 'drivers') && remote.data && <AdminResourceForm kind={editor.category} previous={editingResource} catalog={remote.data.catalog} accounts={accounts} onClose={() => setEditor(null)} onSaved={saved} />}
