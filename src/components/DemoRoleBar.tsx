@@ -30,7 +30,7 @@ export function DemoRoleBar() {
     const element = barRef.current
     if (!element) return
     const syncHeight = () => {
-      root.style.setProperty('--demo-bar-height', `${Math.ceil(element.getBoundingClientRect().height)}px`)
+      root.style.setProperty('--demo-bar-height', `${element.getBoundingClientRect().height}px`)
     }
     syncHeight()
     if (typeof ResizeObserver === 'undefined') {

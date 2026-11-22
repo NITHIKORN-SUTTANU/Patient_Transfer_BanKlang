@@ -308,7 +308,7 @@ body:has(.driver-shell) { background:var(--color-canvas); }
 @media(min-width:768px) {
  .admin-shell { --admin-sidebar-w:250px; }
  .admin-shell.admin-sidebar-collapsed { --admin-sidebar-w:80px; }
- .admin-shell .admin-sidebar { position:fixed; display:flex; flex-direction:column; top:var(--demo-bar-height, 0px); left:0; width:var(--admin-sidebar-w, 250px); height:calc(100dvh - var(--demo-bar-height, 0px)); padding:30px 14px; overflow-y:auto; z-index:15; }
+ .admin-shell .admin-sidebar { position:fixed; display:flex; flex-direction:column; top:var(--demo-bar-height, 0px); bottom:0; left:0; width:var(--admin-sidebar-w, 250px); height:calc(100vh - var(--demo-bar-height, 0px)); height:calc(100dvh - var(--demo-bar-height, 0px)); padding:30px 14px; overflow-y:auto; z-index:15; }
  .admin-shell main { margin-left:var(--admin-sidebar-w, 250px); }
  .admin-sidebar nav.responsive-navigation { margin-top:40px; margin-bottom:24px; }
  .admin-shell.admin-sidebar-collapsed .admin-sidebar { width:80px; padding-inline:16px; }
@@ -319,7 +319,7 @@ body:has(.driver-shell) { background:var(--color-canvas); }
  .admin-sidebar-collapsed .responsive-navigation a { width:48px; min-height:48px; padding:12px; justify-content:center; }
  .admin-sidebar-collapsed .dispatch-sidebar-toggle { align-self:center; }
  .admin-sidebar a:focus-visible { outline:3px solid #ffdc8d; outline-offset:2px; }
- .dispatch-sidebar { position:sticky; top:var(--demo-bar-height, 0px); height:calc(100dvh - var(--demo-bar-height, 0px)); overflow-y:auto; }
+ .dispatch-sidebar { position:sticky; top:var(--demo-bar-height, 0px); align-self:start; height:calc(100vh - var(--demo-bar-height, 0px)); height:calc(100dvh - var(--demo-bar-height, 0px)); overflow-y:auto; }
  .dispatch-sidebar .dispatch-sidebar-tools { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0; margin-bottom:20px; }
  .dispatch-sidebar > .dispatch-sidebar-tools:first-child { padding-inline:0; margin-inline:0; }
  .dispatch-sidebar-toggle { display:grid; place-items:center; align-self:flex-end; flex-shrink:0; width:48px; min-width:48px; height:48px; margin-top:auto; border:0; border-radius:12px; background:transparent; color:white; }

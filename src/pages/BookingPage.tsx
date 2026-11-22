@@ -21,6 +21,10 @@ import { isInteractiveDemoActive } from '../services/interactiveDemo'
 import '../booking.css'
 
 const GENERIC_PIN_LABELS = new Set(['จุดรับที่เลือกบนแผนที่', 'จุดรับที่ระบุพิกัดเอง'])
+const CITIZEN_BOOKINGS_PAGE_SIZE = 10
+const MAX_SERVICE_RADIUS_KM = 8
+const ROAD_PREFIX_PATTERN = /^(?:ถนน|ถ\.|ซอย|ซ\.|ทางหลวงชนบท|ทางหลวง|ทล\.|ทช\.|route\b|road\b|rd\.|soi\b|highway\b|hwy\b)/i
+const MULTI_ROAD_SPLIT_PATTERN = /(?=(?:ถนน|ถ\.|ทางหลวงชนบท|ทางหลวง|ทล\.|ทช\.)\s*\S)/g
 
 function approxDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const dLat = (lat2 - lat1) * 111.32
@@ -32,19 +36,58 @@ function findNearestServiceVillage(
   latitude: number,
   longitude: number,
   catalogVillages: CitizenCatalog['villages'],
-): { id: string; number: number; name: string } | null {
+): { village: { id: string; number: number; name: string } | null; outOfZone: boolean } {
   let best: { id: string; number: number; name: string } | null = null
   let bestDist = Infinity
+  let matchedAnySeed = false
   for (const cv of catalogVillages) {
     const seedMatch = BAN_KLANG_VILLAGES.find(v => v.id === cv.id || v.number === cv.number)
     if (!seedMatch) continue
+    matchedAnySeed = true
     const dist = approxDistanceKm(latitude, longitude, seedMatch.latitude, seedMatch.longitude)
     if (dist < bestDist) {
       bestDist = dist
       best = { id: cv.id, number: cv.number, name: cv.name }
     }
   }
-  return best && bestDist <= 8 ? best : null
+  if (!matchedAnySeed) return { village: null, outOfZone: false }
+  if (best && bestDist <= MAX_SERVICE_RADIUS_KM) return { village: best, outOfZone: false }
+  return { village: null, outOfZone: true }
+}
+
+function cleanSingleRoadToken(raw: string): string {
+  const collapsed = raw.trim().replace(/^[\s,·]+|[\s,·]+$/g, '').replace(/\s+/g, ' ')
+  if (!collapsed) return ''
+  // If a single field already holds doubled road clauses (e.g. "ถนนรอบเมืองนอก ถนนพระคงฤาษี"), keep only the primary road.
+  const roadSegments = collapsed.split(MULTI_ROAD_SPLIT_PATTERN).map(s => s.trim().replace(/[,·]+$/g, '').trim()).filter(Boolean)
+  if (roadSegments.length > 1 && roadSegments.filter(seg => ROAD_PREFIX_PATTERN.test(seg)).length > 1) {
+    const firstNonRoad = !ROAD_PREFIX_PATTERN.test(roadSegments[0]) ? roadSegments[0] : ''
+    const firstRoad = roadSegments.find(seg => ROAD_PREFIX_PATTERN.test(seg)) ?? ''
+    return firstNonRoad && firstRoad ? `${firstNonRoad} ${firstRoad}` : (firstRoad || roadSegments[0])
+  }
+  // Remove exact repeated adjacent tokens (e.g. "ถนนบ้านกลาง ถนนบ้านกลาง").
+  const words = collapsed.split(' ')
+  const dedupedWords = words.filter((word, idx) => idx === 0 || word.toLocaleLowerCase() !== words[idx - 1].toLocaleLowerCase())
+  return dedupedWords.join(' ')
+}
+
+function formatCleanNearbyAddress(props: Record<string, string | undefined>): string {
+  const name = cleanSingleRoadToken(props.name ?? '')
+  const street = cleanSingleRoadToken(props.street ?? '')
+  const area = cleanSingleRoadToken(props.district || props.locality || '')
+
+  if (name && street) {
+    const lowerName = name.toLocaleLowerCase()
+    const lowerStreet = street.toLocaleLowerCase()
+    if (lowerName === lowerStreet || lowerName.includes(lowerStreet)) return name
+    if (lowerStreet.includes(lowerName)) return street
+    // Never concatenate two road names together (e.g. avoid "ถนนรอบเมืองนอก ถนนพระคงฤาษี").
+    if (ROAD_PREFIX_PATTERN.test(name) && ROAD_PREFIX_PATTERN.test(street)) return name
+    return `${name} ${street}`
+  }
+  if (name) return name
+  if (street) return street
+  return area
 }
 
 async function reverseGeocodeNearby(latitude: number, longitude: number, signal: AbortSignal): Promise<string> {
@@ -57,10 +100,7 @@ async function reverseGeocodeNearby(latitude: number, longitude: number, signal:
     const data = await response.json() as { features?: { properties?: Record<string, string> }[] }
     const props = data.features?.[0]?.properties
     if (!props) return ''
-    const parts = [props.name, props.street, props.district || props.locality]
-      .map(value => (value ?? '').trim().replace(/^[\s,·]+|[\s,·]+$/g, ''))
-      .filter(Boolean)
-    return [...new Set(parts)].slice(0, 2).join(' ')
+    return formatCleanNearbyAddress(props)
   } catch {
     return ''
   }
@@ -106,8 +146,12 @@ export function BookingPage() {
   const locationRequest = useRef(0)
   const manualVillageRef = useRef(false)
   const [villageAutoMatched, setVillageAutoMatched] = useState(false)
+  const [pinOutOfZone, setPinOutOfZone] = useState(false)
   const [addressSuggestion, setAddressSuggestion] = useState('')
-  const [pinLookup, setPinLookup] = useState<{ lat: number; lng: number; explicitLabel?: string; seq: number } | null>(null)
+  const [pinLookup, setPinLookup] = useState<{ lat: number; lng: number; explicitLabel?: string; pinDriven: boolean; seq: number } | null>(null)
+  const [bookingSearch, setBookingSearch] = useState('')
+  const [bookingStatusFilter, setBookingStatusFilter] = useState<'all' | 'pending' | 'assigned' | 'completed'>('all')
+  const [bookingLimitState, setBookingLimitState] = useState<{ key: string; count: number }>({ key: '', count: CITIZEN_BOOKINGS_PAGE_SIZE })
   const gpsActive = draft.pickup?.accuracy !== undefined
   const [sending, setSending] = useState(false)
   const [intakeUncertain, setIntakeUncertain] = useState(false)
@@ -236,16 +280,23 @@ export function BookingPage() {
   useEffect(() => {
     if (!pinLookup || screen !== 'assistance') return
     const controller = new AbortController()
-    const { lat, lng, explicitLabel } = pinLookup
+    const { lat, lng, explicitLabel, pinDriven } = pinLookup
     const timer = window.setTimeout(async () => {
-      const nearest = findNearestServiceVillage(lat, lng, catalog.villages)
-      if (nearest && !manualVillageRef.current) {
-        setDraft(current => (current.villageId === nearest.id ? current : { ...current, villageId: nearest.id }))
-        setErrors(current => { const next = { ...current }; delete next.villageId; return next })
-        setVillageAutoMatched(true)
+      const { village: nearest, outOfZone } = findNearestServiceVillage(lat, lng, catalog.villages)
+      if (outOfZone) {
+        setPinOutOfZone(true)
+        setVillageAutoMatched(false)
+      } else {
+        setPinOutOfZone(false)
+        if (nearest && (pinDriven || !manualVillageRef.current)) {
+          manualVillageRef.current = false
+          setDraft(current => (current.villageId === nearest.id ? current : { ...current, villageId: nearest.id }))
+          setErrors(current => { const next = { ...current }; delete next.villageId; return next })
+          setVillageAutoMatched(true)
+        }
       }
       const cleanExplicit = explicitLabel && !GENERIC_PIN_LABELS.has(explicitLabel.trim()) && !explicitLabel.startsWith('ตำแหน่งปัจจุบัน')
-        ? explicitLabel.trim()
+        ? cleanSingleRoadToken(explicitLabel)
         : ''
       const geocoded = cleanExplicit || await reverseGeocodeNearby(lat, lng, controller.signal)
       if (controller.signal.aborted) return
@@ -287,7 +338,7 @@ export function BookingPage() {
       const { latitude, longitude, accuracy } = position.coords
       const pickup = { x: 50, y: 50, latitude, longitude, accuracy, label: `ตำแหน่งปัจจุบัน (${latitude.toFixed(6)}, ${longitude.toFixed(6)})` }
       update('pickup', pickup)
-      setPinLookup(prev => ({ lat: latitude, lng: longitude, seq: (prev?.seq ?? 0) + 1 }))
+      setPinLookup(prev => ({ lat: latitude, lng: longitude, pinDriven: true, seq: (prev?.seq ?? 0) + 1 }))
     }, error => {
       if (request !== locationRequest.current) { setLocatingPath(null); return }
       setLocatingPath(null)
@@ -389,6 +440,7 @@ export function BookingPage() {
     setIntakeUncertain(false)
     manualVillageRef.current = false
     setVillageAutoMatched(false)
+    setPinOutOfZone(false)
     setAddressSuggestion('')
     setPinLookup(null)
     setDraft(next)
@@ -401,7 +453,7 @@ export function BookingPage() {
     locationRequest.current += 1
     setLocatingPath(null)
     update('pickup', { x: 50, y: 50, latitude, longitude, label: label || 'จุดรับที่เลือกบนแผนที่' })
-    setPinLookup(prev => ({ lat: latitude, lng: longitude, explicitLabel: label, seq: (prev?.seq ?? 0) + 1 }))
+    setPinLookup(prev => ({ lat: latitude, lng: longitude, explicitLabel: label, pinDriven: true, seq: (prev?.seq ?? 0) + 1 }))
   }
   async function decideConsent(accepted: boolean) {
     if (consentBusy || !session.config || !session.user) return
@@ -452,7 +504,7 @@ export function BookingPage() {
     <BookingHeader title="ข้อมูลผู้ป่วย" subtitle="ใครต้องการใช้รถรับส่ง?" /><BookingProgress step={1} />
     <div className="booking-tabs" role="group" aria-label="ประเภทการจอง">{(['self', 'other'] as const).map(value => <button type="button" aria-pressed={draft.bookingFor === value} key={value} onClick={() => { update('bookingFor', value); setErrors({}) }}>{value === 'self' ? 'จองให้ตนเอง' : 'จองให้ผู้อื่น'}</button>)}</div>
     <p className="booking-small">ช่องที่มี * จำเป็นต้องกรอก</p><form className="booking-form" noValidate onSubmit={e => { e.preventDefault(); patientNext() }}>
-      {profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; manualVillageRef.current = Boolean(profile?.villageId); setVillageAutoMatched(false); setAddressSuggestion(''); setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select><span className="booking-small">โปรดตรวจสอบข้อมูลก่อนส่งคำขอ</span></label>}
+      {profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; manualVillageRef.current = Boolean(profile?.villageId); setVillageAutoMatched(false); setPinOutOfZone(false); setAddressSuggestion(''); setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select><span className="booking-small">โปรดตรวจสอบข้อมูลก่อนส่งคำขอ</span></label>}
       {field('patientName', 'ชื่อผู้ป่วย', 'ชื่อและนามสกุล')}
       {draft.bookingFor === 'other' && field('contactName', 'ชื่อผู้ดูแล / ผู้ติดต่อ', 'ชื่อผู้จองหรือผู้ดูแล')}
       {field('phone', draft.bookingFor === 'self' ? 'เบอร์โทรศัพท์ของคุณ' : 'เบอร์โทรศัพท์ผู้ติดต่อ', '08X-XXX-XXXX')}
@@ -473,7 +525,8 @@ export function BookingPage() {
     <div className="booking-location-controls"><PickupMap value={draft.pickup} onChange={selectPoint} />
     <BookingButton secondary className="booking-location-button" aria-pressed={gpsActive} disabled={locating} onClick={useCurrentLocation}>{locating ? 'กำลังค้นหาตำแหน่ง…' : gpsActive ? '✓ ใช้ตำแหน่งปัจจุบันแล้ว' : 'ใช้ตำแหน่งปัจจุบัน'}</BookingButton>
     </div>
-    <label className="booking-field">หมู่บ้านในเขตบริการ *<select value={draft.villageId ?? ''} aria-invalid={!!errors.villageId} onChange={event => { manualVillageRef.current = Boolean(event.target.value); setVillageAutoMatched(false); update('villageId', event.target.value) }}><option value="">เลือกหมู่บ้าน</option>{catalog.villages.map(village => <option key={village.id} value={village.id}>หมู่ {village.number} · {village.name}</option>)}</select>{villageAutoMatched && draft.villageId && <span className="booking-village-auto-hint">อิงจากตำแหน่งบนแผนที่</span>}{error('villageId')}</label>
+    <label className="booking-field">หมู่บ้านในเขตบริการ *<select value={draft.villageId ?? ''} aria-invalid={!!errors.villageId} onChange={event => { manualVillageRef.current = Boolean(event.target.value); setVillageAutoMatched(false); setPinOutOfZone(false); update('villageId', event.target.value) }}><option value="">เลือกหมู่บ้าน</option>{catalog.villages.map(village => <option key={village.id} value={village.id}>หมู่ {village.number} · {village.name}</option>)}</select>{villageAutoMatched && draft.villageId && <span className="booking-village-auto-hint">อิงจากตำแหน่งบนแผนที่</span>}{error('villageId')}</label>
+    {pinOutOfZone && <p className="booking-out-of-zone-notice" role="status">ตำแหน่งหมุดอยู่นอกเขตบริการหลัก กรุณาตรวจสอบหมู่บ้านอีกครั้ง</p>}
     <label className="booking-field">ที่อยู่จุดรับ *<input value={draft.pickupAddress ?? ''} autoComplete="street-address" placeholder="บ้านเลขที่ หมู่บ้าน ตำบล" aria-invalid={!!errors.pickupAddress} onChange={event => update('pickupAddress', event.target.value)} />{error('pickupAddress')}</label>
     {addressSuggestion && !(draft.pickupAddress ?? '').includes(addressSuggestion) && (
       <div className="booking-address-suggestion-wrap">
@@ -491,7 +544,7 @@ export function BookingPage() {
       </div>
     )}
     <label className="booking-field">จุดสังเกต<input value={draft.landmark ?? ''} aria-invalid={!!errors.landmark} onChange={event => update('landmark', event.target.value)} />{error('landmark')}</label>
-    <details className="booking-address-fallback"><summary>เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง</summary><p className="booking-small">ที่อยู่ต้องมีพิกัดและอยู่ในหมู่บ้านที่ให้บริการ หากไม่ทราบพิกัด กรุณาติดต่อเทศบาล</p>{(['latitude', 'longitude'] as const).map(key => <label key={key} className="booking-field">{key === 'latitude' ? 'ละติจูด' : 'ลองจิจูด'}<input type="number" step="any" value={draft.pickup?.[key] ?? ''} onChange={event => { locationRequest.current += 1; setLocatingPath(null); const value = event.target.value === '' ? undefined : Number(event.target.value); const nextPickup = { x: 50, y: 50, label: 'จุดรับที่ระบุพิกัดเอง', ...draft.pickup, [key]: value, accuracy: undefined }; update('pickup', nextPickup); if (typeof nextPickup.latitude === 'number' && Number.isFinite(nextPickup.latitude) && typeof nextPickup.longitude === 'number' && Number.isFinite(nextPickup.longitude)) { setPinLookup(prev => ({ lat: nextPickup.latitude!, lng: nextPickup.longitude!, seq: (prev?.seq ?? 0) + 1 })) } }} /></label>)}</details>
+    <details className="booking-address-fallback"><summary>เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง</summary><p className="booking-small">ที่อยู่ต้องมีพิกัดและอยู่ในหมู่บ้านที่ให้บริการ หากไม่ทราบพิกัด กรุณาติดต่อเทศบาล</p>{(['latitude', 'longitude'] as const).map(key => <label key={key} className="booking-field">{key === 'latitude' ? 'ละติจูด' : 'ลองจิจูด'}<input type="number" step="any" value={draft.pickup?.[key] ?? ''} onChange={event => { locationRequest.current += 1; setLocatingPath(null); const value = event.target.value === '' ? undefined : Number(event.target.value); const nextPickup = { x: 50, y: 50, label: 'จุดรับที่ระบุพิกัดเอง', ...draft.pickup, [key]: value, accuracy: undefined }; update('pickup', nextPickup); if (typeof nextPickup.latitude === 'number' && Number.isFinite(nextPickup.latitude) && typeof nextPickup.longitude === 'number' && Number.isFinite(nextPickup.longitude)) { setPinLookup(prev => ({ lat: nextPickup.latitude!, lng: nextPickup.longitude!, pinDriven: false, seq: (prev?.seq ?? 0) + 1 })) } }} /></label>)}</details>
     <section className="booking-pickup-value" tabIndex={errors.pickup ? -1 : undefined} aria-invalid={!!errors.pickup} aria-describedby={errors.pickup ? 'pickup-error' : undefined}><p>จุดรับที่เลือก</p>{(draft.pickup || !errors.pickup) && <strong>{draft.pickup ? formatPickupSummary(draft.pickupAddress, draft.pickup.label) : 'กรุณาเลือกจุดรับก่อนดำเนินการ'}</strong>}{error('pickup')}</section>
     <p className="booking-info">ตรวจสอบจุดรับบนแผนที่ หรือที่อยู่ที่ระบุ ก่อนดำเนินการต่อ</p>
     <div className="booking-pickup-actions"><BookingButton onClick={assistanceNext}>ถัดไป →</BookingButton><BookingButton secondary onClick={() => go('patient')}>ย้อนกลับ</BookingButton></div>
@@ -540,13 +593,105 @@ export function BookingPage() {
       if (Number.isFinite(apptA) && Number.isFinite(apptB) && apptA !== apptB) return apptB - apptA
       return b.id.localeCompare(a.id)
     })
+    const needle = bookingSearch.trim().toLocaleLowerCase()
+    const filteredBookings = sortedBookings.filter(b => {
+      const matchesSearch = !needle || `${b.reference ?? ''} ${b.id}`.toLocaleLowerCase().includes(needle)
+      const api = b.apiStatus ?? ''
+      const matchesStatus =
+        bookingStatusFilter === 'all'
+          ? true
+          : bookingStatusFilter === 'pending'
+            ? ['REQUESTED', 'APPROVED'].includes(api)
+            : bookingStatusFilter === 'assigned'
+              ? ['SCHEDULED', 'ASSIGNED', 'PICKING_UP', 'PICKED_UP', 'IN_TRANSIT'].includes(api)
+              : api === 'COMPLETED'
+      return matchesSearch && matchesStatus
+    })
+    const bookingFilterKey = `${needle}|${bookingStatusFilter}`
+    const visibleLimit = bookingLimitState.key === bookingFilterKey ? bookingLimitState.count : CITIZEN_BOOKINGS_PAGE_SIZE
+    const visibleBookings = filteredBookings.slice(0, visibleLimit)
+    const remainingBookings = Math.max(0, filteredBookings.length - visibleBookings.length)
     content = <>
       <BookingHeader title="รายการจองของฉัน" subtitle={sortedBookings.length ? 'ดูสถานะและรายละเอียดการจอง' : 'ไม่มีคำขอจองรถในขณะนี้'} />
       <div className="booking-list-toolbar">
         <Link className="booking-home-link booking-list-back" to="/booking" onClick={() => setErrors({})}>← กลับหน้าหลัก</Link>
         <button type="button" className="booking-compact-refresh" disabled={loading} aria-busy={loading} onClick={() => setVersion(value => value + 1)}><span aria-hidden="true">↻</span> โหลดข้อมูลล่าสุด</button>
       </div>
-      {sortedBookings.length ? <><div className="booking-list-title"><h2>รายการจองล่าสุด</h2><span>{sortedBookings.length} {hasMore ? 'รายการที่โหลดแล้ว' : 'รายการ'}</span></div>{sortedBookings.map(b => <BookingSummaryCard key={b.id} booking={b} statusLabel={statusLabels[b.apiStatus!]} to={`/booking/status/${b.id}`} />)}{hasMore && <><p className="booking-small">ยังมีรายการจองอื่น กดโหลดรายการเพิ่มเติมเพื่อดูครบ</p><BookingButton secondary disabled={loading} aria-busy={loading} onClick={() => setListRange({ owner: session.user!.id, pages: pages + 1 })}>โหลดรายการเพิ่มเติม</BookingButton></>}</> : <><section className="booking-empty"><span aria-hidden="true">▱</span><h2>ยังไม่มีรายการจอง</h2><p>เริ่มส่งคำขอจองรถได้เลย</p></section><BookingButton onClick={start}>เริ่มจองรถ</BookingButton></>}
+      {sortedBookings.length ? (
+        <>
+          <div className="booking-list-filters" role="region" aria-label="ค้นหาและกรองรายการจองของฉัน">
+            <input
+              type="search"
+              className="booking-list-search"
+              aria-label="ค้นหารหัสการจอง"
+              placeholder="ค้นหารหัสการจอง (เช่น BK-...)"
+              value={bookingSearch}
+              onChange={event => setBookingSearch(event.target.value)}
+            />
+            <div className="booking-list-chips" role="group" aria-label="กรองสถานะการจอง">
+              {([
+                ['all', 'ทั้งหมด'],
+                ['pending', 'รอตรวจสอบ'],
+                ['assigned', 'จัดรถแล้ว'],
+                ['completed', 'เสร็จสิ้น'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className="booking-list-chip"
+                  aria-pressed={bookingStatusFilter === key}
+                  onClick={() => setBookingStatusFilter(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="booking-list-title">
+            <h2>รายการจองล่าสุด</h2>
+            <span>แสดง {visibleBookings.length} จาก {filteredBookings.length} รายการ</span>
+            {(bookingSearch || bookingStatusFilter !== 'all') && (
+              <button
+                type="button"
+                className="booking-list-filter-reset"
+                onClick={() => { setBookingSearch(''); setBookingStatusFilter('all') }}
+              >
+                ล้างตัวกรอง
+              </button>
+            )}
+          </div>
+          {visibleBookings.length ? (
+            <>
+              {visibleBookings.map(b => <BookingSummaryCard key={b.id} booking={b} statusLabel={statusLabels[b.apiStatus!]} to={`/booking/status/${b.id}`} />)}
+              {remainingBookings > 0 && (
+                <BookingButton
+                  secondary
+                  onClick={() => setBookingLimitState({ key: bookingFilterKey, count: visibleLimit + CITIZEN_BOOKINGS_PAGE_SIZE })}
+                >
+                  แสดงเพิ่มเติม (เหลืออีก {remainingBookings} รายการ)
+                </BookingButton>
+              )}
+              {hasMore && remainingBookings === 0 && (
+                <>
+                  <p className="booking-small">ยังมีรายการจองอื่น กดโหลดรายการเพิ่มเติมเพื่อดูครบ</p>
+                  <BookingButton secondary disabled={loading} aria-busy={loading} onClick={() => setListRange({ owner: session.user!.id, pages: pages + 1 })}>โหลดรายการเพิ่มเติม</BookingButton>
+                </>
+              )}
+            </>
+          ) : (
+            <section className="booking-empty">
+              <span aria-hidden="true">▱</span>
+              <h2>ไม่พบรายการจองตามตัวกรอง</h2>
+              <p>ลองเปลี่ยนรหัสการจองหรือสถานะที่เลือก</p>
+            </section>
+          )}
+        </>
+      ) : (
+        <>
+          <section className="booking-empty"><span aria-hidden="true">▱</span><h2>ยังไม่มีรายการจอง</h2><p>เริ่มส่งคำขอจองรถได้เลย</p></section>
+          <BookingButton onClick={start}>เริ่มจองรถ</BookingButton>
+        </>
+      )}
     </>
   }
   else if (screen === 'cancel' && saved) content = <>

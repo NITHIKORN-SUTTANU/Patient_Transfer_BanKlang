@@ -948,3 +948,198 @@ test('Desktop mouse-wheel scrolling works on /booking, /dispatcher, and /driver 
   await page.mouse.wheel(0, 600)
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
 })
+
+test('Final UX, Privacy & Layout Polish: sticky desktop sidebars, pin-driven village sync & clean address dedupe, citizen PDPA scope/pagination, and driver sticky CTA clearance', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.route('https://photon.komoot.io/reverse*', route =>
+    route.fulfill({
+      json: {
+        features: [
+          {
+            properties: {
+              name: 'ถนนรอบเมืองนอก',
+              street: 'ถนนพระคงฤาษี',
+              district: 'ในเมือง',
+            },
+          },
+        ],
+      },
+    }),
+  )
+
+  // 1. Desktop sticky left sidebars with zero bottom white gap (/dispatcher, /driver, /admin)
+  await page.setViewportSize({ width: 1280, height: 680 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.mouse.move(700, 340)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+
+  const dispSidebarRect = await page.locator('#dispatcher-sidebar').evaluate(el => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top, bottom: r.bottom, height: r.height }
+  })
+  expect(dispSidebarRect.top).toBeGreaterThanOrEqual(0)
+  expect(dispSidebarRect.top).toBeLessThanOrEqual(64)
+  expect(dispSidebarRect.bottom).toBeGreaterThanOrEqual(678)
+
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.mouse.move(700, 340)
+  await page.mouse.wheel(0, 600)
+  const adminSidebarRect = await page.locator('#admin-sidebar').evaluate(el => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top, bottom: r.bottom }
+  })
+  expect(adminSidebarRect.top).toBeGreaterThanOrEqual(0)
+  expect(adminSidebarRect.top).toBeLessThanOrEqual(64)
+  expect(adminSidebarRect.bottom).toBeGreaterThanOrEqual(678)
+
+  // Load 320 seed rows in Admin to verify Citizen PDPA scoping below
+  await page.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  await expect(page.getByText('ข้อมูลจำลองในระบบ: 320 รายการ')).toBeVisible()
+
+  // 2. Citizen PDPA own-bookings privacy scope + search, status chips & 10-item progressive pagination
+  await demoBar.getByRole('button', { name: 'ผู้ป่วย / จองรถ' }).click()
+  await expect(page).toHaveURL(/\/booking$/)
+  await page.getByRole('button', { name: 'ดูสถานะการจอง' }).click()
+  await expect(page).toHaveURL(/\/booking\/bookings$/)
+
+  // Even with 320 seeded dispatcher trips loaded, citizen sees ONLY own 4 demo bookings (zero BK-SEED- leaks!)
+  await expect(page.locator('.booking-list-title')).toContainText('แสดง 4 จาก 4 รายการ')
+  await expect(page.locator('a.booking-summary-card')).toHaveCount(4)
+  await expect(page.locator('body')).not.toContainText('BK-SEED-')
+
+  // Inject 12 more own demo bookings so citizen owns 16 -> verify 10-item progressive pagination + filters
+  await page.evaluate(() => {
+    const key = 'ban-klang-transit:interactive-demo-db:v1'
+    const raw = localStorage.getItem(key)
+    if (!raw) return
+    const db = JSON.parse(raw)
+    const template = db.bookings[0]
+    for (let i = 1; i <= 12; i++) {
+      db.bookings.push({
+        ...template,
+        id: `BK-DEMO-20${String(i).padStart(2, '0')}`,
+        reference: `BK-DEMO-20${String(i).padStart(2, '0')}`,
+        status: i % 3 === 0 ? 'COMPLETED' : i % 3 === 1 ? 'REQUESTED' : 'ASSIGNED',
+        submittedAt: new Date(Date.now() - (i + 10) * 3600_000).toISOString(),
+      })
+    }
+    localStorage.setItem(key, JSON.stringify(db))
+  })
+  await page.getByRole('button', { name: /โหลดข้อมูลล่าสุด/ }).click()
+  await expect(page.locator('.booking-list-title')).toContainText('แสดง 10 จาก 16 รายการ')
+  await expect(page.locator('a.booking-summary-card')).toHaveCount(10)
+  const loadMoreCitizen = page.getByRole('button', { name: 'แสดงเพิ่มเติม (เหลืออีก 6 รายการ)', exact: true })
+  await expect(loadMoreCitizen).toBeVisible()
+  await loadMoreCitizen.click()
+  await expect(page.locator('.booking-list-title')).toContainText('แสดง 16 จาก 16 รายการ')
+  await expect(page.locator('a.booking-summary-card')).toHaveCount(16)
+
+  // Quick status filter chips & search by booking ID
+  await page.getByRole('button', { name: 'เสร็จสิ้น', exact: true }).click()
+  await expect(page.locator('.booking-list-title')).toContainText('แสดง 5 จาก 5 รายการ')
+  await page.getByRole('button', { name: 'ทั้งหมด', exact: true }).click()
+  await page.getByLabel('ค้นหารหัสการจอง').fill('BK-DEMO-1003')
+  await expect(page.locator('a.booking-summary-card')).toHaveCount(1)
+  await expect(page.locator('.booking-summary-id').first()).toHaveText('BK-DEMO-1003')
+
+  // 3. Citizen Pickup Map: village auto-sync, clean road deduplication, out-of-zone amber notice & non-destructive manual input
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('link', { name: /กลับหน้าหลัก/ }).click()
+  await page.getByRole('button', { name: 'เริ่มจองรถ →' }).click()
+  await page.getByLabel(/รับทราบการใช้ข้อมูล/).check()
+  await page.getByRole('button', { name: 'รับทราบและถัดไป' }).click()
+  await page.getByLabel(/ชื่อผู้ป่วย/).fill('นางทดสอบ แผนที่')
+  await page.getByLabel(/เบอร์โทรศัพท์ของคุณ/).fill('0893334455')
+  await page.getByLabel(/โรงพยาบาล/).selectOption('hospital-lamphun')
+  await page.locator('button.booking-input-trigger').first().click()
+  await page.getByRole('button', { name: 'เดือนถัดไป', exact: true }).click()
+  await page.locator('.booking-calendar button:not([disabled])', { hasText: /^\s*(?:[\u0E00-\u0E7F]+\.\s*)?23$/ }).first().click()
+  await page.getByRole('button', { name: 'ยืนยันวันที่', exact: true }).click()
+  await page.locator('button.booking-input-trigger').nth(1).click()
+  await setPickerTime(page, 'ชั่วโมง', '10')
+  await setPickerTime(page, 'นาที', '00')
+  await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
+  await page.getByRole('button', { name: 'ถัดไป →' }).click()
+  await expect(page).toHaveURL(/\/booking\/assistance$/)
+
+  const addressInput = page.getByLabel(/ที่อยู่จุดรับ/)
+  const villageSelect = page.getByLabel(/หมู่บ้านในเขตบริการ/)
+  await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง').click()
+
+  // First pin inside Ban Klang Village 1 with empty address -> auto-selects village-01 & deduplicates road name cleanly!
+  await page.getByLabel('ละติจูด').fill('18.5795')
+  await page.getByLabel('ลองจิจูด').fill('99.0435')
+  await expect(villageSelect).toHaveValue('village-01')
+  await expect(page.locator('.booking-village-auto-hint')).toContainText('อิงจากตำแหน่งบนแผนที่')
+  await expect(addressInput).toHaveValue('ถนนรอบเมืองนอก')
+  expect(await addressInput.inputValue()).not.toContain('ถนนพระคงฤาษี')
+
+  // Move pin to Ban Klang Village 4 after typing manual house number -> updates village to village-04, keeps manual address intact!
+  await addressInput.fill('82 13')
+  await page.getByLabel('ละติจูด').fill('18.5890')
+  await page.getByLabel('ลองจิจูด').fill('99.0468')
+  await expect(villageSelect).toHaveValue('village-04')
+  await expect(addressInput).toHaveValue('82 13')
+  await expect(page.locator('.booking-address-suggestion')).toContainText('+ เติมจุดใกล้เคียง: ถนนรอบเมืองนอก')
+
+  // Move pin OUTSIDE 8 km Ban Klang radius -> does NOT force another village, displays amber out-of-zone notice!
+  await page.getByLabel('ละติจูด').fill('18.4500')
+  await page.getByLabel('ลองจิจูด').fill('98.9000')
+  await expect(page.locator('.booking-out-of-zone-notice')).toContainText('ตำแหน่งหมุดอยู่นอกเขตบริการหลัก กรุณาตรวจสอบหมู่บ้านอีกครั้ง')
+  await expect(villageSelect).toHaveValue('village-04')
+  await expect(page.locator('.booking-village-auto-hint')).toHaveCount(0)
+
+  // 4. Driver Active Trip View: sticky CTA bottom clearance, full-width mobile CTA, live-sync hint & sticky desktop sidebar
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await expect(page.locator('.driver-trip').first()).toBeVisible()
+  const trackActiveBtn = page.getByRole('button', { name: /ติดตามสถานะงาน/ }).first()
+  if ((await trackActiveBtn.count()) > 0) {
+    await trackActiveBtn.click()
+  } else {
+    await page.getByRole('button', { name: /ดูรายละเอียด/ }).first().click()
+    await page.getByRole('button', { name: 'เริ่มงาน', exact: true }).click()
+    await page.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  }
+  await expect(page).toHaveURL(/\/driver\/status/)
+  await expect(page.locator('.driver-live-sync-hint')).toContainText('ไม่ใช้ GPS พื้นหลัง')
+
+  // Mobile 390x844: zero overflow, full-width CTA, zero bottom overlap when scrolled to bottom
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  const mobileCtaBox = (await page.locator('.driver-action').boundingBox())!
+  const mobileCtaBtnBox = (await page.locator('.driver-action .driver-button').boundingBox())!
+  const lastContentSelector = (await page.locator('.driver-next-preview').count()) > 0 ? '.driver-next-preview' : '.driver-timeline'
+  const mobileLastCardBox = (await page.locator(lastContentSelector).boundingBox())!
+  expect(mobileCtaBtnBox.x).toBeLessThanOrEqual(24)
+  expect(mobileCtaBtnBox.width).toBeGreaterThanOrEqual(340)
+  expect(mobileLastCardBox.y + mobileLastCardBox.height).toBeLessThanOrEqual(mobileCtaBox.y + 2)
+
+  // Desktop 1280x680: sticky left sidebar zero white gap + sticky bottom CTA never obscures cards at scroll bottom
+  await page.setViewportSize({ width: 1280, height: 680 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.mouse.move(700, 340)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+  const driverSidebarRect = await page.locator('#driver-sidebar').evaluate(el => {
+    const r = el.getBoundingClientRect()
+    return { top: r.top, bottom: r.bottom }
+  })
+  expect(driverSidebarRect.top).toBeGreaterThanOrEqual(0)
+  expect(driverSidebarRect.top).toBeLessThanOrEqual(64)
+  expect(driverSidebarRect.bottom).toBeGreaterThanOrEqual(678)
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  const desktopCtaBox = (await page.locator('.driver-action').boundingBox())!
+  const desktopLastCardBox = (await page.locator(lastContentSelector).boundingBox())!
+  expect(desktopLastCardBox.y + desktopLastCardBox.height).toBeLessThanOrEqual(desktopCtaBox.y + 2)
+})

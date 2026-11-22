@@ -646,6 +646,11 @@ export async function handleDemoApiRequest<T>(
 
   // --- Bookings Collection & Creation ---
   if (pathname === '/bookings' && !isPost) {
+    if (role === 'citizen') {
+      // PDPA scope: citizens only see their own account's bookings, never other patients' seeded rows.
+      const ownBookings = db.bookings.filter(b => !b.id.startsWith('BK-SEED-') && !b.id.startsWith('BK-CSV-'))
+      return { bookings: ownBookings, nextCursor: null, hasMore: false } as T
+    }
     const allBookings = mergeWithOverlayBookings(db)
     if (role === 'driver') {
       const driverId = db.drivers[0]?.id || 'demo-driver-A'
@@ -723,6 +728,9 @@ export async function handleDemoApiRequest<T>(
     const rest = pathname.slice('/bookings/'.length).split('/')
     const bookingId = decodeURIComponent(rest[0] || '')
     const action = rest[1] || ''
+    if (role === 'citizen' && (bookingId.startsWith('BK-SEED-') || bookingId.startsWith('BK-CSV-'))) {
+      throw new ApiError(403)
+    }
     const allBookings = mergeWithOverlayBookings(db)
     let booking = db.bookings.find(b => b.id === bookingId)
     if (!booking) {
@@ -1212,7 +1220,10 @@ export async function handleDemoApiRequest<T>(
     const replace = body?.replace !== false
     const converted = incoming.map(b => toCitizenBookingFromSeed(b, db))
     if (replace) {
-      db.bookings = converted
+      // Replace previously imported seed/CSV rows while preserving the demo citizen's own bookings.
+      const ownCitizenBookings = db.bookings.filter(b => !b.id.startsWith('BK-SEED-') && !b.id.startsWith('BK-CSV-'))
+      const convertedIds = new Set(converted.map(b => b.id))
+      db.bookings = [...ownCitizenBookings.filter(b => !convertedIds.has(b.id)), ...converted]
     } else {
       const ids = new Set(converted.map(b => b.id))
       db.bookings = [...db.bookings.filter(b => !ids.has(b.id)), ...converted]
