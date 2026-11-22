@@ -10,6 +10,7 @@ import {
   bangkokDateFromMs,
   checkCitizenSlotCapacity,
   computeBackwardBlockedWindow,
+  normalizeMobilityCode,
   parseVehicleCapabilities,
 } from '../domain/capacity'
 import { ApiError } from './apiError'
@@ -376,7 +377,7 @@ function createInitialDemoDatabase(): DemoDatabase {
     vehicles,
     drivers,
     windows,
-    bookings: initialBookings,
+    bookings: enforceZeroOverlapInvariant(initialBookings, vehicles, drivers),
     profiles: [],
     auditEvents: [
       {
@@ -472,6 +473,138 @@ function toCitizenBookingFromSeed(b: Booking, db: DemoDatabase): CitizenBooking 
   }
 }
 
+function isSeedRecordId(id: string): boolean {
+  return id.startsWith('BK-SEED-') || id.startsWith('BK-CSV-')
+}
+
+function enforceZeroOverlapInvariant(
+  bookings: CitizenBooking[],
+  vehicles: AdminResource[],
+  drivers: AdminResource[],
+): CitizenBooking[] {
+  const activeVehicles = vehicles.filter(v => v.active && !v.held)
+  const activeDrivers = drivers.filter(d => d.active && !d.held)
+  const vehicleSlots = new Map<string, [number, number][]>()
+  const driverSlots = new Map<string, [number, number][]>()
+  const reservedVehicleSlots = new Map<string, [number, number][]>()
+  const reservedDriverSlots = new Map<string, [number, number][]>()
+
+  const hasOverlap = (list: [number, number][] | undefined, startMs: number, endMs: number) =>
+    Boolean(list?.some(([s, e]) => startMs < e && endMs > s))
+  const addSlot = (map: Map<string, [number, number][]>, key: string, startMs: number, endMs: number) => {
+    const arr = map.get(key) ?? []
+    arr.push([startMs, endMs])
+    map.set(key, arr)
+  }
+  const vehicleSupports = (v: AdminResource, mobility: string) => {
+    const req = normalizeMobilityCode(mobility)
+    const caps = parseVehicleCapabilities({ capabilities: v.capabilities })
+    return caps.length === 0 || caps.includes(req)
+  }
+  const isActiveScheduled = (b: CitizenBooking) =>
+    !['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(b.status) &&
+    Boolean(b.vehicleId || b.driverId || b.schedule || b.proposedSchedule)
+  const getInterval = (b: CitizenBooking): [number, number] | null => {
+    const win = computeBackwardBlockedWindow(b.appointmentAt, {
+      hospitalName: b.hospitalName,
+      existingSchedule: b.schedule ?? b.proposedSchedule,
+    })
+    return win ? [win.startMs, win.endMs] : null
+  }
+
+  const out = bookings.map(b => ({ ...b }))
+
+  const assignOrDemote = (b: CitizenBooking, respectReserved: boolean) => {
+    const interval = getInterval(b)
+    if (!interval) return
+    const [startMs, endMs] = interval
+    const curV = b.vehicleId ? activeVehicles.find(v => v.id === b.vehicleId) : undefined
+    const curD = b.driverId ? activeDrivers.find(d => d.id === b.driverId) : undefined
+    const curOk = Boolean(
+      curV &&
+      curD &&
+      vehicleSupports(curV, b.mobility) &&
+      !hasOverlap(vehicleSlots.get(curV.id), startMs, endMs) &&
+      !hasOverlap(driverSlots.get(curD.id), startMs, endMs) &&
+      (!respectReserved || (
+        !hasOverlap(reservedVehicleSlots.get(curV.id), startMs, endMs) &&
+        !hasOverlap(reservedDriverSlots.get(curD.id), startMs, endMs)
+      )),
+    )
+    if (curOk && curV && curD) {
+      addSlot(vehicleSlots, curV.id, startMs, endMs)
+      addSlot(driverSlots, curD.id, startMs, endMs)
+      return
+    }
+    // Try to find a genuinely free, mobility-compatible vehicle & free driver.
+    const compatibleVs = activeVehicles.filter(v => vehicleSupports(v, b.mobility))
+    for (const v of compatibleVs) {
+      if (hasOverlap(vehicleSlots.get(v.id), startMs, endMs)) continue
+      if (respectReserved && hasOverlap(reservedVehicleSlots.get(v.id), startMs, endMs)) continue
+      const vIdx = vehicles.findIndex(item => item.id === v.id)
+      const orderedDrivers = vIdx >= 0 && activeDrivers.length > 0
+        ? [...activeDrivers.slice(vIdx % activeDrivers.length), ...activeDrivers.slice(0, vIdx % activeDrivers.length)]
+        : activeDrivers
+      const freeDriver = orderedDrivers.find(
+        d => !hasOverlap(driverSlots.get(d.id), startMs, endMs) && (!respectReserved || !hasOverlap(reservedDriverSlots.get(d.id), startMs, endMs)),
+      )
+      if (freeDriver) {
+        b.vehicleId = v.id
+        b.driverId = freeDriver.id
+        b.vehicleName = `${v.name} · ${v.plate}`
+        if (b.proposedSchedule) {
+          b.proposedSchedule = { ...b.proposedSchedule, vehicleId: v.id, driverId: freeDriver.id }
+        }
+        addSlot(vehicleSlots, v.id, startMs, endMs)
+        addSlot(driverSlots, freeDriver.id, startMs, endMs)
+        return
+      }
+    }
+    // No free compatible resource pair exists -> demote cleanly to unassigned APPROVED so zero overlaps exist.
+    b.status = 'APPROVED'
+    b.vehicleId = null
+    b.driverId = null
+    b.vehicleName = undefined
+    b.schedule = null
+    b.proposedSchedule = null
+    b.startedAt = null
+  }
+
+  // Pass 1: Lock preserved citizen/demo bookings first (e.g. BK-DEMO-1003).
+  for (const b of out) {
+    if (isSeedRecordId(b.id) || !isActiveScheduled(b)) continue
+    assignOrDemote(b, false)
+  }
+
+  // Pass 2: Process BK-SEED-1005 (active wheelchair demo incident target) and reserve 1 free wheelchair vehicle + 1 free driver during its window so incident reassignment is always testable.
+  const seed1005 = out.find(b => b.id === 'BK-SEED-1005' && isActiveScheduled(b))
+  if (seed1005) {
+    assignOrDemote(seed1005, false)
+    const interval1005 = getInterval(seed1005)
+    if (interval1005) {
+      const [s1005, e1005] = interval1005
+      const spareWheelchairVehicle = activeVehicles.find(
+        v => v.id !== seed1005.vehicleId && vehicleSupports(v, 'wheelchair') && !hasOverlap(vehicleSlots.get(v.id), s1005, e1005),
+      )
+      const spareDriver = activeDrivers.find(
+        d => d.id !== seed1005.driverId && !hasOverlap(driverSlots.get(d.id), s1005, e1005),
+      )
+      if (spareWheelchairVehicle) addSlot(reservedVehicleSlots, spareWheelchairVehicle.id, s1005, e1005)
+      if (spareDriver) addSlot(reservedDriverSlots, spareDriver.id, s1005, e1005)
+    }
+  }
+
+  // Pass 3: Process all remaining seed/CSV active scheduled bookings chronologically.
+  const remainingSeeds = out
+    .filter(b => isSeedRecordId(b.id) && b.id !== 'BK-SEED-1005' && isActiveScheduled(b))
+    .sort((a, b) => Date.parse(a.schedule?.departureAt || a.appointmentAt) - Date.parse(b.schedule?.departureAt || b.appointmentAt) || a.id.localeCompare(b.id))
+  for (const b of remainingSeeds) {
+    assignOrDemote(b, true)
+  }
+
+  return out
+}
+
 function mergeWithOverlayBookings(db: DemoDatabase): CitizenBooking[] {
   const overlay = seedOverlay.getState()
   if (!overlay.active || overlay.bookings.length === 0) return db.bookings
@@ -479,7 +612,8 @@ function mergeWithOverlayBookings(db: DemoDatabase): CitizenBooking[] {
   const extra = overlay.bookings
     .filter(b => !existingIds.has(b.id))
     .map(b => toCitizenBookingFromSeed(b, db))
-  return [...db.bookings, ...extra]
+  if (extra.length === 0) return db.bookings
+  return enforceZeroOverlapInvariant([...db.bookings, ...extra], db.vehicles, db.drivers)
 }
 
 function toCapacityInputs(rows: CitizenBooking[]) {
@@ -850,6 +984,9 @@ export async function handleDemoApiRequest<T>(
         pickupWaitingMinutes: waitMin,
         originLocationId: String(body?.originLocationId || db.settings.id),
         originKind: String(body?.originKind || 'depot'),
+        ...(typeof body?.previousBookingId === 'string' && body.previousBookingId.trim()
+          ? { previousBookingId: body.previousBookingId.trim() }
+          : {}),
       }
 
       if (action === 'configuration-preview') {
@@ -1231,13 +1368,21 @@ export async function handleDemoApiRequest<T>(
     const replace = body?.replace !== false
     const converted = incoming.map(b => toCitizenBookingFromSeed(b, db))
     if (replace) {
-      // Replace previously imported seed/CSV rows while preserving the demo citizen's own bookings.
-      const ownCitizenBookings = db.bookings.filter(b => !b.id.startsWith('BK-SEED-') && !b.id.startsWith('BK-CSV-'))
+      // Replace previously imported seed/CSV rows while preserving the demo citizen's own bookings and zero-overlap invariant.
+      const ownCitizenBookings = db.bookings.filter(b => !isSeedRecordId(b.id))
       const convertedIds = new Set(converted.map(b => b.id))
-      db.bookings = [...ownCitizenBookings.filter(b => !convertedIds.has(b.id)), ...converted]
+      db.bookings = enforceZeroOverlapInvariant(
+        [...ownCitizenBookings.filter(b => !convertedIds.has(b.id)), ...converted],
+        db.vehicles,
+        db.drivers,
+      )
     } else {
       const ids = new Set(converted.map(b => b.id))
-      db.bookings = [...db.bookings.filter(b => !ids.has(b.id)), ...converted]
+      db.bookings = enforceZeroOverlapInvariant(
+        [...db.bookings.filter(b => !ids.has(b.id)), ...converted],
+        db.vehicles,
+        db.drivers,
+      )
     }
     recordAudit(db, {
       action: 'SEED_IMPORT',

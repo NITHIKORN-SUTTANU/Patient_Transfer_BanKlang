@@ -55,22 +55,29 @@ export function DispatcherOperations({ booking, catalog, rows, onSaved, onBusyCh
   </section>
 }
 
+const READINESS_QUICK_REASONS = [
+  'กลับถึงศูนย์รถพร้อมใช้งานแล้ว',
+  'ตรวจสอบสภาพรถ/คนขับเรียบร้อย',
+  'ส่งต่อเคสฉุกเฉิน 1669 เสร็จสิ้น',
+] as const
+
 export function ResourceReadiness({
   catalog,
   onSaved,
   initialResource,
   autoFocusPanel = false,
-  incidentBookings = [],
-  onOpenIncident,
+  feedbackMessage = '',
 }: {
   catalog: Catalog
-  onSaved: () => void
+  onSaved: (releasedLabel: string, remainingCount: number) => void
   initialResource?: string
   autoFocusPanel?: boolean
-  incidentBookings?: { id: string; reference?: string }[]
-  onOpenIncident?: (id: string) => void
+  feedbackMessage?: string
 }) {
-  const resources = [...catalog.vehicles.filter(v => v.held).map(v => ({ value: `vehicles/${v.id}`, label: `รถ: ${v.name}` })), ...catalog.drivers.filter(d => d.held).map(d => ({ value: `drivers/${d.id}`, label: `คนขับ: ${d.name}` }))]
+  const resources = [
+    ...catalog.vehicles.filter(v => v.held).map(v => ({ value: `vehicles/${v.id}`, label: `รถ: ${v.name}`, pillLabel: `${v.name} · ${v.plate}` })),
+    ...catalog.drivers.filter(d => d.held).map(d => ({ value: `drivers/${d.id}`, label: `คนขับ: ${d.name}`, pillLabel: `คนขับ: ${d.name}` })),
+  ]
   const [resource, setResource] = useState(() => (initialResource && resources.some(item => item.value === initialResource) ? initialResource : ''))
   const [locationId, setLocationId] = useState('')
   const [reason, setReason] = useState('')
@@ -80,38 +87,129 @@ export function ResourceReadiness({
   const [error, setError] = useState('')
   const panelRef = useRef<HTMLElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const effectiveResource = resources.some(item => item.value === resource)
+    ? resource
+    : initialResource && resources.some(item => item.value === initialResource)
+    ? initialResource
+    : ''
   useEffect(() => {
     if (!autoFocusPanel || !resources.length) return
     panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     headingRef.current?.focus()
   }, [autoFocusPanel, resources.length])
+  const missingHint = (() => {
+    if (busy) return ''
+    if (!effectiveResource) return 'กรุณาเลือกทรัพยากรที่ต้องการยืนยันความพร้อม'
+    if (!locationId) return 'กรุณาเลือกตำแหน่งปัจจุบันที่ยืนยันแล้ว'
+    if (!reason.trim()) return 'กรุณากรอกเหตุผลและผลตรวจสอบ'
+    if (!confirmed) return 'กรุณาติ๊กยืนยันตำแหน่งจริงและความพร้อมก่อนกดบันทึก'
+    return ''
+  })()
+  const submitDisabled = busy || !confirmed || !reason.trim() || !effectiveResource || !locationId
   async function submit() {
-    if (pending.current || !resources.some(item => item.value === resource) || !confirmed) return
+    const selectedItem = resources.find(item => item.value === effectiveResource)
+    if (pending.current || !selectedItem || !confirmed) return
     pending.current = true; setBusy(true); setError('')
-    try { await staffRequest(`/resources/${resource}/readiness`, { locationId, reason: reason.trim() }); onSaved() }
-    catch (error) { setError(dispatcherError(error)) }
-    finally { pending.current = false; setBusy(false) }
+    try {
+      await staffRequest(`/resources/${effectiveResource}/readiness`, { locationId, reason: reason.trim() })
+      const remaining = Math.max(0, resources.length - 1)
+      setResource('')
+      setLocationId('')
+      setReason('')
+      setConfirmed(false)
+      onSaved(selectedItem.pillLabel, remaining)
+    } catch (err) {
+      setError(dispatcherError(err))
+    } finally {
+      pending.current = false; setBusy(false)
+    }
   }
-  if (!resources.length) return null
-  return <section ref={panelRef} id="resource-readiness-panel" className="dispatch-panel dispatch-readiness-panel" aria-labelledby="resource-readiness-title">
+  if (!resources.length) {
+    return feedbackMessage ? (
+      <div className="dispatch-readiness-success" role="status">
+        <strong>✓ {feedbackMessage}</strong>
+      </div>
+    ) : null
+  }
+  return <section ref={panelRef} id="resource-readiness-panel" className="dispatch-readiness-panel" aria-labelledby="resource-readiness-title">
     <div className="dispatch-readiness-head">
       <h2 ref={headingRef} id="resource-readiness-title" tabIndex={-1}>ยืนยันตำแหน่งและความพร้อมรถหรือคนขับ</h2>
       <span className="dispatch-readiness-count-badge">รอคลี่คลาย {resources.length} รายการ</span>
     </div>
-    <p>ยืนยันแยกแต่ละทรัพยากร ระบบจะตรวจงานที่ยังดำเนินอยู่และเวลาพักเตรียมพร้อมก่อนปล่อยการระงับ</p>
-    {incidentBookings.length > 0 && onOpenIncident && (
-      <div className="dispatch-readiness-incident-links" role="status">
-        <span>งานที่ยังเปิดเหตุขัดข้องอยู่:</span>
-        {incidentBookings.map(inc => (
-          <button key={inc.id} type="button" className="dispatch-incident-secondary" onClick={() => onOpenIncident(inc.id)}>
-            เปิดเคส {inc.reference ?? inc.id} เพื่อคลี่คลาย / จัดรถทดแทน →
+    <div className="dispatch-readiness-body">
+      <p className="dispatch-readiness-subtitle">ขั้นตอนที่ 2: หลังจัดการเคสด้านบนแล้ว ยืนยันตำแหน่งเพื่อปล่อยรถและคนขับกลับเข้าสถานะว่างพร้อมจัด</p>
+      <div className="dispatch-held-pills" role="group" aria-label="ทรัพยากรที่ถูกระงับความพร้อม">
+        {resources.map(item => (
+          <button
+            key={item.value}
+            type="button"
+            className="dispatch-held-pill"
+            aria-pressed={effectiveResource === item.value}
+            disabled={busy}
+            onClick={() => { setResource(item.value); setError('') }}
+          >
+            {item.pillLabel}
           </button>
         ))}
       </div>
-    )}
-    <form onSubmit={event => { event.preventDefault(); void submit() }}><fieldset disabled={busy}>
-    <label className="booking-field">ทรัพยากรที่ตรวจสอบ<select required value={resource} onChange={event => setResource(event.target.value)}><option value="">เลือกทรัพยากร</option>{resources.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-    <label className="booking-field">ตำแหน่งปัจจุบันที่ยืนยันแล้ว<select required value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">เลือกตำแหน่ง</option>{catalog.locations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-    <label className="booking-field">เหตุผลและผลตรวจสอบ<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label><label className="booking-checkbox"><input required type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว</span></label></fieldset>
-    {error && <p role="alert" className="dispatch-alert">{error}</p>}<DispatchButton type="submit" disabled={busy || !confirmed || !reason.trim() || !resource || !locationId}>{busy ? 'กำลังบันทึก…' : 'ยืนยันความพร้อมทรัพยากรนี้'}</DispatchButton></form></section>
+      {feedbackMessage && (
+        <div className="dispatch-readiness-success" role="status">
+          <strong>✓ {feedbackMessage}</strong>
+        </div>
+      )}
+      <form className="dispatch-readiness-form" onSubmit={event => { event.preventDefault(); void submit() }}>
+        <fieldset disabled={busy}>
+          <div className="dispatch-readiness-grid">
+            <label className="booking-field">ทรัพยากรที่ตรวจสอบ *
+              <select required value={effectiveResource} onChange={event => { setResource(event.target.value); setError('') }}>
+                <option value="">เลือกทรัพยากร</option>
+                {resources.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+            <label className="booking-field">ตำแหน่งปัจจุบันที่ยืนยันแล้ว *
+              <select required value={locationId} onChange={event => { setLocationId(event.target.value); setError('') }}>
+                <option value="">เลือกตำแหน่ง</option>
+                {catalog.locations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="dispatch-readiness-reason-block">
+            <div className="dispatch-readiness-quick-chips" role="group" aria-label="เหตุผลด่วนสำหรับยืนยันความพร้อม">
+              {READINESS_QUICK_REASONS.map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`dispatch-readiness-chip ${reason === preset ? 'active' : ''}`}
+                  aria-pressed={reason === preset}
+                  disabled={busy}
+                  onClick={() => { setReason(preset); setError('') }}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <label className="booking-field">เหตุผลและผลตรวจสอบ *
+              <textarea
+                required
+                maxLength={1000}
+                rows={3}
+                placeholder="ระบุผลการตรวจสอบรถ/คนขับ หรือแตะเลือกเหตุผลด่วนด้านบน"
+                value={reason}
+                onChange={event => { setReason(event.target.value); setError('') }}
+              />
+            </label>
+          </div>
+        </fieldset>
+        {missingHint && <p className="dispatch-readiness-hint" role="status">{missingHint}</p>}
+        {error && <p role="alert" className="dispatch-alert">{error}</p>}
+        <div className="dispatch-readiness-footer">
+          <label className="booking-checkbox">
+            <input required type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />
+            <span>ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว</span>
+          </label>
+          <DispatchButton type="submit" disabled={submitDisabled}>{busy ? 'กำลังบันทึก…' : 'ยืนยันความพร้อมทรัพยากรนี้'}</DispatchButton>
+        </div>
+      </form>
+    </div>
+  </section>
 }

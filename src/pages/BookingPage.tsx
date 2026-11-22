@@ -145,6 +145,7 @@ export function BookingPage() {
   const locating = locatingPath === pathname
   const locationRequest = useRef(0)
   const manualVillageRef = useRef(false)
+  const manualAddressRef = useRef(false)
   const [villageAutoMatched, setVillageAutoMatched] = useState(false)
   const [pinOutOfZone, setPinOutOfZone] = useState(false)
   const [addressSuggestion, setAddressSuggestion] = useState('')
@@ -305,12 +306,12 @@ export function BookingPage() {
       if (!candidate) return
       setDraft(current => {
         const existing = (current.pickupAddress ?? '').trim()
-        if (!existing) {
+        if (!existing || !manualAddressRef.current) {
           setAddressSuggestion('')
           setErrors(errs => { const next = { ...errs }; delete next.pickupAddress; return next })
-          return { ...current, pickupAddress: candidate }
+          return existing === candidate ? current : { ...current, pickupAddress: candidate }
         }
-        if (!existing.includes(candidate)) {
+        if (existing !== candidate) {
           setAddressSuggestion(candidate)
         } else {
           setAddressSuggestion('')
@@ -439,6 +440,7 @@ export function BookingPage() {
     pendingIntake.current = null
     setIntakeUncertain(false)
     manualVillageRef.current = false
+    manualAddressRef.current = false
     setVillageAutoMatched(false)
     setPinOutOfZone(false)
     setAddressSuggestion('')
@@ -504,7 +506,7 @@ export function BookingPage() {
     <BookingHeader title="ข้อมูลผู้ป่วย" subtitle="ใครต้องการใช้รถรับส่ง?" /><BookingProgress step={1} />
     <div className="booking-tabs" role="group" aria-label="ประเภทการจอง">{(['self', 'other'] as const).map(value => <button type="button" aria-pressed={draft.bookingFor === value} key={value} onClick={() => { update('bookingFor', value); setErrors({}) }}>{value === 'self' ? 'จองให้ตนเอง' : 'จองให้ผู้อื่น'}</button>)}</div>
     <p className="booking-small">ช่องที่มี * จำเป็นต้องกรอก</p><form className="booking-form" noValidate onSubmit={e => { e.preventDefault(); patientNext() }}>
-      {profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; manualVillageRef.current = Boolean(profile?.villageId); setVillageAutoMatched(false); setPinOutOfZone(false); setAddressSuggestion(''); setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select><span className="booking-small">โปรดตรวจสอบข้อมูลก่อนส่งคำขอ</span></label>}
+      {profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; manualVillageRef.current = Boolean(profile?.villageId); manualAddressRef.current = Boolean(profile?.pickupAddress?.trim()); setVillageAutoMatched(false); setPinOutOfZone(false); setAddressSuggestion(''); setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select><span className="booking-small">โปรดตรวจสอบข้อมูลก่อนส่งคำขอ</span></label>}
       {field('patientName', 'ชื่อผู้ป่วย', 'ชื่อและนามสกุล')}
       {draft.bookingFor === 'other' && field('contactName', 'ชื่อผู้ดูแล / ผู้ติดต่อ', 'ชื่อผู้จองหรือผู้ดูแล')}
       {field('phone', draft.bookingFor === 'self' ? 'เบอร์โทรศัพท์ของคุณ' : 'เบอร์โทรศัพท์ผู้ติดต่อ', '08X-XXX-XXXX')}
@@ -527,19 +529,19 @@ export function BookingPage() {
     </div>
     <label className="booking-field">หมู่บ้านในเขตบริการ *<select value={draft.villageId ?? ''} aria-invalid={!!errors.villageId} onChange={event => { manualVillageRef.current = Boolean(event.target.value); setVillageAutoMatched(false); setPinOutOfZone(false); update('villageId', event.target.value) }}><option value="">เลือกหมู่บ้าน</option>{catalog.villages.map(village => <option key={village.id} value={village.id}>หมู่ {village.number} · {village.name}</option>)}</select>{villageAutoMatched && draft.villageId && <span className="booking-village-auto-hint">อิงจากตำแหน่งบนแผนที่</span>}{error('villageId')}</label>
     {pinOutOfZone && <p className="booking-out-of-zone-notice" role="status">ตำแหน่งหมุดอยู่นอกเขตบริการหลัก กรุณาตรวจสอบหมู่บ้านอีกครั้ง</p>}
-    <label className="booking-field">ที่อยู่จุดรับ *<input value={draft.pickupAddress ?? ''} autoComplete="street-address" placeholder="บ้านเลขที่ หมู่บ้าน ตำบล" aria-invalid={!!errors.pickupAddress} onChange={event => update('pickupAddress', event.target.value)} />{error('pickupAddress')}</label>
-    {addressSuggestion && !(draft.pickupAddress ?? '').includes(addressSuggestion) && (
+    <label className="booking-field">ที่อยู่จุดรับ *<input value={draft.pickupAddress ?? ''} autoComplete="street-address" placeholder="บ้านเลขที่ หมู่บ้าน ตำบล" aria-invalid={!!errors.pickupAddress} onChange={event => { manualAddressRef.current = Boolean(event.target.value.trim()); update('pickupAddress', event.target.value) }} />{error('pickupAddress')}</label>
+    {addressSuggestion && (draft.pickupAddress ?? '').trim() !== addressSuggestion && (
       <div className="booking-address-suggestion-wrap">
         <button
           type="button"
           className="booking-address-suggestion"
           onClick={() => {
-            const current = (draft.pickupAddress ?? '').trim()
-            update('pickupAddress', current ? `${current} ${addressSuggestion}` : addressSuggestion)
+            update('pickupAddress', addressSuggestion)
+            manualAddressRef.current = false
             setAddressSuggestion('')
           }}
         >
-          + เติมจุดใกล้เคียง: {addressSuggestion}
+          ใช้ที่อยู่นี้แทน: {addressSuggestion}
         </button>
       </div>
     )}

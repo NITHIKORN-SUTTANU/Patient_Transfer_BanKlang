@@ -59,15 +59,29 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
       selectedVehicle.capabilities.length > 0 &&
       !selectedVehicle.capabilities.includes(requiredMobility),
   )
-  const matchingPreviousJobs = previousJobs.filter(
-    row =>
-      row.id !== booking.id &&
-      row.schedule &&
-      row.vehicleId === vehicleId &&
-      row.driverId === driverId &&
-      (row.hospitalLocationId ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.location_id) === originId &&
-      !['CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status),
-  )
+  const [todayBkk] = useState(() => bangkokDateFromMs(Date.now()))
+  const bookingDay = bangkokDateFromMs(Date.parse(booking.appointmentAt))
+  const targetApptMs = Date.parse(booking.appointmentAt)
+  const isSameDayPriorJob = (row: ApiBooking, locId: string, requireSelectedPair: boolean) => {
+    if (row.id === booking.id || !row.schedule) return false
+    if (['CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status)) return false
+    if (requireSelectedPair) {
+      if (row.vehicleId !== vehicleId || row.driverId !== driverId) return false
+    } else {
+      if (vehicleId && row.vehicleId !== vehicleId) return false
+      if (driverId && row.driverId !== driverId) return false
+    }
+    const rowHospitalLoc = row.hospitalLocationId ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.location_id ?? row.hospitalId
+    if (rowHospitalLoc !== locId) return false
+    const rowDay = bangkokDateFromMs(Date.parse(row.schedule.pickupAt || row.appointmentAt))
+    if (rowDay !== bookingDay) return false
+    const rowFinishMs = Date.parse(row.schedule.arrivalAt || row.appointmentAt)
+    return Number.isFinite(rowFinishMs) && Number.isFinite(targetApptMs) && rowFinishMs < targetApptMs
+  }
+  const matchingPreviousJobs = previousJobs.filter(row => isSameDayPriorJob(row, originId, true))
+  const preservedPreviousRow = previousId && !matchingPreviousJobs.some(row => row.id === previousId)
+    ? previousJobs.find(row => row.id === previousId)
+    : undefined
   const hospitalName = booking.hospitalName ?? catalog.hospitals.find(h => h.id === booking.hospitalId)?.name
   const outsideServiceHours = (() => {
     if (proposal) {
@@ -82,8 +96,6 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     hospitalName,
     existingSchedule: proposal,
   })
-  const [todayBkk] = useState(() => bangkokDateFromMs(Date.now()))
-  const bookingDay = bangkokDateFromMs(Date.parse(booking.appointmentAt))
   const resolveHospitalName = (row: ApiBooking) =>
     row.hospitalName ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.name ?? 'โรงพยาบาล'
   const resolveHospitalLocationKey = (row: ApiBooking) =>
@@ -299,15 +311,12 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
   }
 
   const countPriorJobsAtLocation = (locId: string) =>
-    previousJobs.filter(
-      row =>
-        row.id !== booking.id &&
-        row.schedule &&
-        (!vehicleId || row.vehicleId === vehicleId) &&
-        (!driverId || row.driverId === driverId) &&
-        (row.hospitalLocationId ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.location_id) === locId &&
-        !['CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status),
-    ).length
+    previousJobs.filter(row => isSameDayPriorJob(row, locId, false)).length
+
+  const hasFreeCompatibleVehicle = catalog.vehicles.some(v => {
+    const info = vehicleInsights.get(v.id)
+    return v.active && info && info.supportsCase && !info.heldOrIncident && !info.overlapWin
+  })
 
   const disabledReason = (() => {
     if (busy) return null
@@ -446,6 +455,16 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     <p className="dispatch-small">ข้อมูลเส้นทาง © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> / OSRM · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noreferrer">แก้ไขแผนที่</a></p>
     <fieldset ref={resourceSectionRef} className={editingProposal ? 'is-editing-proposal' : undefined} disabled={busy || assigning}>
       <h2>3. เลือกรถและคนขับ</h2>
+      {assigning && (
+        <p className="dispatch-locked-caption" role="status">
+          ล็อกข้อมูลตามตารางที่ยืนยันแล้ว — กด &quot;แก้ไขข้อเสนอตารางและทรัพยากร&quot; ด้านบนหากต้องการเปลี่ยนรถหรือต้นทาง
+        </p>
+      )}
+      {!assigning && catalog.vehicles.length > 0 && !hasFreeCompatibleVehicle && (
+        <p className="dispatch-no-free-vehicle-note" role="status">
+          ขณะนี้ไม่มีรถที่รองรับประเภท {MOBILITY_LABELS[requiredMobility]} ว่างในช่วงเวลานี้ (รถที่รองรับทุกคันติดงานหรือถูกระงับความพร้อม)
+        </p>
+      )}
       <div className="dispatch-resource-row">
         <div className="dispatch-resource-col">
           <ResourcePicker
@@ -545,10 +564,15 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
               onChange={event => setPreviousId(event.target.value)}
             >
               <option value="">เลือกงานก่อนหน้า</option>
+              {previousId && !matchingPreviousJobs.some(row => row.id === previousId) && (
+                <option value={previousId}>
+                  {preservedPreviousRow ? `${preservedPreviousRow.reference} · ${dispatchDate(preservedPreviousRow.appointmentAt)} ${dispatchTime(preservedPreviousRow.appointmentAt)}` : previousId}
+                </option>
+              )}
               {matchingPreviousJobs.map(row => <option value={row.id} key={row.id}>{row.reference} · {dispatchDate(row.appointmentAt)} {dispatchTime(row.appointmentAt)}</option>)}
             </select>
           </label>
-          {matchingPreviousJobs.length === 0 && (
+          {matchingPreviousJobs.length === 0 && !previousId && (
             <div className="dispatch-origin-helper" role="status">
               <p>ไม่พบงานก่อนหน้าของรถและคนขับคู่นี้ที่โรงพยาบาลดังกล่าว กรุณาเปลี่ยนต้นทางกลับเป็นศูนย์รถเทศบาลตำบลบ้านกลาง</p>
               {depotOriginId && depotOriginId !== originId && (

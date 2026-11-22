@@ -38,6 +38,21 @@ interface TimelineTrip {
   mobility: 'standard' | 'wheelchair' | 'stretcher'
 }
 
+function assignTimelineLanes(trips: TimelineTrip[]): { items: (TimelineTrip & { lane: number })[]; laneCount: number } {
+  const laneEnds: number[] = []
+  const items = trips.map(trip => {
+    let lane = laneEnds.findIndex(endMs => endMs <= trip.window.startMs)
+    if (lane === -1) {
+      lane = laneEnds.length
+      laneEnds.push(trip.window.endMs)
+    } else {
+      laneEnds[lane] = trip.window.endMs
+    }
+    return { ...trip, lane }
+  })
+  return { items, laneCount: Math.max(1, laneEnds.length) }
+}
+
 export function VehicleTimelineView({
   bookings,
   vehicles,
@@ -89,10 +104,21 @@ export function VehicleTimelineView({
 
   const chipDates = useMemo(() => {
     const source = scheduledDates.length > 0 ? scheduledDates : activeDates
-    const set = new Set<string>(source.slice(0, 4))
-    if (selectedDate) set.add(selectedDate)
-    return Array.from(set).sort().slice(0, 5)
-  }, [scheduledDates, activeDates, selectedDate])
+    // Prioritize today and upcoming dates first so older historical dates never crowd out today's schedule.
+    const upcoming = source.filter(d => d >= todayDate)
+    const pastRecent = source.filter(d => d < todayDate).reverse()
+    const prioritized = [...upcoming, ...pastRecent]
+    const ordered: string[] = []
+    if (selectedDate && !prioritized.includes(selectedDate)) ordered.push(selectedDate)
+    for (const d of prioritized) {
+      if (!ordered.includes(d)) ordered.push(d)
+      if (ordered.length >= 4) break
+    }
+    if (selectedDate && !ordered.includes(selectedDate)) {
+      ordered.splice(ordered.length - 1, 1, selectedDate)
+    }
+    return ordered
+  }, [scheduledDates, activeDates, todayDate, selectedDate])
 
   const fleetList = useMemo(() => {
     if (catalogVehicles && catalogVehicles.length > 0) {
@@ -256,25 +282,29 @@ export function VehicleTimelineView({
               </div>
 
               <div className="dispatch-timeline-track-area">
-                {!isAllDays && (
-                  <div className="dispatch-timeline-track" aria-hidden="true">
-                    {dayTrips.slice(0, 12).map(({ booking, window }) => {
-                      const leftPct = pctFromClock(window.departureClock)
-                      const rightPct = pctFromClock(window.freeClock)
-                      const widthPct = Math.max(8, rightPct - leftPct)
-                      return (
-                        <div
-                          key={booking.id}
-                          className="dispatch-timeline-block"
-                          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                          title={`${booking.id} · ${window.windowLabel}`}
-                        >
-                          <span>{window.departureClock}–{window.freeClock}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                {!isAllDays && (() => {
+                  const { items: lanedTrips, laneCount } = assignTimelineLanes(dayTrips.slice(0, 12))
+                  const trackHeight = laneCount > 1 ? laneCount * 28 + (laneCount - 1) * 4 + 6 : 32
+                  return (
+                    <div className="dispatch-timeline-track" style={{ height: `${trackHeight}px` }} aria-hidden="true">
+                      {lanedTrips.map(({ booking, window, lane }) => {
+                        const leftPct = pctFromClock(window.departureClock)
+                        const rightPct = pctFromClock(window.freeClock)
+                        const widthPct = Math.max(8, rightPct - leftPct)
+                        return (
+                          <div
+                            key={booking.id}
+                            className="dispatch-timeline-block"
+                            style={{ left: `${leftPct}%`, width: `${widthPct}%`, top: `${3 + lane * 32}px`, height: '26px' }}
+                            title={`${booking.id} · ${window.windowLabel}`}
+                          >
+                            <span>{window.departureClock}–{window.freeClock}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
 
                 {dayTrips.length > 0 ? (
                   <ul className="dispatch-timeline-trip-list">

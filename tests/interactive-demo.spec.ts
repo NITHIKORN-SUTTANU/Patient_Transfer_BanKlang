@@ -190,8 +190,11 @@ test('UI/UX polish: DemoRoleBar offset/collapse, Admin layout, bounded lists, ci
 
   await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'ติดตามงานรับส่ง', exact: true }).click()
   await expect(page).toHaveURL(/\/dispatcher\/tracking$/)
-  const monitoringWrapBox = (await page.locator('.dispatch-monitoring .service-table-wrap').boundingBox())!
-  expect(monitoringWrapBox.height).toBeLessThanOrEqual(545)
+  const trackingInnerScroll = await page.locator('.dispatch-monitoring .service-table-wrap').evaluate(el => ({
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  }))
+  expect(trackingInnerScroll.scrollHeight).toBeLessThanOrEqual(trackingInnerScroll.clientHeight + 2)
 
   // 3. Citizen /booking/review profile update stays checked + clean pickup formatting + newest-first booking sort
   await demoBar.getByRole('button', { name: 'ผู้ป่วย / จองรถ' }).click()
@@ -698,9 +701,10 @@ test('Pre-UAT polish: pickup map auto-village & non-destructive suggestion pill,
   await expect(addressInput).toHaveValue('82 13')
   const suggestionPill = page.locator('.booking-address-suggestion')
   await expect(suggestionPill).toBeVisible()
-  await expect(suggestionPill).toContainText('+ เติมจุดใกล้เคียง:')
+  await expect(suggestionPill).toContainText('ใช้ที่อยู่นี้แทน:')
   await suggestionPill.click()
-  await expect(addressInput).toHaveValue(/^82 13 .+/)
+  await expect(addressInput).toHaveValue(/^ใกล้หมู่ 1 บ้านกลาง/)
+  await expect(suggestionPill).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
   // 2. Desktop 1280px: Load 320 seed rows -> check Timeline ทุกวัน toggle, Live Fleet Matrix horizontal scroll row, & Driver History 12-item pagination + filters
@@ -1095,7 +1099,7 @@ test('Final UX, Privacy & Layout Polish: sticky desktop sidebars, pin-driven vil
   await page.getByLabel('ลองจิจูด').fill('99.0468')
   await expect(villageSelect).toHaveValue('village-04')
   await expect(addressInput).toHaveValue('82 13')
-  await expect(page.locator('.booking-address-suggestion')).toContainText('+ เติมจุดใกล้เคียง: ถนนรอบเมืองนอก')
+  await expect(page.locator('.booking-address-suggestion')).toContainText('ใช้ที่อยู่นี้แทน: ถนนรอบเมืองนอก')
 
   // Move pin OUTSIDE 8 km Ban Klang radius -> does NOT force another village, displays amber out-of-zone notice!
   await page.getByLabel('ละติจูด').fill('18.4500')
@@ -1299,4 +1303,306 @@ test('Final Pre-UAT Visual & Navigation Polish: single-day timeline & unclipped 
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     }
   }
+})
+
+test('Comprehensive Pre-UAT Bugfix & UX Pass: zero overlaps, 2-step hospital origin, dropdown geometry & BK-SEED-1005 reassign, readiness panel feedback, tracking pagination auto-scroll, address replace & mobile menu dot', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  let reverseHit = 0
+  await page.route('https://photon.komoot.io/reverse*', route => {
+    reverseHit += 1
+    const road = reverseHit === 1 ? 'ถนนบ้านกลางสาย 1' : 'ถนนลำพูน-ป่าซาง'
+    return route.fulfill({ json: { features: [{ properties: { name: road } }] } })
+  })
+
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
+
+  // Helper to assert zero overlapping active trips on any vehicleId or driverId in localStorage demo DB
+  const assertZeroOverlaps = async () => {
+    const conflicts = await page.evaluate(() => {
+      const raw = localStorage.getItem('ban-klang-transit:interactive-demo-db:v1')
+      if (!raw) return []
+      const db = JSON.parse(raw) as { bookings: { id: string; status: string; vehicleId: string | null; driverId: string | null; appointmentAt: string; schedule: { departureAt: string; readyAt: string } | null; proposedSchedule: { departureAt: string; readyAt: string } | null }[] }
+      const active = db.bookings.filter(b => !['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(b.status) && (b.vehicleId || b.driverId))
+      const spans = active.map(b => {
+        const s = b.schedule ?? b.proposedSchedule
+        const start = s ? Date.parse(s.departureAt) : Date.parse(b.appointmentAt) - 75 * 60_000
+        const end = s ? Date.parse(s.readyAt) : Date.parse(b.appointmentAt) + 55 * 60_000
+        return { id: b.id, v: b.vehicleId, d: b.driverId, start, end }
+      })
+      const found: string[] = []
+      for (let i = 0; i < spans.length; i++) {
+        for (let j = i + 1; j < spans.length; j++) {
+          const a = spans[i]
+          const b = spans[j]
+          if (a.start < b.end && a.end > b.start) {
+            if (a.v && b.v && a.v === b.v) found.push(`vehicle:${a.v}:${a.id}<->${b.id}`)
+            if (a.d && b.d && a.d === b.d) found.push(`driver:${a.d}:${a.id}<->${b.id}`)
+          }
+        }
+      }
+      return found
+    })
+    expect(conflicts).toEqual([])
+  }
+
+  // 1a. Zero overlaps in initial Demo Mode
+  await assertZeroOverlaps()
+
+  // 2. 2-Step Hospital-Origin Scheduling Flow (same-day filter + preserved previousBookingId + custom dropdown non-overlap geometry)
+  await page.evaluate(() => {
+    const key = 'ban-klang-transit:interactive-demo-db:v1'
+    const db = JSON.parse(localStorage.getItem(key)!)
+    const target = db.bookings.find((b: { id: string }) => b.id === 'BK-DEMO-1002')
+    const baseMs = Date.parse(target.appointmentAt)
+    const sameDayAppt = new Date(baseMs - 3 * 3600_000).toISOString()
+    const oldMonthAppt = new Date(baseMs - 30 * 86400_000).toISOString()
+    const makePrior = (id: string, apptIso: string) => {
+      const m = Date.parse(apptIso)
+      return {
+        ...target,
+        id,
+        reference: id,
+        status: 'COMPLETED',
+        revision: 4,
+        patientName: `ผู้ป่วยรอบก่อนหน้า ${id}`,
+        appointmentAt: apptIso,
+        vehicleId: 'demo-vehicle-1',
+        driverId: 'demo-driver-A',
+        vehicleName: 'รถคันที่ 01 · กข 1101',
+        schedule: {
+          departureAt: new Date(m - 55 * 60_000).toISOString(),
+          pickupAt: new Date(m - 35 * 60_000).toISOString(),
+          arrivalAt: new Date(m - 20 * 60_000).toISOString(),
+          readyAt: new Date(m + 10 * 60_000).toISOString(),
+          pickupWaitingMinutes: 0,
+          originLocationId: db.settings.id,
+          originKind: 'depot',
+        },
+        proposedSchedule: null,
+      }
+    }
+    db.bookings.push(makePrior('BK-DEMO-PRIOR-SAMEDAY', sameDayAppt))
+    db.bookings.push(makePrior('BK-DEMO-PRIOR-OLDMONTH', oldMonthAppt))
+    localStorage.setItem(key, JSON.stringify(db))
+  })
+
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  await page.getByRole('button', { name: 'โหลดข้อมูลล่าสุด', exact: true }).click()
+
+  // Verify custom dropdown options NEVER overlap vertically for Vehicle & Driver pickers
+  const assertNoOptionOverlap = async (triggerName: RegExp) => {
+    await page.getByRole('button', { name: triggerName }).click()
+    const options = page.locator('.dispatch-resource-options [role="option"]')
+    const count = await options.count()
+    expect(count).toBeGreaterThanOrEqual(3)
+    const rects = await options.evaluateAll(els => els.map(el => {
+      const r = el.getBoundingClientRect()
+      return { top: r.top, bottom: r.bottom }
+    }))
+    for (let i = 0; i < rects.length - 1; i++) {
+      expect(rects[i].bottom).toBeLessThanOrEqual(rects[i + 1].top + 1)
+    }
+  }
+
+  await assertNoOptionOverlap(/^รถรับส่ง:/)
+  await page.getByRole('option', { name: /รถคันที่ 01/ }).click()
+  await assertNoOptionOverlap(/^คนขับ:/)
+  await page.getByRole('option', { name: /นายสมชาย ใจดี/ }).click()
+
+  // Hospital origin shows ONLY same-day prior job (excludes cross-month BK-DEMO-PRIOR-OLDMONTH)
+  const originSelect = page.locator('#dispatch-origin-select')
+  await originSelect.selectOption('hospital-hariphunchai')
+  const prevSelect = page.locator('#dispatch-previous-job-select')
+  await expect(prevSelect).toContainText('BK-DEMO-PRIOR-SAMEDAY')
+  await expect(prevSelect).not.toContainText('BK-DEMO-PRIOR-OLDMONTH')
+  await prevSelect.selectOption('BK-DEMO-PRIOR-SAMEDAY')
+
+  // Step 1 -> confirms schedule and preserves previousBookingId in locked Section 3 -> Step 2 stays ENABLED and completes!
+  await page.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันตาราง', exact: true }).click()
+  await expect(page.locator('.dispatch-locked-caption')).toContainText('ล็อกข้อมูลตามตารางที่ยืนยันแล้ว')
+  await expect(prevSelect).toHaveValue('BK-DEMO-PRIOR-SAMEDAY')
+  const step2Btn = page.getByRole('button', { name: 'ตรวจสอบซ้ำและยืนยันการมอบหมาย', exact: true })
+  await expect(step2Btn).toBeEnabled()
+  await step2Btn.click()
+  await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันการมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking$/)
+
+  // 1b + 3 + 5. Inject a preserved BK-DEMO booking on 2026-11-22 09:15-11:25 on demo-vehicle-1/demo-driver-A (exact collision with BK-SEED-1005!),
+  // then load 320 seed rows -> verify ZERO overlaps across 320+ merged bookings, BK-SEED-1005 reassignable, tracking table no inner scrollbar + pagination auto-scroll!
+  await page.evaluate(() => {
+    const key = 'ban-klang-transit:interactive-demo-db:v1'
+    const db = JSON.parse(localStorage.getItem(key)!)
+    const base = db.bookings.find((b: { id: string }) => b.id === 'BK-DEMO-1003')
+    if (base) {
+      db.bookings.push({
+        ...base,
+        id: 'BK-DEMO-COLLIDE-1122',
+        reference: 'BK-DEMO-COLLIDE-1122',
+        status: 'ASSIGNED',
+        appointmentAt: '2026-11-22T10:30:00+07:00',
+        vehicleId: 'demo-vehicle-1',
+        driverId: 'demo-driver-A',
+        vehicleName: 'รถคันที่ 01 · กข 1101',
+        schedule: {
+          departureAt: '2026-11-22T09:15:00+07:00',
+          pickupAt: '2026-11-22T09:45:00+07:00',
+          arrivalAt: '2026-11-22T10:10:00+07:00',
+          readyAt: '2026-11-22T11:25:00+07:00',
+          pickupWaitingMinutes: 0,
+          originLocationId: db.settings.id,
+          originKind: 'depot',
+        },
+        proposedSchedule: null,
+      })
+      localStorage.setItem(key, JSON.stringify(db))
+    }
+  })
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await page.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  await expect(page.getByText('ข้อมูลจำลองในระบบ: 320 รายการ')).toBeVisible()
+  await assertZeroOverlaps()
+
+  // Verify BK-SEED-1005 has at least 1 genuinely free wheelchair-compatible vehicle & free driver available in Demo Mode
+  await demoBar.getByRole('button', { name: 'เจ้าหน้าที่จัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'ติดตามงานรับส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking$/)
+
+  // Tracking table: NO inner vertical scroll trap & horizontal side-by-side pagination buttons & auto-scroll on ถัดไป →
+  const wrapMetrics = await page.locator('.dispatch-monitoring .service-table-wrap').evaluate(el => ({
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  }))
+  expect(wrapMetrics.scrollHeight).toBeLessThanOrEqual(wrapMetrics.clientHeight + 2)
+
+  const prevPageBtn = page.locator('.dispatch-monitoring .service-pagination-btn').nth(0)
+  const nextPageBtn = page.locator('.dispatch-monitoring .service-pagination-btn').nth(1)
+  const prevBox = (await prevPageBtn.boundingBox())!
+  const nextBox = (await nextPageBtn.boundingBox())!
+  expect(Math.abs(prevBox.y - nextBox.y)).toBeLessThanOrEqual(4)
+  await nextPageBtn.click()
+  await expect(page.locator('.dispatch-monitoring .service-pagination-summary')).toContainText('หน้า 2/')
+  await expect.poll(async () => page.locator('.dispatch-monitoring').evaluate(el => el.getBoundingClientRect().top)).toBeLessThanOrEqual(220)
+
+  // Open BK-SEED-1005 -> choose 'modify' -> verify a genuinely free wheelchair vehicle + free driver exist!
+  await page.getByPlaceholder(/ค้นหารหัสงาน/).fill('BK-SEED-1005')
+  await page.locator('.dispatch-monitoring tbody tr', { hasText: 'BK-SEED-1005' }).getByRole('button', { name: /ดูสถานะ|ดูรายละเอียด/ }).click()
+  const trackDialog = page.getByRole('dialog')
+  await trackDialog.getByLabel('การดำเนินการ').selectOption('modify')
+  await trackDialog.getByRole('button', { name: /^รถรับส่ง:/ }).click()
+  const freeWheelchairOpt = trackDialog.locator('.dispatch-resource-options [role="option"]', { hasText: /ว่าง.*รถเข็น/ })
+  expect(await freeWheelchairOpt.count()).toBeGreaterThanOrEqual(1)
+  await freeWheelchairOpt.first().click()
+  await trackDialog.getByRole('button', { name: /^คนขับ:/ }).click()
+  const freeDriverOpt = trackDialog.locator('.dispatch-resource-options [role="option"]', { hasText: /ว่าง \(/ })
+  expect(await freeDriverOpt.count()).toBeGreaterThanOrEqual(1)
+  await freeDriverOpt.first().click()
+  await trackDialog.getByRole('button', { name: 'ปิดรายละเอียด', exact: true }).click()
+
+  // 4. Redesigned #resource-readiness-panel: held pills + quick-fill chip + inline hint + green confirmation feedback
+  await page.evaluate(() => {
+    const key = 'ban-klang-transit:interactive-demo-db:v1'
+    const db = JSON.parse(localStorage.getItem(key)!)
+    db.vehicles[0].held = true
+    db.drivers[0].held = true
+    localStorage.setItem(key, JSON.stringify(db))
+  })
+  await page.getByRole('button', { name: 'โหลดข้อมูลล่าสุด', exact: true }).click()
+  const readiness = page.locator('#resource-readiness-panel')
+  await expect(readiness).toBeVisible()
+  await expect(readiness.locator('.dispatch-readiness-count-badge')).toContainText('รอคลี่คลาย 2 รายการ')
+  await expect(readiness.locator('.dispatch-readiness-hint')).toContainText('กรุณาเลือกทรัพยากร')
+
+  await readiness.locator('.dispatch-held-pill').first().click()
+  await readiness.getByLabel(/ตำแหน่งปัจจุบันที่ยืนยันแล้ว/).selectOption({ index: 1 })
+  await expect(readiness.locator('.dispatch-readiness-hint')).toContainText('กรุณากรอกเหตุผลและผลตรวจสอบ')
+  await readiness.locator('.dispatch-readiness-chip', { hasText: 'กลับถึงศูนย์รถพร้อมใช้งานแล้ว' }).click()
+  await readiness.getByLabel('ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว').check()
+  await readiness.getByRole('button', { name: 'ยืนยันความพร้อมทรัพยากรนี้' }).click()
+  await expect(readiness.locator('.dispatch-readiness-success')).toContainText('เหลือทรัพยากรรอคลี่คลายอีก 1 รายการ')
+  await expect(readiness.locator('.dispatch-readiness-count-badge')).toContainText('รอคลี่คลาย 1 รายการ')
+
+  // 7. Mobile 390px hamburger menu (☰) priority status dots (red on Dispatcher hold, green on Driver active trip on /driver/history)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('#dispatcher-sidebar .mobile-menu-status-dot.is-danger')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // Clear remaining hold so Dispatcher dot downgrades to amber on /dispatcher/tracking (pending/unassigned exist on other tabs)
+  await readiness.locator('.dispatch-held-pill').first().click()
+  await readiness.getByLabel(/ตำแหน่งปัจจุบันที่ยืนยันแล้ว/).selectOption({ index: 1 })
+  await readiness.locator('.dispatch-readiness-chip').first().click()
+  await readiness.getByLabel('ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว').check()
+  await readiness.getByRole('button', { name: 'ยืนยันความพร้อมทรัพยากรนี้' }).click()
+  await expect(page.locator('.dispatch-readiness-success')).toContainText('ปล่อยการระงับครบทุกรายการ')
+  await expect(page.locator('#dispatcher-sidebar .mobile-menu-status-dot.is-amber')).toBeVisible()
+
+  // Driver mobile 390px: active trip has NO dot on /driver/status and shows GREEN dot on ☰ when viewing /driver/history
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await expect(page.locator('.driver-trip').first()).toBeVisible()
+  const trackActive = page.getByRole('button', { name: /ติดตามสถานะงาน/ }).first()
+  if ((await trackActive.count()) > 0) {
+    await expect(page.locator('#driver-sidebar .mobile-menu-status-dot.is-active')).toBeVisible()
+    await trackActive.click()
+  } else {
+    await page.getByRole('button', { name: /ดูรายละเอียด/ }).first().click()
+    await page.getByRole('button', { name: 'เริ่มงาน', exact: true }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  }
+  await expect(page).toHaveURL(/\/driver\/status/)
+  await expect(page.locator('#driver-sidebar .mobile-menu-status-dot')).toHaveCount(0)
+  await page.getByRole('button', { name: 'เมนูคนขับ', exact: true }).click()
+  await page.getByRole('dialog', { name: 'เมนูคนขับ', exact: true }).getByRole('link', { name: 'ประวัติ', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/history$/)
+  await expect(page.locator('#driver-sidebar .mobile-menu-status-dot.is-active')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // 6. Citizen Pickup Address: auto-fill replaces on pin move; manual edit shows ใช้ที่อยู่นี้แทน: and clicking replaces cleanly!
+  await demoBar.getByRole('button', { name: 'ผู้ป่วย / จองรถ' }).click()
+  await page.getByRole('button', { name: 'เริ่มจองรถ →' }).click()
+  await page.getByLabel(/รับทราบการใช้ข้อมูล/).check()
+  await page.getByRole('button', { name: 'รับทราบและถัดไป' }).click()
+  await page.getByLabel(/ชื่อผู้ป่วย/).fill('นางทดสอบ แทนที่ที่อยู่')
+  await page.getByLabel(/เบอร์โทรศัพท์ของคุณ/).fill('0894445566')
+  await page.getByLabel(/โรงพยาบาล/).selectOption('hospital-lamphun')
+  await page.locator('button.booking-input-trigger').first().click()
+  await page.getByRole('button', { name: 'เดือนถัดไป', exact: true }).click()
+  await page.locator('.booking-calendar button:not([disabled])', { hasText: /^\s*(?:[\u0E00-\u0E7F]+\.\s*)?24$/ }).first().click()
+  await page.getByRole('button', { name: 'ยืนยันวันที่', exact: true }).click()
+  await page.locator('button.booking-input-trigger').nth(1).click()
+  await setPickerTime(page, 'ชั่วโมง', '10')
+  await setPickerTime(page, 'นาที', '30')
+  await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
+  await page.getByRole('button', { name: 'ถัดไป →' }).click()
+  await expect(page).toHaveURL(/\/booking\/assistance$/)
+
+  const addrInput = page.getByLabel(/ที่อยู่จุดรับ/)
+  await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง').click()
+  await page.getByLabel('ละติจูด').fill('18.5795')
+  await page.getByLabel('ลองจิจูด').fill('99.0435')
+  await expect(addrInput).toHaveValue('ถนนบ้านกลางสาย 1')
+
+  // Second pin move while still auto-filled cleanly replaces (never concatenates!)
+  await page.getByLabel('ละติจูด').fill('18.5890')
+  await page.getByLabel('ลองจิจูด').fill('99.0468')
+  await expect(addrInput).toHaveValue('ถนนลำพูน-ป่าซาง')
+
+  // Manual edit -> next pin move preserves manual text and renders ใช้ที่อยู่นี้แทน: -> clicking replaces entire value and hides pill!
+  await addrInput.fill('99/1 ซอยบ้านฉัน')
+  await page.getByLabel('ละติจูด').fill('18.5842')
+  await page.getByLabel('ลองจิจูด').fill('99.0352')
+  await expect(addrInput).toHaveValue('99/1 ซอยบ้านฉัน')
+  const replacePill = page.locator('.booking-address-suggestion')
+  await expect(replacePill).toContainText('ใช้ที่อยู่นี้แทน: ถนนลำพูน-ป่าซาง')
+  await replacePill.click()
+  await expect(addrInput).toHaveValue('ถนนลำพูน-ป่าซาง')
+  await expect(replacePill).toHaveCount(0)
 })

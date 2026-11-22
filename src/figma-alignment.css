@@ -288,7 +288,11 @@ body:has(.driver-shell) { background:var(--color-canvas); }
 @media(min-width:768px) { .driver-shell .driver-nav { padding-right:76px; } }
 
 /* One disclosure pattern across role navigation; desktop links stay expanded. */
-.navigation-toggle { display:none; }
+.navigation-toggle { display:none; position:relative; }
+.mobile-menu-status-dot { position:absolute; top:7px; right:7px; width:11px; height:11px; border-radius:50%; border:2px solid var(--color-primary); pointer-events:none; }
+.mobile-menu-status-dot.is-danger { background:#ef4444; box-shadow:0 0 0 1px rgba(255, 255, 255, 0.72); }
+.mobile-menu-status-dot.is-amber { background:#fbbf24; }
+.mobile-menu-status-dot.is-active { background:#4ade80; }
 .navigation-toggle, .navigation-drawer header button { border-radius:12px; transition:background-color .15s ease, transform .15s ease; }
 .dispatch-sidebar .navigation-toggle:hover, .navigation-drawer header button:hover { background:#ffffff18; }
 .dispatch-sidebar .navigation-toggle:active, .navigation-drawer header button:active { background:#ffffff30; transform:scale(.94); }
