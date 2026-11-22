@@ -1,34 +1,44 @@
 @import "tailwindcss";
 
-/* Values read from Figma palette and spacing variables. */
+/* Calm Modern Civic Healthcare design tokens (aligned with Ban Klang municipal identity). */
 @theme {
   --font-sans: 'Noto Sans Thai', sans-serif;
-  --color-canvas: #f6faf9;
-  --color-ink: #132d2c;
-  --color-muted: #49635f;
-  --color-primary: #075e57;
-  --color-primary-hover: #08796c;
-  --color-accent: #ecf9f5;
+  --color-canvas: #f5f9f8;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f7fbfa;
+  --color-ink: #122a29;
+  --color-muted: #46605c;
+  --color-primary: #065a53;
+  --color-primary-hover: #087368;
+  --color-accent: #ebf7f3;
   --color-accent-strong: #d7f3ec;
-  --color-border: #d5e0dc;
-  --color-error: #a72d3b;
-  --radius-sm: 6px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --color-border: #d8e4e0;
+  --color-hairline: rgba(15, 23, 42, 0.08);
+  --color-error: #a92b39;
+  --color-warning-bg: #fff8eb;
+  --color-warning-ink: #7c4706;
+  --color-warning-border: #f0cf8e;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 20px rgba(15, 42, 39, 0.045);
+  --shadow-card-hover: 0 4px 12px rgba(15, 23, 42, 0.06), 0 12px 26px rgba(6, 90, 83, 0.08);
+  --shadow-modal: 0 20px 50px rgba(15, 23, 42, 0.18), 0 4px 16px rgba(15, 23, 42, 0.08);
 }
 @layer base {
   :root { --demo-bar-height: 0px; }
-  body { margin: 0; min-width: 320px; font-family: var(--font-sans); }
+  body { margin: 0; min-width: 320px; font-family: var(--font-sans); line-height: 1.6; color: var(--color-ink); background: var(--color-canvas); -webkit-font-smoothing: antialiased; }
   button { cursor: pointer; }
   button, a { -webkit-tap-highlight-color: transparent; }
   :focus-visible { outline: 3px solid var(--color-primary-hover); outline-offset: 4px; }
+  time, .booking-summary-id, .booking-reference strong, .booking-review-time, .dispatch-metrics strong, .dispatch-timeline-scale, .dispatch-timeline-block, .dispatch-pickup-chip, .dispatch-window-chip, .dispatch-window-tag, .admin-metrics strong, .admin-kpi-card strong, .admin-bar-val, .driver-time, .driver-schedule dd { font-variant-numeric: tabular-nums; }
 }
 @layer components {
-  .actor-card { display: flex; flex-direction: column; text-align: left; border: 1px solid var(--color-border); border-radius: 20px; background: white; padding: 24px; transition: border-color .16s ease-out, box-shadow .16s ease-out, transform .15s ease-out; }
+  .actor-card { display: flex; flex-direction: column; text-align: left; border: 1px solid var(--color-hairline); border-radius: 16px; background: var(--color-surface); padding: 24px; box-shadow: var(--shadow-card); transition: border-color .16s ease-out, box-shadow .16s ease-out, transform .15s ease-out; }
   .actor-card > span:nth-last-child(2) { margin-top: auto; padding-top: 16px; }
-  .actor-card:hover { border-color: var(--color-primary); box-shadow: 0 6px 20px #075e5714; }
+  .actor-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-card-hover); }
   .actor-card:active { transform: scale(.985); }
-  .actor-card-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary); }
+  .actor-card-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary), var(--shadow-card); }
   .actor-number { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--color-accent-strong); color: var(--color-primary); font-weight: 600; font-size: 20px; }
   .skip-link { position: absolute; left: 16px; top: -100px; z-index: 10; background: white; padding: 16px; border-radius: 14px; }
   .skip-link:focus { top: 16px; }
@@ -102,6 +112,8 @@
   .dispatch-resource-options,
   .pickup-map-results,
   .dispatch-notice,
+  .dispatch-disabled-reason,
+  .dispatch-edit-proposal-banner,
   .driver-notice,
   .admin-notice,
   .booking-success-notice {

@@ -10,6 +10,7 @@ import {
 } from '../domain/capacity'
 import { statusLabels } from '../services/dispatcherApi'
 import { dispatchDate, dispatchTime } from '../services/dispatch'
+import { ServiceSymbol } from './ServiceSymbol'
 
 function pinStatusColor(b: Booking): { tone: string; hex: string; statusText: string } {
   if (b.status === 'pending') return { tone: 'pending', hex: '#b45309', statusText: statusLabels[b.apiStatus || 'REQUESTED'] || 'รอตรวจสอบ' }
@@ -279,6 +280,7 @@ export function DailyDispatchMapView({
                 <div>
                   <strong>{selectedBooking.id} · {selectedBooking.patientName}</strong>
                   <span className={`dispatch-mobility-badge ${normalizeMobilityCode(selectedBooking.details?.assistance)}`}>
+                    <ServiceSymbol kind={normalizeMobilityCode(selectedBooking.details?.assistance) === 'stretcher' ? 'bed' : normalizeMobilityCode(selectedBooking.details?.assistance) === 'wheelchair' ? 'wheel' : 'walk'} />
                     {mobilityThaiLabel(normalizeMobilityCode(selectedBooking.details?.assistance))}
                   </span>
                 </div>
@@ -357,7 +359,10 @@ export function DailyDispatchMapView({
                       <div className="dispatch-map-list-head">
                         <span className="dispatch-map-dot" style={{ backgroundColor: color.hex }} aria-hidden="true" />
                         <strong>{b.id}</strong>
-                        <span className={`dispatch-mobility-badge ${mob}`}>{mobilityThaiLabel(mob)}</span>
+                        <span className={`dispatch-mobility-badge ${mob}`}>
+                          <ServiceSymbol kind={mob === 'stretcher' ? 'bed' : mob === 'wheelchair' ? 'wheel' : 'walk'} />
+                          {mobilityThaiLabel(mob)}
+                        </span>
                       </div>
                       <span className="dispatch-job-patient">{b.patientName}</span>
                       <span className="dispatch-small">{b.details?.hospital || 'ไม่ระบุโรงพยาบาล'}</span>

@@ -254,3 +254,71 @@ test('UI/UX polish: DemoRoleBar offset/collapse, Admin layout, bounded lists, ci
   expect(refreshBox.width).toBeLessThan(260)
   expect(accountBox.x).toBeGreaterThanOrEqual(refreshBox.x + refreshBox.width)
 })
+
+test('UX clarity elevation: disabled reasons, hospital origin helper, edit-proposal feedback, desktop drawer & admin driver/history clarity', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  // 1. Dispatcher case detail drawer shows appointment & contact side-by-side on desktop
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await page.getByRole('button', { name: 'ดูรายละเอียด →' }).first().click()
+  const apptBox = (await page.locator('.dispatch-details-summary-grid .dispatch-appointment').boundingBox())!
+  const contactBox = (await page.locator('.dispatch-details-summary-grid .dispatch-detail-contact').boundingBox())!
+  expect(contactBox.x).toBeGreaterThanOrEqual(apptBox.x + apptBox.width - 1)
+  await page.getByRole('button', { name: 'ปิด' }).click()
+
+  // 2. Assignment disabled-reason banner, mobility mismatch check, hospital origin helper & edit-proposal toggle
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  // Default waiting job BK-DEMO-1002 requires stretcher; no vehicle/driver selected yet
+  await expect(page.locator('.dispatch-disabled-reason')).toContainText('กรุณาเลือกรถรับส่งและคนขับให้ครบก่อนตรวจสอบและยืนยันตาราง')
+
+  // Selecting standard/wheelchair-only vehicle (คันที่ 02) for a stretcher job shows explicit mobility mismatch reason
+  await page.getByRole('button', { name: 'รถรับส่ง: เลือกรถ', exact: true }).click()
+  await page.getByRole('option', { name: /รถคันที่ 02/ }).click()
+  await page.getByRole('button', { name: 'คนขับ: เลือกคนขับ', exact: true }).click()
+  await page.getByRole('option', { name: /นายสมชาย/ }).click()
+  await expect(page.locator('.dispatch-disabled-reason')).toContainText('รถที่เลือกไม่รองรับประเภทการเดินทางของผู้ป่วย')
+
+  // Pick stretcher-capable vehicle (คันที่ 01), then switch ต้นทาง to a hospital with no prior job (รพ.หริภุญชัย)
+  await page.getByRole('button', { name: /รถรับส่ง:/ }).click()
+  await page.getByRole('option', { name: /รถคันที่ 01/ }).click()
+  await page.locator('#dispatch-origin-select').selectOption({ index: 3 })
+  await expect(page.locator('.dispatch-origin-helper')).toContainText('ไม่พบงานก่อนหน้าของรถและคนขับคู่นี้ที่โรงพยาบาลดังกล่าว')
+  await expect(page.locator('.dispatch-disabled-reason')).toContainText('กรุณาเลือก "งานก่อนหน้าที่โรงพยาบาล"')
+
+  // Click helper button to switch back to municipal depot -> disabled reason clears
+  await page.getByRole('button', { name: 'เปลี่ยนต้นทางเป็นศูนย์รถเทศบาล' }).click()
+  await expect(page.locator('.dispatch-disabled-reason')).toHaveCount(0)
+
+  // Confirm schedule -> SCHEDULED state -> click แก้ไขข้อเสนอตารางและทรัพยากร -> verify unmistakable banner & highlight
+  await page.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true }).click()
+  await page.getByRole('button', { name: 'ยืนยันตาราง', exact: true }).click()
+  const editProposalBtn = page.getByRole('button', { name: 'แก้ไขข้อเสนอตารางและทรัพยากร', exact: true })
+  await expect(editProposalBtn).toBeVisible()
+  await editProposalBtn.click()
+  await expect(page.locator('.dispatch-edit-proposal-banner')).toContainText('กำลังแก้ไขข้อเสนอ')
+  await expect(page.locator('fieldset.is-editing-proposal')).toBeVisible()
+
+  // 3. Admin /admin/drivers เพิ่มคนขับ modal helper & (ผูกข้อมูลคนขับแล้ว) option labels
+  await page.locator('.demo-role-bar').getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await page.locator('#admin-sidebar').getByRole('link', { name: 'คนขับ', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/drivers$/)
+  await page.getByRole('button', { name: '+ เพิ่มคนขับ', exact: true }).click()
+  await expect(page.locator('.admin-field-hint')).toContainText('ผู้ใช้งานและสิทธิ์')
+  const linkedOptionCount = await page.locator('select option[disabled]', { hasText: '(ผูกข้อมูลคนขับแล้ว)' }).count()
+  expect(linkedOptionCount).toBeGreaterThan(0)
+  await page.getByRole('button', { name: 'ยกเลิก', exact: true }).click()
+
+  // 4. Admin /admin/history: NotificationFailures collapsed by default, MonthlyReportExport open & ready
+  await page.locator('#admin-sidebar').getByRole('link', { name: 'ประวัติการรับ–ส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/history$/)
+  const notifDetails = page.locator('details', { hasText: 'ปัญหาการส่งข้อความ' })
+  await expect(notifDetails).not.toHaveAttribute('open', '')
+  const monthlyDetails = page.locator('details.admin-report-panel')
+  await expect(monthlyDetails).toHaveAttribute('open', '')
+  await expect(monthlyDetails.getByRole('button', { name: 'ดาวน์โหลดรายงานรายเดือน (.xlsx)' })).toBeEnabled()
+})

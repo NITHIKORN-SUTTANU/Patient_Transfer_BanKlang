@@ -10,6 +10,7 @@ import {
 } from '../domain/capacity'
 import type { Catalog } from '../services/dispatcherApi'
 import { dispatchDate } from '../services/dispatch'
+import { ServiceSymbol } from './ServiceSymbol'
 
 const DAY_START_MIN = 6 * 60 // 06:00
 const DAY_END_MIN = 18 * 60 // 18:00
@@ -196,6 +197,7 @@ export function VehicleTimelineView({
                 <div className="dispatch-mobility-chips">
                   {v.capabilities.map(cap => (
                     <span key={cap} className={`dispatch-mobility-badge ${cap}`}>
+                      <ServiceSymbol kind={cap === 'stretcher' ? 'bed' : cap === 'wheelchair' ? 'wheel' : 'walk'} />
                       {capabilityBadgeText(cap)}
                     </span>
                   ))}
@@ -229,7 +231,10 @@ export function VehicleTimelineView({
                           <strong>{booking.id}</strong> · {booking.details?.hospital || 'ไม่ระบุโรงพยาบาล'} ·{' '}
                           <span className="dispatch-window-tag">{window.windowLabel}</span> · รับ {window.pickupClock} น.
                         </span>
-                        <span className={`dispatch-mobility-badge ${mobility}`}>{capabilityBadgeText(mobility)}</span>
+                        <span className={`dispatch-mobility-badge ${mobility}`}>
+                          <ServiceSymbol kind={mobility === 'stretcher' ? 'bed' : mobility === 'wheelchair' ? 'wheel' : 'walk'} />
+                          {capabilityBadgeText(mobility)}
+                        </span>
                         {onSelectBooking && (
                           <button type="button" className="dispatch-mini-link" onClick={() => onSelectBooking(booking)}>
                             รายละเอียด →
