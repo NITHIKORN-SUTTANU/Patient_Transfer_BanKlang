@@ -27,6 +27,14 @@ export function TimeWheel({ label, value, maximum, onChange }: { label: string; 
   // The containing dialog opens in its layout effect, before this effect runs.
   useEffect(() => { if (wheel.current) wheel.current.scrollTop = initial.current * ROW_HEIGHT }, [])
   useEffect(() => {
+    const element = wheel.current
+    if (!element) return
+    const current = Math.round(element.scrollTop / rowHeight.current)
+    if (current !== value) {
+      element.scrollTo({ top: value * rowHeight.current, behavior: 'instant' })
+    }
+  }, [value])
+  useEffect(() => {
     const element = wheel.current!
     const text = element.querySelector<HTMLElement>('[aria-selected=true] span')!
     const measure = () => {

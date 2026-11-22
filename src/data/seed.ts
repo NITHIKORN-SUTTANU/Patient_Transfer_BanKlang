@@ -6,7 +6,7 @@ export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'in_transit' |
 export type DriverStage = 'assigned' | 'going_to_pickup' | 'patient_onboard' | 'going_to_hospital' | 'delivered'
 export interface DriverProgress { stage: DriverStage; events: { stage: DriverStage; at: string }[] }
 // Production metadata is separate from the legacy visual grouping used by cards.
-export interface Booking { apiStatus?: string; revision?: number; executionVersion?: number; incidentOpen?: boolean; resourceHold?: boolean }
+export interface Booking { apiStatus?: string; revision?: number; executionVersion?: number; incidentOpen?: boolean; resourceHold?: boolean; incidentReason?: string; incidentReportedAt?: string }
 export interface Booking { startedAt?: string | null; originName?: string; vehicleName?: string }
 export interface Booking { reference?: string; cancellationLocked?: boolean }
 export interface Booking { destinationRevision?: { version: number; arrivalAt: string; readyAt: string; latenessSeconds: number; appointmentLatenessSeconds: number; originalHospitalName: string; originalArrivalAt: string; recordedAt: string } }

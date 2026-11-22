@@ -891,19 +891,50 @@ export async function handleDemoApiRequest<T>(
           booking.status = 'COMPLETED'
           booking.executionVersion += 1
           break
+        case 'FAILED_PICKUP':
         case 'REPORT_FAILED_PICKUP':
           booking.status = 'CANCELLED'
           booking.resourceHold = true
+          booking.incidentReason = cmd.reason || 'ไม่สามารถรับผู้ป่วยได้'
+          booking.incidentReportedAt = new Date().toISOString()
+          if (booking.vehicleId) {
+            const v = db.vehicles.find(item => item.id === booking.vehicleId)
+            if (v) v.held = true
+          }
+          if (booking.driverId) {
+            const d = db.drivers.find(item => item.id === booking.driverId)
+            if (d) d.held = true
+          }
           booking.executionVersion += 1
           break
         case 'REPORT_INCIDENT':
           booking.incidentOpen = true
           booking.resourceHold = true
+          booking.incidentReason = cmd.reason || 'รายงานเหตุขัดข้องระหว่างปฏิบัติงาน'
+          booking.incidentReportedAt = new Date().toISOString()
+          if (booking.vehicleId) {
+            const v = db.vehicles.find(item => item.id === booking.vehicleId)
+            if (v) v.held = true
+          }
+          if (booking.driverId) {
+            const d = db.drivers.find(item => item.id === booking.driverId)
+            if (d) d.held = true
+          }
           booking.executionVersion += 1
           break
         case 'RESOLVE_INCIDENT':
           booking.incidentOpen = false
           booking.resourceHold = false
+          booking.incidentReason = null
+          booking.incidentReportedAt = null
+          if (booking.vehicleId) {
+            const v = db.vehicles.find(item => item.id === booking.vehicleId)
+            if (v) v.held = false
+          }
+          if (booking.driverId) {
+            const d = db.drivers.find(item => item.id === booking.driverId)
+            if (d) d.held = false
+          }
           break
         case 'ABORT':
           booking.status = 'ABORTED'

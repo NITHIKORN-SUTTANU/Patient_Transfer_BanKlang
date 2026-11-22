@@ -57,9 +57,30 @@
   .demo-role-btn.active { background: white; color: #0f3e38; border-color: white; font-weight: 700; }
   .demo-role-btn.ghost { background: transparent; border-color: #6ea79d; color: #e6faf6; }
   .demo-role-btn.ghost:hover { background: #14534b; border-color: #a6d6ce; }
+  .staff-login-form { display: flex; flex-direction: column; gap: 14px; }
+  .staff-login-submit { margin-top: 0.75rem; }
+  .staff-session-card .booking-card-copy { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+  .staff-session-role { color: var(--color-muted); font-size: 16px; margin: 0; }
+  .staff-session-checking { margin: 8px 0 0; padding: 10px 13px; border-radius: 10px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; font-size: 14px; font-weight: 600; }
+  .staff-session-verified { margin: 8px 0 0; padding: 11px 13px; border-radius: 10px; border: 1px solid #a7f3d0; background: #ecfdf5; color: #065f46; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.5; }
+  .staff-session-actions { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 14px; width: 100%; }
   .staff-demo-panel { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-border); display: flex; flex-direction: column; gap: 10px; }
   .staff-demo-panel h2 { font-size: 18px; font-weight: 700; color: var(--color-primary); margin: 0; }
-  .staff-demo-buttons { display: flex; flex-direction: column; gap: 8px; }
+  .staff-demo-buttons { display: flex; flex-direction: column; gap: 0.625rem; }
+
+  /* Actionable sidebar count pills & status dots (Dispatcher & Admin, expanded + collapsed) */
+  .dispatch-sidebar nav a, .admin-sidebar nav a { position: relative; }
+  .nav-badge-count { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; font-style: normal; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; flex-shrink: 0; }
+  .nav-badge-count.amber { background: #fef3c7; color: #78350f; border: 1px solid #f59e0b; }
+  .nav-badge-count.danger { background: #dc2626; color: white; border: 1px solid #fecaca; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2); }
+  .nav-status-dot { margin-left: auto; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .nav-status-dot.active { background: #86efac; border: 2px solid #064e3b; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85); }
+  .nav-status-dot.amber { background: #fbbf24; border: 2px solid #78350f; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85); }
+  .nav-status-dot.danger { background: #ef4444; border: 2px solid #7f1d1d; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9); }
+  .dispatch-sidebar-collapsed .nav-badge-count,
+  .admin-sidebar-collapsed .nav-badge-count { position: absolute; top: 4px; right: 4px; margin-left: 0; min-width: 18px; height: 18px; padding: 0 4px; font-size: 10px; }
+  .dispatch-sidebar-collapsed .nav-status-dot,
+  .admin-sidebar-collapsed .nav-status-dot { position: absolute; top: 8px; right: 8px; margin-left: 0; }
 }
 
 @keyframes ui-fade-in {

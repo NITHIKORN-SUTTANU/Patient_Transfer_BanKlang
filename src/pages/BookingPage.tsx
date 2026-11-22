@@ -350,7 +350,7 @@ export function BookingPage() {
     <p className="booking-small">ฉบับ {session.config?.noticeVersion}</p>
     {consentError && <p role="alert" className="booking-error-box">{consentError}</p>}
     <BookingButton disabled={!draft.acknowledged || consentBusy || !session.config?.noticeText.trim()} aria-busy={consentBusy} onClick={() => void decideConsent(true)}>{consentBusy ? 'กำลังบันทึก…' : 'รับทราบและถัดไป'}</BookingButton>
-    <BookingButton secondary disabled={consentBusy} aria-busy={consentBusy} onClick={() => void decideConsent(false)}>ไม่ยินยอมใช้ข้อมูล</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
+    <BookingButton secondary className="booking-decline-btn" disabled={consentBusy} aria-busy={consentBusy} onClick={() => void decideConsent(false)}>ไม่ยินยอมใช้ข้อมูล</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
   </>
   else if (screen === 'patient') content = <>
     <BookingHeader title="ข้อมูลผู้ป่วย" subtitle="ใครต้องการใช้รถรับส่ง?" /><BookingProgress step={1} />
@@ -475,8 +475,21 @@ export function BookingPage() {
     <p className="booking-notice">บริการรับส่งตามนัดหมาย ไม่ใช่บริการฉุกเฉิน</p><EmergencyLink />
     {session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>}
   </main></div>
-    {picker && <AppointmentPicker kind={picker} date={draft.date} time={draft.time} onClose={() => setPicker(null)} onConfirm={value => { update(picker, value); setPicker(null) }} />}
-    {consentDeclined && <BookingModal title="ติดต่อเทศบาลเพื่อจองทางโทรศัพท์" onClose={() => setConsentDeclined(false)}><p>คุณยังไม่ได้ยินยอมใช้ข้อมูล จึงยังไม่สามารถกรอกแบบฟอร์มจองรถได้</p>{session.config?.contactPhone ? <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a> : <p>ยังไม่ได้ตั้งค่าหมายเลขเทศบาล กรุณาติดต่อผ่าน LINE OA</p>}<Link className="booking-home-link" to="/booking" onClick={() => { setConsentDeclined(false); setErrors({}) }}>กลับหน้าหลัก</Link></BookingModal>}
+    {picker && (
+      <AppointmentPicker
+        kind={picker}
+        date={draft.date}
+        time={draft.time}
+        onClose={() => setPicker(null)}
+        onConfirm={value => { update(picker, value); setPicker(null) }}
+        onJumpDateTime={(nextDate, nextTime) => {
+          setDraft(current => ({ ...current, date: nextDate, time: nextTime }))
+          setErrors(current => ({ ...current, date: '', time: '' }))
+          setPicker(null)
+        }}
+      />
+    )}
+    {consentDeclined && <BookingModal title="ติดต่อเทศบาลเพื่อจองทางโทรศัพท์" onClose={() => setConsentDeclined(false)}><p>คุณเลือกไม่ยินยอมใช้ข้อมูลผ่านระบบออนไลน์ จึงยังไม่สามารถกรอกแบบฟอร์มจองรถได้</p><p>หากต้องการขอรับบริการรถรับ–ส่งผู้ป่วย สามารถโทรติดต่อเจ้าหน้าที่เทศบาลตำบลบ้านกลางเพื่อแจ้งนัดหมายทางโทรศัพท์ได้โดยตรงในเวลาทำการ (06:00–16:00 น.)</p>{session.config?.contactPhone ? <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a> : <p>ยังไม่ได้ตั้งค่าหมายเลขเทศบาล กรุณาติดต่อผ่าน LINE OA</p>}<Link className="booking-home-link" to="/booking" onClick={() => { setConsentDeclined(false); setErrors({}) }}>กลับหน้าหลัก</Link></BookingModal>}
     {privacyOpen && <BookingModal title="ข้อมูลส่วนบุคคล" onClose={() => setPrivacyOpen(false)}><p style={{ whiteSpace: 'pre-wrap' }}>{session.config?.noticeText}</p><BookingButton onClick={() => setPrivacyOpen(false)}>ปิด</BookingButton></BookingModal>}
     {locationError && <BookingModal title="ไม่พบตำแหน่งปัจจุบัน" onClose={() => setLocationError('')}><p>ยังจองรถต่อได้โดยปักหมุดเอง</p><section className="booking-empty"><h3>ไม่สามารถดึงตำแหน่งได้</h3><p>{locationError}</p></section><p className="booking-info">เลือกจุดรับบนแผนที่แทนได้</p><BookingButton onClick={() => { setLocationError(''); openPin() }}>เลือกจุดรับบนแผนที่</BookingButton><BookingButton secondary onClick={() => setLocationError('')}>ย้อนกลับ</BookingButton></BookingModal>}
   </div>

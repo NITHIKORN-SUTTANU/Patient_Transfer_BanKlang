@@ -14,6 +14,7 @@ export interface ApiBooking {
   patientName: string; appointmentAt: string; hospitalId: string; contactPhone: string; pickupAddress: string;
   latitude: number; longitude: number; mobility: string; vehicleId: string | null; driverId: string | null;
   startedAt: string | null; incidentOpen: boolean; resourceHold: boolean; scheduleReviewRequired: boolean;
+  incidentReason?: string | null; incidentReportedAt?: string | null;
   originName?: string; vehicleName?: string;
   hospitalName?: string; hospitalLocationId?: string; depotLocationId?: string;
   configurationChanges?: {id: string; type: string; proposed: {name?: string; date?: string; active?: boolean; latitude?: number; longitude?: number; radiusMetres?: number}}[];
@@ -50,6 +51,7 @@ export function viewBooking(row: ApiBooking, catalog: Catalog): Booking {
   return {
     id: row.id, patientName: row.patientName, appointmentAt: row.appointmentAt, status, apiStatus: row.status,
     revision: row.revision, executionVersion: row.executionVersion, incidentOpen: row.incidentOpen, resourceHold: row.resourceHold,
+    incidentReason: row.incidentReason ?? undefined, incidentReportedAt: row.incidentReportedAt ?? undefined,
     startedAt: row.startedAt, originName: row.originName, vehicleName: row.vehicleName,
     destinationRevision: row.destinationRevision ?? undefined,
     vehicleId: row.vehicleId ?? undefined, driverId: row.driverId ?? undefined,
@@ -119,7 +121,15 @@ export function useDispatcherData(bookingId?: string) {
     }).catch(error => { if (active) { setData(null); setError(dispatcherError(error)) } }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [session.user?.id, version, bookingId, pages, overlay.active, overlay.importedAt, overlay.bookings, overlay.vehicles, overlay.drivers])
-  return { data, error, loading, hasMore, loadMore: () => { if (!loading) { setLoading(true); setError(''); setPages(p => p + 1) } }, reload: () => { setLoading(true); setError(''); setVersion(v => v + 1) } }
+  return {
+    data,
+    error,
+    loading,
+    hasMore,
+    loadMore: () => { if (!loading) { setLoading(true); setError(''); setPages(p => p + 1) } },
+    reload: () => { setLoading(true); setError(''); setVersion(v => v + 1) },
+    silentReload: () => { setVersion(v => v + 1) },
+  }
 }
 export function bookingCommand(row: Booking, command: Record<string, unknown>) {
   return staffRequest(`/bookings/${encodeURIComponent(row.id)}/commands`, { eventId: crypto.randomUUID(), expectedRevision: row.revision, expectedExecutionVersion: row.executionVersion, command })

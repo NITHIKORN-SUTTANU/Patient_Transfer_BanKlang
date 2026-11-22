@@ -185,3 +185,11 @@
 }
 .booking-status-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .booking-status-actions > * { flex: 1 1 200px; }
+.booking-button.booking-secondary.booking-decline-btn { border-color: #cbd5e1; background: #f8fafc; color: #475569; font-weight: 600; }
+.booking-button.booking-secondary.booking-decline-btn:hover:not(:disabled) { background: #f1f5f9; border-color: #94a3b8; color: #334155; }
+.booking-picker-lead-alert { display: flex; flex-direction: column; gap: 10px; }
+.booking-picker-lead-alert p { margin: 0; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.booking-picker-jump-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.booking-picker-jump-btn { min-height: 44px; padding: 8px 14px; border: 1.5px solid var(--color-primary); border-radius: 10px; background: white; color: var(--color-primary); font: inherit; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; width: fit-content; max-width: 100%; }
+.booking-picker-jump-btn:hover { background: var(--color-accent); }
+.booking-picker-jump-btn.secondary { border-color: #cbd5e1; color: #334155; font-weight: 600; }

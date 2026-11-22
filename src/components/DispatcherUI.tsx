@@ -8,7 +8,16 @@ export function DispatchButton(props: Parameters<typeof BookingButton>[0]) {
 export function DispatchModal({ title, children, onClose, kind = '' }: { title: string; children: ReactNode; onClose: () => void; kind?: string }) {
   return <BookingModal title={title} onClose={onClose} className={`dispatch-modal ${kind}`}>{children}</BookingModal>
 }
-export function ResourcePicker({ label, placeholder, value, options, onChange }: { label: string; placeholder: string; value: string; options: { id: string; label: string; active: boolean }[]; onChange: (id: string) => void }) {
+export interface ResourcePickerOption {
+  id: string
+  label: string
+  active: boolean
+  selectable?: boolean
+  meta?: string
+  tone?: 'free' | 'busy' | 'warn' | 'incident' | 'inactive'
+}
+
+export function ResourcePicker({ label, placeholder, value, options, onChange }: { label: string; placeholder: string; value: string; options: ResourcePickerOption[]; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -20,6 +29,7 @@ export function ResourcePicker({ label, placeholder, value, options, onChange }:
     return () => document.removeEventListener('pointerdown', outside)
   }, [open])
   function close() { setOpen(false); trigger.current?.focus() }
+  const selected = options.find(o => o.id === value)
   // Preserve focus during option mousedown: Safari otherwise focuses the
   // surrounding main element and closes the list before click can select.
   return <div ref={root} className="dispatch-resource" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false) }} onKeyDown={e => {
@@ -33,7 +43,10 @@ export function ResourcePicker({ label, placeholder, value, options, onChange }:
       choices[next].focus()
     }
   }}>
-    <button ref={trigger} type="button" className="dispatch-resource-trigger" aria-label={`${label}: ${options.find(o => o.id === value)?.label || placeholder}`} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}><span>{label}:</span>{' '}<strong>{options.find(o => o.id === value)?.label || placeholder}<span aria-hidden="true"> ▾</span></strong></button>
-    {open && <div role="listbox" aria-label={label} className="dispatch-resource-options">{options.length ? options.map(option => <button type="button" role="option" key={option.id} disabled={!option.active} aria-selected={value === option.id} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(option.id); close() }}><strong>{option.label}</strong><span>{option.active ? 'แตะเพื่อเลือก' : 'ไม่พร้อมใช้งาน'}</span></button>) : <p>ไม่มี{label}ที่พร้อมใช้งาน</p>}</div>}
+    <button ref={trigger} type="button" className="dispatch-resource-trigger" aria-label={`${label}: ${selected?.label || placeholder}`} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}><span>{label}:</span>{' '}<strong>{selected?.label || placeholder}<span aria-hidden="true"> ▾</span></strong></button>
+    {open && <div role="listbox" aria-label={label} className="dispatch-resource-options">{options.length ? options.map(option => {
+      const canSelect = option.selectable ?? true
+      return <button type="button" role="option" key={option.id} disabled={!canSelect} aria-selected={value === option.id} className={option.tone ? `tone-${option.tone}` : undefined} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(option.id); close() }}><strong>{option.label}</strong><span className={`dispatch-option-meta ${option.tone ?? ''}`}>{option.meta ?? (option.active ? 'แตะเพื่อเลือก' : 'ไม่พร้อมใช้งาน')}</span></button>
+    }) : <p>ไม่มี{label}ที่พร้อมใช้งาน</p>}</div>}
   </div>
 }

@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react'
 import {
   bangkokClockFromMs,
+  bangkokDateFromMs,
   computeBackwardBlockedWindow,
   normalizeMobilityCode,
+  parseVehicleCapabilities,
 } from '../domain/capacity'
 import type { ApiBooking, Catalog, Schedule } from '../services/dispatcherApi'
 import { dispatcherError } from '../services/dispatcherApi'
@@ -13,6 +15,11 @@ import { ServiceSymbol } from './ServiceSymbol'
 
 const MOBILITY_LABELS = { standard: 'ทั่วไป', wheelchair: 'รถเข็น', stretcher: 'เปลนอน' } as const
 const MOBILITY_ICONS = { standard: 'walk', wheelchair: 'wheel', stretcher: 'bed' } as const
+
+function shortHospital(name?: string | null): string {
+  if (!name) return 'โรงพยาบาล'
+  return name.replace(/^โรงพยาบาล/, 'รพ.')
+}
 
 export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, onAssigned, onBusyChange }: { booking: ApiBooking; catalog: Catalog; previousJobs: ApiBooking[]; reload: () => void; onAssigned: () => void; onBusyChange?: (busy: boolean) => void }) {
   const modifying = ['ASSIGNED', 'PICKING_UP'].includes(booking.status)
@@ -68,12 +75,135 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     const est = computeBackwardBlockedWindow(booking.appointmentAt, { hospitalName })
     return Boolean(est && (est.departureClock < '06:00' || est.freeClock > '16:00'))
   })()
+  const currentWin = computeBackwardBlockedWindow(booking.appointmentAt, {
+    hospitalName,
+    existingSchedule: proposal,
+  })
+  const [todayBkk] = useState(() => bangkokDateFromMs(Date.now()))
+  const resolveHospitalName = (row: ApiBooking) =>
+    row.hospitalName ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.name ?? 'โรงพยาบาล'
+
+  const vehicleInsights = new Map(
+    catalog.vehicles.map(v => {
+      const caps = parseVehicleCapabilities({ capabilities: v.capabilities })
+      const capText = caps.map(c => MOBILITY_LABELS[c]).join('/')
+      const supportsCase = !Array.isArray(v.capabilities) || v.capabilities.length === 0 || caps.includes(requiredMobility)
+      const incidentPeer = previousJobs.find(
+        row => row.id !== booking.id && row.vehicleId === v.id && row.incidentOpen && !['COMPLETED', 'CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status),
+      )
+      const heldOrIncident = Boolean(incidentPeer || (v.held && !(modifying && v.id === booking.vehicleId)))
+      let overlapWin: ReturnType<typeof computeBackwardBlockedWindow> = null
+      let overlapHospital = ''
+      if (currentWin) {
+        for (const peer of previousJobs) {
+          if (peer.id === booking.id || peer.vehicleId !== v.id || ['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(peer.status)) continue
+          const peerWin = computeBackwardBlockedWindow(peer.appointmentAt, {
+            hospitalName: resolveHospitalName(peer),
+            existingSchedule: peer.schedule,
+          })
+          if (peerWin && currentWin.startMs < peerWin.endMs && peerWin.startMs < currentWin.endMs) {
+            overlapWin = peerWin
+            overlapHospital = shortHospital(resolveHospitalName(peer))
+            break
+          }
+        }
+      }
+      const activeTrip = previousJobs.find(
+        row => row.id !== booking.id && row.vehicleId === v.id && ['PICKING_UP', 'PICKED_UP', 'IN_TRANSIT'].includes(row.status),
+      ) ?? previousJobs.find(
+        row => row.id !== booking.id && row.vehicleId === v.id && row.status === 'ASSIGNED' && bangkokDateFromMs(Date.parse(row.schedule?.pickupAt || row.appointmentAt)) === todayBkk,
+      )
+      const completedToday = previousJobs
+        .filter(row => row.vehicleId === v.id && row.status === 'COMPLETED' && bangkokDateFromMs(Date.parse(row.schedule?.arrivalAt || row.appointmentAt)) === todayBkk)
+        .sort((a, b) => Date.parse(b.schedule?.readyAt || b.appointmentAt) - Date.parse(a.schedule?.readyAt || a.appointmentAt))[0]
+
+      const locationShort = activeTrip
+        ? shortHospital(resolveHospitalName(activeTrip))
+        : completedToday
+        ? shortHospital(resolveHospitalName(completedToday))
+        : 'ศูนย์รถฯ'
+      const locationFull = activeTrip
+        ? `ปลายทาง ${shortHospital(resolveHospitalName(activeTrip))}`
+        : completedToday
+        ? `จบงานล่าสุดที่ ${shortHospital(resolveHospitalName(completedToday))}`
+        : 'ศูนย์รถ ทต.บ้านกลาง'
+
+      let statusText = `ว่าง (${locationShort})`
+      let badgeText = 'ว่างพร้อมจัด'
+      let tone: 'free' | 'busy' | 'warn' | 'incident' | 'inactive' = supportsCase ? 'free' : 'warn'
+      if (!v.active) {
+        statusText = 'ปิดใช้งาน'
+        badgeText = 'ปิดใช้งาน'
+        tone = 'inactive'
+      } else if (heldOrIncident) {
+        statusText = 'มีเหตุขัดข้อง'
+        badgeText = 'มีเหตุขัดข้อง / รอยืนยันความพร้อม'
+        tone = 'incident'
+      } else if (overlapWin) {
+        statusText = `ติดงาน ${overlapWin.departureClock}–${overlapWin.freeClock} (${overlapHospital})`
+        badgeText = `ติดงาน ${overlapWin.departureClock}–${overlapWin.freeClock}`
+        tone = 'busy'
+      }
+      const meta = `${statusText} · ${capText}`
+      return [v.id, { meta, statusText, badgeText, locationFull, supportsCase, tone, capText }] as const
+    }),
+  )
+
+  const driverInsights = new Map(
+    catalog.drivers.map(d => {
+      const incidentPeer = previousJobs.find(
+        row => row.id !== booking.id && row.driverId === d.id && row.incidentOpen && !['COMPLETED', 'CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status),
+      )
+      const heldOrIncident = Boolean(incidentPeer || (d.held && !(modifying && d.id === booking.driverId)))
+      let overlapWin: ReturnType<typeof computeBackwardBlockedWindow> = null
+      if (currentWin) {
+        for (const peer of previousJobs) {
+          if (peer.id === booking.id || peer.driverId !== d.id || ['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(peer.status)) continue
+          const peerWin = computeBackwardBlockedWindow(peer.appointmentAt, {
+            hospitalName: resolveHospitalName(peer),
+            existingSchedule: peer.schedule,
+          })
+          if (peerWin && currentWin.startMs < peerWin.endMs && peerWin.startMs < currentWin.endMs) {
+            overlapWin = peerWin
+            break
+          }
+        }
+      }
+      let statusText = 'ว่าง'
+      let tone: 'free' | 'busy' | 'warn' | 'incident' | 'inactive' = 'free'
+      if (!d.active) {
+        statusText = 'ปิดใช้งาน'
+        tone = 'inactive'
+      } else if (heldOrIncident) {
+        statusText = 'ติดเหตุขัดข้อง'
+        tone = 'incident'
+      } else if (overlapWin) {
+        statusText = `ติดงาน ${overlapWin.departureClock}–${overlapWin.freeClock}`
+        tone = 'busy'
+      } else if (outsideServiceHours) {
+        statusText = 'นอกกะเวลา'
+        tone = 'warn'
+      }
+      return [d.id, { statusText, tone }] as const
+    }),
+  )
+
+  const selectedVehicleInfo = vehicleId ? vehicleInsights.get(vehicleId) : undefined
+  const selectedDriverInfo = driverId ? driverInsights.get(driverId) : undefined
+
+  const countPriorJobsAtLocation = (locId: string) =>
+    previousJobs.filter(
+      row =>
+        row.id !== booking.id &&
+        row.schedule &&
+        (!vehicleId || row.vehicleId === vehicleId) &&
+        (!driverId || row.driverId === driverId) &&
+        (row.hospitalLocationId ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.location_id) === locId &&
+        !['CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status),
+    ).length
+
   const resourceOverlapWarning = (() => {
     if (!vehicleId && !driverId) return ''
-    const currentWin = computeBackwardBlockedWindow(booking.appointmentAt, {
-      hospitalName,
-      existingSchedule: proposal,
-    })
     if (!currentWin) return ''
     for (const peer of previousJobs) {
       if (peer.id === booking.id || ['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(peer.status)) continue
@@ -81,7 +211,7 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
       const sameDriver = Boolean(driverId && peer.driverId === driverId)
       if (!sameVehicle && !sameDriver) continue
       const peerWin = computeBackwardBlockedWindow(peer.appointmentAt, {
-        hospitalName: peer.hospitalName ?? catalog.hospitals.find(h => h.id === peer.hospitalId)?.name,
+        hospitalName: resolveHospitalName(peer),
         existingSchedule: peer.schedule,
       })
       if (!peerWin) continue
@@ -216,7 +346,60 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     <p className="dispatch-small">ข้อมูลเส้นทาง © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> / OSRM · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noreferrer">แก้ไขแผนที่</a></p>
     <fieldset ref={resourceSectionRef} className={editingProposal ? 'is-editing-proposal' : undefined} disabled={busy || assigning}>
       <h2>3. เลือกรถและคนขับ</h2>
-      <div className="dispatch-resource-row"><ResourcePicker label="รถรับส่ง" placeholder="เลือกรถ" value={vehicleId} options={catalog.vehicles.map(v => ({ id: v.id, label: `${v.name} · ${v.plate}`, active: v.active && (!v.held || (modifying && v.id === booking.vehicleId)) }))} onChange={nextVehicleId => { setVehicleId(nextVehicleId); setPreviousId('') }} /><ResourcePicker label="คนขับ" placeholder="เลือกคนขับ" value={driverId} options={catalog.drivers.map(d => ({ id: d.id, label: d.name, active: d.active && (!d.held || (modifying && d.id === booking.driverId)) }))} onChange={nextDriverId => { setDriverId(nextDriverId); setPreviousId('') }} /></div>
+      <div className="dispatch-resource-row">
+        <div className="dispatch-resource-col">
+          <ResourcePicker
+            label="รถรับส่ง"
+            placeholder="เลือกรถ"
+            value={vehicleId}
+            options={catalog.vehicles.map(v => {
+              const info = vehicleInsights.get(v.id)
+              return {
+                id: v.id,
+                label: `${v.name} · ${v.plate}`,
+                active: v.active && (!v.held || (modifying && v.id === booking.vehicleId)),
+                selectable: true,
+                meta: info?.meta,
+                tone: info?.tone,
+              }
+            })}
+            onChange={nextVehicleId => { setVehicleId(nextVehicleId); setPreviousId('') }}
+          />
+          {selectedVehicleInfo && (
+            <div className="dispatch-selected-meta-pills" aria-label="สถานะรถที่เลือก">
+              <span className={`dispatch-readiness-pill tone-${selectedVehicleInfo.tone}`}>{selectedVehicleInfo.badgeText}</span>
+              <span className="dispatch-readiness-pill neutral">{selectedVehicleInfo.locationFull}</span>
+              <span className={`dispatch-readiness-pill ${selectedVehicleInfo.supportsCase ? 'match' : 'mismatch'}`}>
+                {selectedVehicleInfo.supportsCase ? '✓ รองรับเคสนี้' : `ไม่รองรับ ${MOBILITY_LABELS[requiredMobility]}`}
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="dispatch-resource-col">
+          <ResourcePicker
+            label="คนขับ"
+            placeholder="เลือกคนขับ"
+            value={driverId}
+            options={catalog.drivers.map(d => {
+              const info = driverInsights.get(d.id)
+              return {
+                id: d.id,
+                label: d.name,
+                active: d.active && (!d.held || (modifying && d.id === booking.driverId)),
+                selectable: true,
+                meta: info?.statusText,
+                tone: info?.tone,
+              }
+            })}
+            onChange={nextDriverId => { setDriverId(nextDriverId); setPreviousId('') }}
+          />
+          {selectedDriverInfo && (
+            <div className="dispatch-selected-meta-pills" aria-label="สถานะคนขับที่เลือก">
+              <span className={`dispatch-readiness-pill tone-${selectedDriverInfo.tone}`}>คนขับ: {selectedDriverInfo.statusText}</span>
+            </div>
+          )}
+        </div>
+      </div>
       <label className="booking-field">ต้นทาง
         <select
           id="dispatch-origin-select"
@@ -228,7 +411,11 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
           }}
         >
           <option value="">เลือกต้นทาง</option>
-          {catalog.locations.filter(l => needsHandoff || l.id === catalog.depotLocationId || l.id === booking.depotLocationId || l.id === baselineProposal?.originLocationId || l.kind === 'hospital').map(l => <option value={l.id} key={l.id}>{l.name}</option>)}
+          {catalog.locations.filter(l => needsHandoff || l.id === catalog.depotLocationId || l.id === booking.depotLocationId || l.id === baselineProposal?.originLocationId || l.kind === 'hospital').map(l => {
+            if (l.kind !== 'hospital') return <option value={l.id} key={l.id}>{l.name}</option>
+            const priorCount = countPriorJobsAtLocation(l.id)
+            return <option value={l.id} key={l.id}>{l.name} ({priorCount > 0 ? `มี ${priorCount} งานก่อนหน้า` : 'ไม่มีงานก่อนหน้า'})</option>
+          })}
         </select>
       </label>
       {!needsHandoff && origin?.kind === 'hospital' && (

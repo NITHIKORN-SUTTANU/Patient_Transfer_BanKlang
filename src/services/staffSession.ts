@@ -59,11 +59,17 @@ export const staffSession = {
       publish({ user, busy: false, error: '' })
     } catch (error) { clear(message(error)) }
   },
-  async refresh() {
-    if (state.busy || !state.user) return
+  async refresh(): Promise<StaffIdentity | null> {
+    if (state.busy || !state.user) return state.user
     publish({ ...state, busy: true, error: '' })
-    try { const user = await staffRequest<StaffIdentity>('/auth/me'); publish({ user, busy: false, error: '' }) }
-    catch (error) { clear(message(error)) }
+    try {
+      const user = await staffRequest<StaffIdentity>('/auth/me')
+      publish({ user, busy: false, error: '' })
+      return user
+    } catch (error) {
+      clear(message(error))
+      return null
+    }
   },
   async logout() {
     if (state.busy) return

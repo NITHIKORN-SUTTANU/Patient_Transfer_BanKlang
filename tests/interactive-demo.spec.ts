@@ -497,3 +497,160 @@ test('Field-readiness & layout geometry audit across 1440px, 1280px, and 390px v
   expect(slipBox.height).toBeLessThan(460)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
+
+test('Master operational visibility: Live Fleet Matrix, upfront dropdown readiness, Driver->Dispatcher incident loop, 48h smart time picker, staff session card & admin header alignment', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+
+  // 1. Live Fleet Matrix & Upfront Dispatch Dropdown Readiness (1280px)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+
+  const matrix = page.locator('.dispatch-fleet-matrix')
+  await expect(matrix).toBeVisible()
+  await expect(page.locator('.dispatch-fleet-source-note')).toContainText('ตำแหน่งอ้างอิงจากสถานะงานล่าสุด')
+  await expect(matrix).toContainText('รถคันที่ 01')
+  await expect(matrix).toContainText('เปลนอน')
+  await expect(matrix).toContainText('นายสมชาย ใจดี')
+  await expect(matrix).toContainText('กำลังรับ-ส่ง · ปลายทาง รพ.ลำพูน')
+  await expect(matrix).toContainText('ประจำที่ศูนย์รถ ทต.บ้านกลาง')
+  await expect(matrix).toContainText('ว่างอีกครั้ง')
+
+  // Dispatcher sidebar pending & awaiting-assignment amber badges (aria-hidden keeps accessible names exact)
+  const dispSidebar = page.locator('#dispatcher-sidebar')
+  await expect(dispSidebar.getByRole('link', { name: 'แดชบอร์ดงานรับส่ง', exact: true }).locator('.nav-badge-count.amber')).toHaveAttribute('aria-hidden', 'true')
+  await expect(dispSidebar.getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).locator('.nav-badge-count.amber')).toHaveAttribute('aria-hidden', 'true')
+
+  // Upfront dropdown readiness on /dispatcher/assignment (BK-DEMO-1002 needs stretcher)
+  await dispSidebar.getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  await page.getByRole('button', { name: 'รถรับส่ง: เลือกรถ', exact: true }).click()
+  await expect(page.getByRole('option', { name: /รถคันที่ 01/ })).toContainText('เปลนอน')
+  await page.getByRole('option', { name: /รถคันที่ 02/ }).click()
+  await expect(page.locator('.dispatch-selected-meta-pills').first()).toContainText('ไม่รองรับ เปลนอน')
+
+  await page.getByRole('button', { name: /รถรับส่ง:/ }).click()
+  await page.getByRole('option', { name: /รถคันที่ 01/ }).click()
+  await expect(page.locator('.dispatch-selected-meta-pills').first()).toContainText('✓ รองรับเคสนี้')
+  await expect(page.locator('#dispatch-origin-select')).toContainText('ไม่มีงานก่อนหน้า')
+
+  // 2. Driver -> Dispatcher Incident Alert Loop + Driver top-right header clipping guard
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await page.getByRole('button', { name: /ดูรายละเอียด/ }).first().click()
+  await expect(page).toHaveURL(/\/driver\/details/)
+
+  // Check zero right-edge clipping on /driver/details at both 1280px desktop and 390px mobile
+  for (const vp of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(vp)
+    const linkBox = (await page.locator('.driver-account-link').boundingBox())!
+    expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(vp.width - 8)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  }
+
+  // Report incident on BK-DEMO-1003 and verify structured Driver incident status card
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: 'เริ่มงาน', exact: true }).click()
+  await page.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/status/)
+  await page.getByRole('button', { name: 'รายงานเหตุขัดข้อง', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/incident/)
+  await page.getByLabel('เหตุผลที่รายงาน').fill('รถเสียระหว่างทาง ต้องการรถทดแทน')
+  await page.getByRole('button', { name: 'ยืนยันรายงานเหตุขัดข้อง', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/status/)
+  const driverIncCard = page.locator('.driver-incident-status-card')
+  await expect(driverIncCard).toBeVisible()
+  await expect(driverIncCard).toContainText('รถเสียระหว่างทาง ต้องการรถทดแทน')
+  await expect(driverIncCard).toContainText('ส่งแจ้งเจ้าหน้าที่จัดรถแล้ว — กำลังรอการจัดรถทดแทน')
+
+  // Switch back to Dispatcher: verify sticky Incident Alert Banner, red sidebar badge, matrix red card, and 1-click open to tracking!
+  await demoBar.getByRole('button', { name: 'เจ้าหน้าที่จัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  const incidentBanner = page.locator('.dispatch-incident-banner')
+  await expect(incidentBanner).toBeVisible()
+  await expect(incidentBanner).toContainText('BK-DEMO-1003')
+  await expect(incidentBanner).toContainText('รถเสียระหว่างทาง ต้องการรถทดแทน')
+  await expect(dispSidebar.getByRole('link', { name: 'ติดตามงานรับส่ง', exact: true }).locator('.nav-badge-count.danger')).toHaveAttribute('aria-hidden', 'true')
+  await expect(page.locator('.dispatch-fleet-matrix .dispatch-fleet-unit.is-incident')).toContainText('มีเหตุขัดข้อง · งาน BK-DEMO-1003')
+
+  await incidentBanner.getByRole('button', { name: 'เปิดเคส / จัดรถทดแทน →' }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking/)
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: 'ปิดรายละเอียด', exact: true }).click()
+  await expect(page.getByRole('button', { name: /เฉพาะเหตุขัดข้อง \(1\)/ })).toBeVisible()
+  await expect(page.locator('.dispatch-monitoring tbody tr').first()).toContainText('มีเหตุขัดข้อง — รอจัดรถใหม่')
+
+  // 3. Admin top-right header centerline alignment + Staff Session Card vertical gap & inline verification feedback
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  for (const width of [1280, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    const refreshBox = (await page.locator('.admin-refresh-btn').boundingBox())!
+    const shortcutBox = (await page.locator('.admin-heading-actions .role-selection-shortcut').boundingBox())!
+    const center1 = refreshBox.y + refreshBox.height / 2
+    const center2 = shortcutBox.y + shortcutBox.height / 2
+    expect(Math.abs(center1 - center2)).toBeLessThanOrEqual(2)
+    expect(shortcutBox.x - (refreshBox.x + refreshBox.width)).toBeGreaterThanOrEqual(8)
+  }
+
+  // Open /staff/login from Admin header shortcut -> check session card button spacing & inline verify feedback
+  await page.locator('.admin-heading-actions .role-selection-shortcut').click()
+  await expect(page).toHaveURL(/\/staff\/login$/)
+  const sessionActions = page.locator('.staff-session-actions > *')
+  await expect(sessionActions).toHaveCount(3)
+  const sBox0 = (await sessionActions.nth(0).boundingBox())!
+  const sBox1 = (await sessionActions.nth(1).boundingBox())!
+  const sBox2 = (await sessionActions.nth(2).boundingBox())!
+  expect(sBox1.y - (sBox0.y + sBox0.height)).toBeGreaterThanOrEqual(10)
+  expect(sBox2.y - (sBox1.y + sBox1.height)).toBeGreaterThanOrEqual(10)
+
+  await page.getByRole('button', { name: 'ตรวจสอบเซสชัน', exact: true }).click()
+  await expect(page.locator('.staff-session-verified')).toContainText('✓ เซสชันใช้งานได้ปกติ')
+})
+
+test('Citizen 48-hour smart time picker default & 1-click jump + muted PDPA decline button hierarchy', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  // Freeze clock at 2030-01-12 14:20 BKK -> 48h boundary day is 2030-01-14 at 14:20 BKK
+  await page.clock.install({ time: new Date('2030-01-12T07:20:00Z') })
+
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-01"]').click()
+  await expect(page).toHaveURL(/\/booking$/)
+  await page.getByRole('button', { name: 'เริ่มจองรถ →' }).click()
+  await expect(page).toHaveURL(/\/booking\/privacy$/)
+
+  // Muted decline button keeps exact accessible name & opens calm municipal phone instruction
+  const declineBtn = page.getByRole('button', { name: 'ไม่ยินยอมใช้ข้อมูล', exact: true })
+  await expect(declineBtn).toHaveClass(/booking-decline-btn/)
+  await declineBtn.click()
+  await expect(page.getByRole('dialog')).toContainText('โทรติดต่อเจ้าหน้าที่เทศบาลตำบลบ้านกลาง')
+  await page.getByRole('button', { name: 'ปิด' }).click()
+
+  await page.getByLabel(/รับทราบการใช้ข้อมูล/).check()
+  await page.getByRole('button', { name: 'รับทราบและถัดไป' }).click()
+  await expect(page).toHaveURL(/\/booking\/patient$/)
+
+  // Select boundary date (14 Jan 2030 — exactly +48h day)
+  await page.locator('button.booking-input-trigger').first().click()
+  await page.getByRole('button', { name: /14 มกราคม/ }).click()
+  await page.getByRole('button', { name: 'ยืนยันวันที่', exact: true }).click()
+
+  // Open time picker -> should default to a valid >=48h time (14:20) with NO red alert and enabled confirm!
+  await page.locator('button.booking-input-trigger').nth(1).click()
+  await expect(page.locator('.booking-picker-lead-alert')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'ยืนยันเวลา', exact: true })).toBeEnabled()
+
+  // Scroll back to an invalid <48h time (09:00) -> exact earliest time alert + 1-click jump button recovers cleanly!
+  await setPickerTime(page, 'ชั่วโมง', '09')
+  await setPickerTime(page, 'นาที', '00')
+  await expect(page.locator('.booking-picker-lead-alert')).toContainText(/วันนี้เลือกได้ตั้งแต่ 14:2[01] น\. เป็นต้นไป/)
+  await expect(page.getByRole('button', { name: 'ยืนยันเวลา', exact: true })).toBeDisabled()
+
+  await page.locator('.booking-picker-jump-btn').click()
+  await expect(page.locator('.booking-picker-lead-alert')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'ยืนยันเวลา', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
+  await expect(page.locator('#time-value')).toContainText(/14:2[01] น\./)
+})

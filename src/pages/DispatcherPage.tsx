@@ -56,7 +56,7 @@ export function DispatcherPage() {
   const [capacityCheckId,setCapacityCheckId]=useState<string|null>(null)
   const [search, setSearch] = useState('')
   const [date, setDate] = useState('')
-  const [trackingScope, setTrackingScope] = useState<'today' | 'all'>('all')
+  const [trackingScope, setTrackingScope] = useState<'today' | 'all' | 'incidents'>('all')
   const [filter, setFilter] = useState('')
   const [queuePage, setQueuePage] = useState(1)
   const [waitingPage, setWaitingPage] = useState(1)
@@ -68,6 +68,8 @@ export function DispatcherPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const main = useRef<HTMLElement>(null)
+  const reloadRef = useRef(remote.silentReload)
+  useEffect(() => { reloadRef.current = remote.silentReload }, [remote.silentReload])
   useEffect(() => {
     if (!notice) return
     const timeout = window.setTimeout(() => setNotice(''), 5000)
@@ -81,11 +83,25 @@ export function DispatcherPage() {
   const waiting = state.bookings.filter(b => b.status === 'approved' && !b.schedule)
     .sort((a, b) => Date.parse(a.appointmentAt) - Date.parse(b.appointmentAt) || a.id.localeCompare(b.id))
   const assigned = state.bookings.filter(b => !['REQUESTED', 'APPROVED', 'SCHEDULED', 'REJECTED'].includes(b.apiStatus || ''))
+  const isActiveIncident = (b: Booking) => Boolean((b.incidentOpen || b.resourceHold) && !['COMPLETED', 'CANCELLED', 'REJECTED', 'ABORTED'].includes(b.apiStatus || ''))
+  const activeIncidentBookings = state.bookings
+    .filter(isActiveIncident)
+    .sort((a, b) => Number(Boolean(b.incidentOpen)) - Number(Boolean(a.incidentOpen)) || Date.parse(a.schedule?.pickupAt || a.appointmentAt) - Date.parse(b.schedule?.pickupAt || b.appointmentAt))
+  const inProgressTripsCount = assigned.filter(b => b.status === 'in_transit' || (b.apiStatus === 'ASSIGNED' && Boolean(b.startedAt))).length
   const todaysJobs = assigned.filter(b => bangkokDate(Date.parse((b.schedule?.pickupAt || b.appointmentAt))) === today)
   const selectedId = params.get('booking')
   const selected = selectedId ? waiting.find(b => b.id === selectedId) : waiting[0]
   const modalBooking = state.bookings.find(b => b.id === selectedId)
   const dialog = params.get('dialog')
+  useEffect(() => {
+    if (busy || dialog) return
+    const timer = window.setInterval(() => {
+      if (!submitting.current && document.visibilityState === 'visible') {
+        reloadRef.current()
+      }
+    }, 25_000)
+    return () => window.clearInterval(timer)
+  }, [busy, dialog])
   const previousDialog = useRef(dialog)
   useLayoutEffect(() => {
     if (dialog === 'approve') document.getElementById('approval-back')?.focus()
@@ -147,13 +163,23 @@ export function DispatcherPage() {
       ? <DispatchButton secondary onClick={() => navigate(`/dispatcher/assignment?booking=${encodeURIComponent(b.id)}`)}>จัดรถและคนขับ →</DispatchButton>
       : <DispatchButton secondary={index !== 0} onClick={() => openDetails(b)}>ดูรายละเอียด →</DispatchButton>
   }
+  const effectiveTrackingScope = trackingScope === 'incidents' && activeIncidentBookings.length === 0 ? 'all' : trackingScope
   const monitoring = assigned.filter(b => {
     const needle = search.trim().toLocaleLowerCase()
     const driver = state.drivers.find(d => d.id === b.driverId)?.name || ''
     const pickupDay = bangkokDate(Date.parse((b.schedule?.pickupAt || b.appointmentAt)))
-    const matchesDay = date ? pickupDay === date : trackingScope === 'today' ? pickupDay === today : true
-    return matchesDay && (!filter || b.apiStatus === filter) && (!needle || `${b.id} ${b.patientName} ${driver}`.toLocaleLowerCase().includes(needle))
+    const matchesScope = effectiveTrackingScope === 'incidents'
+      ? isActiveIncident(b)
+      : date
+      ? pickupDay === date
+      : effectiveTrackingScope === 'today'
+      ? pickupDay === today
+      : true
+    return matchesScope && (!filter || b.apiStatus === filter) && (!needle || `${b.id} ${b.patientName} ${driver}`.toLocaleLowerCase().includes(needle))
   }).sort((a, b) => {
+    const incA = isActiveIncident(a) ? 0 : 1
+    const incB = isActiveIncident(b) ? 0 : 1
+    if (incA !== incB) return incA - incB
     const dayA = bangkokDate(Date.parse((a.schedule?.pickupAt || a.appointmentAt)))
     const dayB = bangkokDate(Date.parse((b.schedule?.pickupAt || b.appointmentAt)))
     if (dayA !== dayB) return dayA === today ? -1 : dayB === today ? 1 : dayA.localeCompare(dayB)
@@ -171,6 +197,7 @@ export function DispatcherPage() {
     : state.vehicles
   const totalFleetCount = fleetVehiclesForCap.length
   const activeFleetVehicles = fleetVehiclesForCap.filter(v => v.active && !v.held)
+  const matrixVehicles = fleetVehiclesForCap.filter(v => v.active)
   const focusDate = selected
     ? bangkokDateFromMs(Date.parse(selected.appointmentAt))
     : queue[0]
@@ -181,21 +208,54 @@ export function DispatcherPage() {
       .filter(b => isNonTerminalBooking(b) && b.vehicleId && (bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === today || bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === focusDate))
       .map(b => b.vehicleId!),
   )
-  const activeFleetLiveStatus = activeFleetVehicles.map(v => {
+  const shortHospital = (name?: string) => (name ? name.replace(/^โรงพยาบาล/, 'รพ.') : 'โรงพยาบาล')
+  const driverLabelFor = (driverId?: string) =>
+    driverId ? (state.drivers.find(d => d.id === driverId)?.name || remote.data?.catalog.drivers.find(d => d.id === driverId)?.name || driverId) : ''
+
+  const activeFleetLiveStatus = matrixVehicles.map(v => {
+    const incidentTrip = state.bookings.find(b => isActiveIncident(b) && b.vehicleId === v.id)
     const activeTrips = state.bookings
       .filter(b => isNonTerminalBooking(b) && b.vehicleId === v.id && (bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === today || bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === focusDate))
       .sort((a, b) => Date.parse(a.schedule?.pickupAt || a.appointmentAt) - Date.parse(b.schedule?.pickupAt || b.appointmentAt))
     const currentTrip = activeTrips.find(b => b.status === 'in_transit') ?? activeTrips[0]
+    const completedTodayTrip = state.bookings
+      .filter(b => b.vehicleId === v.id && b.status === 'completed' && bangkokDateFromMs(Date.parse(b.schedule?.arrivalAt || b.appointmentAt)) === today)
+      .sort((a, b) => Date.parse(b.schedule?.endsAt || b.appointmentAt) - Date.parse(a.schedule?.endsAt || a.appointmentAt))[0]
+    const referenceTrip = incidentTrip ?? currentTrip ?? completedTodayTrip
     const win = currentTrip
       ? computeBackwardBlockedWindow(currentTrip.appointmentAt, { hospitalName: currentTrip.details?.hospital, existingSchedule: currentTrip.schedule })
       : null
+    const capabilities = parseVehicleCapabilities(v)
+    const hasIncident = Boolean(incidentTrip || v.held)
+    const statusKind: 'incident' | 'busy' | 'free' = hasIncident ? 'incident' : currentTrip ? 'busy' : 'free'
+    const statusText = statusKind === 'incident' ? 'มีเหตุขัดข้อง' : statusKind === 'busy' ? 'กำลังวิ่งงาน' : 'ว่างพร้อมรับงาน'
+    const locationText = hasIncident
+      ? incidentTrip
+        ? `มีเหตุขัดข้อง · งาน ${incidentTrip.reference ?? incidentTrip.id}`
+        : 'มีเหตุขัดข้อง · รอยืนยันความพร้อม'
+      : currentTrip
+      ? `กำลังรับ-ส่ง · ปลายทาง ${shortHospital(currentTrip.details?.hospital)}`
+      : completedTodayTrip
+      ? `จบงานล่าสุดที่ ${shortHospital(completedTodayTrip.details?.hospital)} (พร้อมต่อรอบ)`
+      : 'ประจำที่ศูนย์รถ ทต.บ้านกลาง'
+    const locationTone: 'incident' | 'active' | 'completed' | 'depot' = hasIncident
+      ? 'incident'
+      : currentTrip
+      ? 'active'
+      : completedTodayTrip
+      ? 'completed'
+      : 'depot'
     return {
       id: v.id,
       label: v.label || v.id,
-      busy: Boolean(currentTrip),
-      tripRef: currentTrip?.reference ?? currentTrip?.id ?? '',
-      hospital: currentTrip?.details?.hospital ?? '',
-      freeClock: win?.freeClock ?? '',
+      capabilities,
+      driverName: driverLabelFor(referenceTrip?.driverId) || 'ยังไม่ระบุคนขับ',
+      statusKind,
+      statusText,
+      locationText,
+      locationTone,
+      tripRef: (incidentTrip ?? currentTrip)?.reference ?? (incidentTrip ?? currentTrip)?.id ?? '',
+      freeClock: !hasIncident && currentTrip ? (win?.freeClock ?? '') : '',
     }
   })
   const fleetInUseCount = busyVehicleIdsOnFocusDate.size
@@ -267,9 +327,60 @@ export function DispatcherPage() {
 
   if (!Object.hasOwn(headers, screen)) return <Navigate to="/dispatcher" replace />
   const [title, subtitle] = headers[screen as keyof typeof headers]
+  const renderSidebarIndicator = (path: string) => {
+    if (path === '/dispatcher') {
+      return queue.length > 0 ? <i className="nav-badge-count amber" aria-hidden="true">{queue.length > 99 ? '99+' : queue.length}</i> : null
+    }
+    if (path.endsWith('assignment')) {
+      return waiting.length > 0 ? <i className="nav-badge-count amber" aria-hidden="true">{waiting.length > 99 ? '99+' : waiting.length}</i> : null
+    }
+    if (path.endsWith('tracking')) {
+      if (activeIncidentBookings.length > 0) {
+        return <i className="nav-badge-count danger" aria-hidden="true">{activeIncidentBookings.length > 99 ? '99+' : activeIncidentBookings.length}</i>
+      }
+      if (inProgressTripsCount > 0) {
+        return <i className="nav-status-dot active" aria-hidden="true" />
+      }
+    }
+    return null
+  }
   return <div className={`dispatch-shell ${sidebarCollapsed ? 'dispatch-sidebar-collapsed' : ''}`}><a className="skip-link" href="#dispatcher-main">ข้ามไปยังเนื้อหา</a>
-    <aside id="dispatcher-sidebar" className="dispatch-sidebar"><div className="dispatch-sidebar-tools"><MunicipalLogo /></div><div className="workspace-nav-heading">ระบบรับส่งผู้ป่วย</div><p className="workspace-role-label">เจ้าหน้าที่จัดรถ</p><ResponsiveNavigation id="dispatcher-navigation" label="เมนูเจ้าหน้าที่จัดรถ">{nav.map(item => <NavLink end to={item.path} key={item.path} aria-label={item.label} title={item.label}><ServiceSymbol kind={item.path.endsWith('assignment') ? 'calendar' : item.path.endsWith('tracking') ? 'route' : 'home'} /><span>{item.label}</span></NavLink>)}</ResponsiveNavigation><button type="button" className="dispatch-sidebar-toggle" aria-label={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} title={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} aria-expanded={!sidebarCollapsed} aria-controls="dispatcher-sidebar" onClick={() => setSidebarCollapsed(hidden => !hidden)}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={sidebarCollapsed ? "m5 6 6 6-6 6m8-12 6 6-6 6" : "m11 6-6 6 6 6m8-12-6 6 6 6"} /></svg></button></aside>
-    <main tabIndex={-1} ref={main} id="dispatcher-main" className={`dispatch-main dispatch-${screen}`}><header className="dispatch-page-header"><h1 tabIndex={-1}>{title}</h1><p>{subtitle}</p></header>
+    <aside id="dispatcher-sidebar" className="dispatch-sidebar"><div className="dispatch-sidebar-tools"><MunicipalLogo /></div><div className="workspace-nav-heading">ระบบรับส่งผู้ป่วย</div><p className="workspace-role-label">เจ้าหน้าที่จัดรถ</p><ResponsiveNavigation id="dispatcher-navigation" label="เมนูเจ้าหน้าที่จัดรถ">{nav.map(item => <NavLink end to={item.path} key={item.path} aria-label={item.label} title={item.label}><ServiceSymbol kind={item.path.endsWith('assignment') ? 'calendar' : item.path.endsWith('tracking') ? 'route' : 'home'} /><span>{item.label}</span>{renderSidebarIndicator(item.path)}</NavLink>)}</ResponsiveNavigation><button type="button" className="dispatch-sidebar-toggle" aria-label={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} title={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} aria-expanded={!sidebarCollapsed} aria-controls="dispatcher-sidebar" onClick={() => setSidebarCollapsed(hidden => !hidden)}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={sidebarCollapsed ? "m5 6 6 6-6 6m8-12 6 6-6 6" : "m11 6-6 6 6 6m8-12-6 6 6 6"} /></svg></button></aside>
+    <main tabIndex={-1} ref={main} id="dispatcher-main" className={`dispatch-main dispatch-${screen}`}>
+      {activeIncidentBookings.length > 0 && (
+        <section className="dispatch-incident-banner" role="status" aria-label="แจ้งเตือนเหตุขัดข้องเร่งด่วน">
+          <div className="dispatch-incident-banner-head">
+            <span className="dispatch-incident-pill">⚠ เหตุขัดข้องเร่งด่วน ({activeIncidentBookings.length})</span>
+            <strong>
+              {activeIncidentBookings[0].reference ?? activeIncidentBookings[0].id} ·{' '}
+              {state.vehicles.find(v => v.id === activeIncidentBookings[0].vehicleId)?.label || activeIncidentBookings[0].vehicleId || 'ไม่ระบุรถ'} ·{' '}
+              {driverLabelFor(activeIncidentBookings[0].driverId) || 'ไม่ระบุคนขับ'}
+            </strong>
+          </div>
+          <p className="dispatch-incident-banner-desc">
+            {activeIncidentBookings[0].incidentReason || (activeIncidentBookings[0].incidentOpen ? 'คนขับรายงานเหตุขัดข้องระหว่างปฏิบัติงาน กรุณาตรวจสอบและจัดรถทดแทน' : 'ทรัพยากรถูกระงับความพร้อมชั่วคราว กรุณาตรวจสอบสถานะงาน')}
+          </p>
+          <div className="dispatch-incident-banner-actions">
+            <button
+              type="button"
+              className="dispatch-incident-cta"
+              onClick={() => navigate(`/dispatcher/tracking?booking=${encodeURIComponent(activeIncidentBookings[0].id)}&dialog=tracking`)}
+            >
+              เปิดเคส / จัดรถทดแทน →
+            </button>
+            {activeIncidentBookings.length > 1 && (
+              <button
+                type="button"
+                className="dispatch-incident-secondary"
+                onClick={() => { setTrackingScope('incidents'); setDate(''); navigate('/dispatcher/tracking') }}
+              >
+                ดูทั้งหมด ({activeIncidentBookings.length} เคส)
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+      <header className="dispatch-page-header"><h1 tabIndex={-1}>{title}</h1><p>{subtitle}</p></header>
       <DispatcherAlerts /><NotificationFailures />{screen === 'tracking' && <><DailyManifestExport /><MonthlyReportExport /></>}<div className="dispatch-toolbar-actions"><button type="button" className="dispatch-refresh-icon-btn" aria-label="โหลดข้อมูลล่าสุด" title="โหลดข้อมูลล่าสุด" disabled={remote.loading || busy} aria-busy={remote.loading} onClick={remote.reload}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><polyline points="21 3 21 9 15 9" /></svg></button><Link className="dispatch-account-link" to="/staff/login">บัญชีเจ้าหน้าที่ / ออกจากระบบ</Link></div>{remote.loading && <p role="status">กำลังโหลดข้อมูล…</p>}{remote.error && <p className="dispatch-alert" role="alert">{remote.error}</p>}{remote.data?.rows.some(row => row.scheduleReviewRequired) && <p className="dispatch-alert">มีตารางที่ต้องตรวจสอบหลังเปลี่ยนการตั้งค่า ตารางเดิมยังมีผล</p>}{notice && <div role="status" className="dispatch-notice"><p>{notice}</p><button aria-label="ปิดข้อความ" type="button" onClick={() => setNotice('')}>×</button></div>}
 
       {remote.data && remote.hasMore && <div className="dispatch-dialog-actions"><p>จำนวนและตัวกรองครอบคลุมเฉพาะรายการที่โหลดแล้ว</p><DispatchButton secondary disabled={remote.loading || busy} onClick={remote.loadMore}>โหลดรายการเพิ่มเติม</DispatchButton></div>}
@@ -295,22 +406,40 @@ export function DispatcherPage() {
             </div>
           </div>
           {screen === 'dashboard' && activeFleetLiveStatus.length > 0 && (
-            <div className="dispatch-fleet-live-strip" aria-label="สถานะความพร้อมรถแต่ละคัน">
-              {activeFleetLiveStatus.map(unit => (
-                <div key={unit.id} className={`dispatch-fleet-unit ${unit.busy ? 'is-busy' : 'is-free'}`}>
-                  <div className="dispatch-fleet-unit-head">
-                    <strong>{unit.label}</strong>
-                    <span className={`dispatch-unit-badge ${unit.busy ? 'busy' : 'free'}`}>
-                      {unit.busy ? 'กำลังวิ่งงาน' : 'ว่างพร้อมรับงาน'}
-                    </span>
-                  </div>
-                  <p className="dispatch-fleet-unit-meta">
-                    {unit.busy
-                      ? `${unit.tripRef}${unit.hospital ? ` · ${unit.hospital}` : ''}${unit.freeClock ? ` · ว่างอีกครั้ง ${unit.freeClock} น.` : ''}`
-                      : 'พร้อมจัดคิวรับ–ส่งทันที'}
-                  </p>
-                </div>
-              ))}
+            <div className="dispatch-fleet-matrix-wrap">
+              <div className="dispatch-fleet-matrix-head">
+                <strong>สถานะรถปฏิบัติงานจริง (Live Fleet Matrix)</strong>
+                <span className="dispatch-fleet-source-note">ตำแหน่งอ้างอิงจากสถานะงานล่าสุด</span>
+              </div>
+              <div className="dispatch-fleet-live-strip dispatch-fleet-matrix" aria-label="สถานะความพร้อมรถแต่ละคัน">
+                {activeFleetLiveStatus.map(unit => (
+                  <article key={unit.id} className={`dispatch-fleet-unit is-${unit.statusKind}`}>
+                    <div className="dispatch-fleet-unit-head">
+                      <strong>{unit.label}</strong>
+                      <span className={`dispatch-unit-badge ${unit.statusKind}`}>{unit.statusText}</span>
+                    </div>
+                    <div className="dispatch-fleet-unit-caps" aria-label="อุปกรณ์ที่รองรับ">
+                      {unit.capabilities.map(cap => (
+                        <span key={cap} className={`dispatch-unit-cap ${cap}`}>
+                          <ServiceSymbol kind={cap === 'stretcher' ? 'bed' : cap === 'wheelchair' ? 'wheel' : 'walk'} />
+                          {cap === 'stretcher' ? 'เปลนอน' : cap === 'wheelchair' ? 'รถเข็น' : 'เดินได้'}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="dispatch-fleet-unit-details">
+                      <span className="dispatch-fleet-driver"><ServiceSymbol kind="person" />{unit.driverName}</span>
+                      <span className={`dispatch-fleet-loc tone-${unit.locationTone}`}>{unit.locationText}</span>
+                    </div>
+                    <p className="dispatch-fleet-unit-meta">
+                      {unit.statusKind === 'incident'
+                        ? 'ระงับคิวชั่วคราวจนกว่าเจ้าหน้าที่จะคลี่คลายเหตุและยืนยันความพร้อม'
+                        : unit.freeClock
+                        ? `งาน ${unit.tripRef} · ว่างอีกครั้ง ${unit.freeClock} น.`
+                        : 'พร้อมจัดคิวรับ–ส่งทันที'}
+                    </p>
+                  </article>
+                ))}
+              </div>
             </div>
           )}
         </section>
@@ -368,9 +497,23 @@ export function DispatcherPage() {
       {screen === 'assignment' && <><div className="dispatch-assignment-grid"><section className="dispatch-panel dispatch-waiting"><h2>1. เลือกงานที่รอจัดตาราง</h2><p>เลือกงาน แล้วจัดรถและคนขับ</p><div className="dispatch-waiting-list" tabIndex={0} role="region" aria-label="รายการงานที่รอจัดตาราง">{pagedWaiting.map(b => <article key={b.id} className={selected?.id === b.id ? 'selected' : ''}><button type="button" aria-pressed={selected?.id === b.id} onClick={() => { setError(''); setParams({ booking: b.id }) }}><div className="dispatch-job-card-heading"><strong>{b.id}</strong><span>{selected?.id === b.id ? '✓ เลือกแล้ว' : 'เลือกงานนี้ →'}</span></div><span className="dispatch-job-patient">{b.patientName}</span><b>{dispatchDate(b.appointmentAt)} · นัด {dispatchTime(b.appointmentAt)} น.</b><span>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</span>{renderDecisionBadges(b)}<span className="dispatch-status approved">รอจัดตาราง</span></button><button type="button" className="dispatch-details-link" onClick={() => openDetails(b)}>ดูรายละเอียด</button></article>)}</div><PaginationControls totalItems={waiting.length} pageSize={DISPATCHER_PAGE_SIZE} page={waitingPage} onPageChange={setWaitingPage} label="แบ่งหน้างานที่รอจัดตาราง" />{!waiting.length && <p className="dispatch-empty">ไม่มีงานรอจัดตาราง กรุณาอนุมัติคำขอจากแดชบอร์ดก่อน</p>}<p className="dispatch-small">แสดงเฉพาะงานที่ยังไม่ได้จัดรถ</p></section>{selected ? <ApiDispatchAssignment key={`${selected.id}:${selected.revision}`} booking={remote.data!.rows.find(row => row.id === selected.id)!} catalog={remote.data!.catalog} previousJobs={remote.data!.rows} reload={remote.reload} onAssigned={() => { remote.reload(); setNotice(`มอบหมายงาน ${selected.id} แล้ว`); navigate('/dispatcher/tracking') }} /> : <section className="dispatch-panel dispatch-empty"><h2>{selectedId ? 'ไม่พบงานที่รอจัดตารางนี้' : 'เลือกงานที่รอจัดตาราง'}</h2><p>งานอาจถูกมอบหมายแล้ว หรือยังไม่ได้รับอนุมัติ</p><Link to="/dispatcher">กลับแดชบอร์ด</Link></section>}</div><VehicleTimelineView bookings={state.bookings} vehicles={state.vehicles} catalogVehicles={remote.data?.catalog.vehicles} defaultDate={selected ? bangkokDateFromMs(Date.parse(selected.appointmentAt)) : focusDate} onSelectBooking={openDetails} /></>}
       {screen === 'tracking' && <>{remote.data && <ResourceReadiness key={remote.data.rows.map(row => row.revision).join(':') + remote.data.catalog.vehicles.filter(v => v.held).length + ':' + remote.data.catalog.drivers.filter(d => d.held).length} catalog={remote.data.catalog} onSaved={() => { remote.reload(); setNotice('ยืนยันความพร้อมทรัพยากรแล้ว') }} />}
         <section className="dispatch-metrics dispatch-tracking-metrics" aria-label="ภาพรวมการรับส่งวันนี้">{[['งานทั้งหมดวันนี้', todaysJobs.length], ['อยู่ระหว่างรับส่ง', todaysJobs.filter(b => b.status === 'in_transit').length], ['ดำเนินการเสร็จแล้ว', todaysJobs.filter(b => b.status === 'completed').length]].map(([label, value]) => <article key={label}><p>{label}</p><strong>{value}</strong>{label === 'งานทั้งหมดวันนี้' && <span className="dispatch-tracking-secondary">{dispatchDate(new Date(now).toISOString())}</span>}</article>)}</section>
-        <div className="dispatch-tracking-scopes" role="group" aria-label="ช่วงเวลาของงานรับส่ง">{([['all', 'ทั้งหมด'], ['today', 'วันนี้']] as const).map(([scope, label]) => <button type="button" key={scope} aria-pressed={!date && trackingScope === scope} onClick={() => { setTrackingScope(scope); setDate('') }}>{label}</button>)}</div>
+        <div className="dispatch-tracking-scopes" role="group" aria-label="ช่วงเวลาของงานรับส่ง">
+          {([['all', 'ทั้งหมด'], ['today', 'วันนี้']] as const).map(([scope, label]) => (
+            <button type="button" key={scope} aria-pressed={!date && effectiveTrackingScope === scope} onClick={() => { setTrackingScope(scope); setDate('') }}>{label}</button>
+          ))}
+          {activeIncidentBookings.length > 0 && (
+            <button
+              type="button"
+              className="dispatch-scope-incident"
+              aria-pressed={!date && effectiveTrackingScope === 'incidents'}
+              onClick={() => { setTrackingScope('incidents'); setDate('') }}
+            >
+              เฉพาะเหตุขัดข้อง ({activeIncidentBookings.length})
+            </button>
+          )}
+        </div>
         <div className="dispatch-filters"><label className="dispatch-search"><span className="sr-only">ค้นหารหัสงาน ชื่อผู้ป่วย หรือคนขับ</span><input type="search" value={search} placeholder="⌕ ค้นหารหัสงาน ชื่อผู้ป่วย หรือคนขับ" onChange={e => setSearch(e.target.value)} /></label><label className="dispatch-date-filter"><span>วันรับผู้ป่วย</span><input type="date" aria-label="วันรับผู้ป่วย" value={date} onChange={e => setDate(e.target.value)} /></label><label><span className="sr-only">กรองสถานะ</span><select aria-label="กรองสถานะ" value={filter} onChange={e => setFilter(e.target.value)}><option value="">สถานะทั้งหมด</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-        <section className="dispatch-panel dispatch-monitoring"><h2>{date ? dispatchDate(date) : trackingScope === 'today' ? 'รายการงานวันนี้' : 'รายการงานรับส่งทั้งหมด'} · {monitoring.length} งาน</h2><p className="dispatch-muted">งานกำลังเดินทางและงานรอรับแสดงก่อนงานที่จบแล้วในแต่ละวัน</p><ServiceTable headings={['งาน / ผู้ป่วย', 'วัน / เวลารับ', 'โรงพยาบาล', 'รถ / คนขับ', 'สถานะ', 'รายละเอียด']} label="ตารางงานรับส่ง">{pagedMonitoring.length ? pagedMonitoring.map(b => <tr key={b.id}><th scope="row">{b.id}<span className="dispatch-tracking-secondary">{b.patientName}</span></th><td><strong>{b.schedule ? dispatchTime(b.schedule.pickupAt) + ' น.' : 'ไม่มีเวลารับที่ยืนยัน'}</strong><span className="dispatch-tracking-secondary">{b.schedule ? dispatchDate(b.schedule.pickupAt) : 'นัด ' + dispatchDate(b.appointmentAt)}</span></td><td>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</td><td>{state.vehicles.find(v => v.id === b.vehicleId)?.label || b.vehicleId} · {state.drivers.find(d => d.id === b.driverId)?.name || b.driverId}</td><td><span className={`dispatch-status-badge ${b.status}`}><span aria-hidden="true">{b.status === 'completed' ? '✓ ' : b.status === 'cancelled' ? '× ' : b.status === 'in_transit' ? '→ ' : '◷ '}</span>{dispatchStatus(b)}</span></td><td><DispatchButton secondary onClick={() => openDetails(b)}>{b.status === 'completed' ? 'ดูรายละเอียด →' : 'ดูสถานะ →'}</DispatchButton></td></tr>) : <tr><td colSpan={6} className="dispatch-empty">{!date && trackingScope === 'today' && !search && !filter ? 'ไม่มีงานรับส่งวันนี้ เลือกทั้งหมดเพื่อดูงานวันอื่น' : 'ไม่พบงานรับส่งที่ตรงกับตัวกรอง'}</td></tr>}</ServiceTable><PaginationControls totalItems={monitoring.length} pageSize={DISPATCHER_PAGE_SIZE} page={monitoringPage} onPageChange={setMonitoringPage} label="แบ่งหน้าตารางติดตามงานรับส่ง" /><p className="dispatch-small">โหลดข้อมูลล่าสุดเพื่อดูสถานะปัจจุบัน · แสดงหน้าละ {DISPATCHER_PAGE_SIZE} รายการ</p></section>
+        <section className="dispatch-panel dispatch-monitoring"><h2>{effectiveTrackingScope === 'incidents' ? 'รายการที่มีเหตุขัดข้องเร่งด่วน' : date ? dispatchDate(date) : effectiveTrackingScope === 'today' ? 'รายการงานวันนี้' : 'รายการงานรับส่งทั้งหมด'} · {monitoring.length} งาน</h2><p className="dispatch-muted">งานที่มีเหตุขัดข้องแสดงบนสุด ตามด้วยงานกำลังเดินทางและงานรอรับในแต่ละวัน</p><ServiceTable headings={['งาน / ผู้ป่วย', 'วัน / เวลารับ', 'โรงพยาบาล', 'รถ / คนขับ', 'สถานะ', 'รายละเอียด']} label="ตารางงานรับส่ง">{pagedMonitoring.length ? pagedMonitoring.map(b => { const activeInc = isActiveIncident(b); return <tr key={b.id} className={activeInc ? 'dispatch-row-incident' : undefined}><th scope="row">{b.id}<span className="dispatch-tracking-secondary">{b.patientName}</span></th><td><strong>{b.schedule ? dispatchTime(b.schedule.pickupAt) + ' น.' : 'ไม่มีเวลารับที่ยืนยัน'}</strong><span className="dispatch-tracking-secondary">{b.schedule ? dispatchDate(b.schedule.pickupAt) : 'นัด ' + dispatchDate(b.appointmentAt)}</span></td><td>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</td><td>{state.vehicles.find(v => v.id === b.vehicleId)?.label || b.vehicleId} · {state.drivers.find(d => d.id === b.driverId)?.name || b.driverId}</td><td><div className="dispatch-status-stack"><span className={`dispatch-status-badge ${b.status}`}><span aria-hidden="true">{b.status === 'completed' ? '✓ ' : b.status === 'cancelled' ? '× ' : b.status === 'in_transit' ? '→ ' : '◷ '}</span>{dispatchStatus(b)}</span>{activeInc && <span className="dispatch-incident-row-badge">มีเหตุขัดข้อง — รอจัดรถใหม่</span>}</div></td><td><DispatchButton secondary onClick={() => openDetails(b)}>{b.status === 'completed' ? 'ดูรายละเอียด →' : 'ดูสถานะ →'}</DispatchButton></td></tr> }) : <tr><td colSpan={6} className="dispatch-empty">{!date && effectiveTrackingScope === 'today' && !search && !filter ? 'ไม่มีงานรับส่งวันนี้ เลือกทั้งหมดเพื่อดูงานวันอื่น' : 'ไม่พบงานรับส่งที่ตรงกับตัวกรอง'}</td></tr>}</ServiceTable><PaginationControls totalItems={monitoring.length} pageSize={DISPATCHER_PAGE_SIZE} page={monitoringPage} onPageChange={setMonitoringPage} label="แบ่งหน้าตารางติดตามงานรับส่ง" /><p className="dispatch-small">โหลดข้อมูลล่าสุดเพื่อดูสถานะปัจจุบัน · แสดงหน้าละ {DISPATCHER_PAGE_SIZE} รายการ</p></section>
       </>}
     </main>
     {dialog && !modalBooking && <DispatchModal title="ไม่พบคำขอนี้" onClose={closeModal}><p>รายการนี้ไม่มีอยู่แล้ว กรุณาตรวจสอบรายการล่าสุด</p><DispatchButton secondary onClick={closeModal}>กลับไปตรวจสอบ</DispatchButton></DispatchModal>}
