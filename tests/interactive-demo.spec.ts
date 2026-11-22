@@ -909,3 +909,42 @@ test('Stale-readiness confirmation modal disables confirm button and offers 1-cl
   await expect(dialog).toHaveCount(0)
   await expect.poll(() => bookingsFetches).toBeGreaterThan(beforeFetches)
 })
+
+test('Desktop mouse-wheel scrolling works on /booking, /dispatcher, and /driver while preserving 390px mobile overflow containment', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 680 })
+
+  // 1. /booking (desktop 1280x680)
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-01"]').click()
+  await expect(page).toHaveURL(/\/booking$/)
+  await expect(page.getByRole('button', { name: 'เริ่มจองรถ →' })).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.mouse.move(640, 340)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+
+  // Verify 390px mobile zero horizontal overflow on /booking
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // 2. /dispatcher (desktop 1280x680)
+  await page.setViewportSize({ width: 1280, height: 680 })
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'เจ้าหน้าที่จัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.mouse.move(700, 340)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+
+  // 3. /driver (desktop 1280x680)
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await expect(page.getByRole('button', { name: /ดูรายละเอียด/ }).first()).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.mouse.move(700, 340)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+})
