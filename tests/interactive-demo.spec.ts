@@ -725,18 +725,25 @@ test('Pre-UAT polish: pickup map auto-village & non-destructive suggestion pill,
   await page.getByRole('button', { name: 'ย่อเป็นแถวเดียว' }).click()
   expect(await matrix.evaluate(el => getComputedStyle(el).display)).toBe('flex')
 
-  // Timeline date chips: default ทุกวัน -> click single date -> click same date again toggles back to ทุกวัน
+  // Timeline date chips: defaults to single active day (no multi-day bar overlap) -> switch to ทุกวัน hides shared 06:00-18:00 track -> click date chip returns cleanly
   const timeline = page.locator('.dispatch-timeline-panel')
   const tlAllChip = timeline.locator('.dispatch-date-chip-all')
+  await expect(tlAllChip).toHaveAttribute('aria-pressed', 'false')
+  await expect(timeline.locator('.dispatch-timeline-scale')).toBeVisible()
+  expect(await timeline.locator('.dispatch-timeline-track').count()).toBeGreaterThan(0)
+  await tlAllChip.click()
   await expect(tlAllChip).toHaveAttribute('aria-pressed', 'true')
   await expect(timeline).toContainText('ภาพรวมทุกวัน')
+  await expect(timeline.locator('.dispatch-timeline-all-days-note')).toContainText('เลือกวันที่ด้านบนเพื่อดูแถบช่วงเวลารายวัน (06:00–18:00 น.)')
+  await expect(timeline.locator('.dispatch-timeline-track')).toHaveCount(0)
   const firstDateChip = timeline.locator('.dispatch-timeline-date-chips .dispatch-date-chip').nth(1)
   await firstDateChip.click()
   await expect(firstDateChip).toHaveAttribute('aria-pressed', 'true')
   await expect(tlAllChip).toHaveAttribute('aria-pressed', 'false')
+  await expect(timeline.locator('.dispatch-timeline-scale')).toBeVisible()
   await firstDateChip.click()
   await expect(tlAllChip).toHaveAttribute('aria-pressed', 'true')
-  await expect(timeline).toContainText('ภาพรวมทุกวัน')
+  await expect(timeline.locator('.dispatch-timeline-track')).toHaveCount(0)
 
   // Driver History 12-item progressive pagination, route summary, and quick filters
   await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
@@ -1142,4 +1149,154 @@ test('Final UX, Privacy & Layout Polish: sticky desktop sidebars, pin-driven vil
   const desktopCtaBox = (await page.locator('.driver-action').boundingBox())!
   const desktopLastCardBox = (await page.locator(lastContentSelector).boundingBox())!
   expect(desktopLastCardBox.y + desktopLastCardBox.height).toBeLessThanOrEqual(desktopCtaBox.y + 2)
+})
+
+test('Final Pre-UAT Visual & Navigation Polish: single-day timeline & unclipped actions, auto-expanded incident holds + actionable fleet cards, sticky mobile headers & driver mobile toolbar/focus', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 800 })
+
+  // 1. Dispatcher Timeline: defaults to single active day, unclipped รายละเอียด → button, ทุกวัน hides shared track
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  const timeline = page.locator('.dispatch-timeline-panel')
+  await expect(timeline).toBeVisible()
+  const tlAllChip = timeline.locator('.dispatch-date-chip-all')
+  await expect(tlAllChip).toHaveAttribute('aria-pressed', 'false')
+  await expect(timeline.locator('.dispatch-timeline-scale')).toBeVisible()
+  expect(await timeline.locator('.dispatch-timeline-track').count()).toBeGreaterThan(0)
+
+  // Verify รายละเอียด → button is completely visible & unclipped inside its timeline trip pill
+  const firstPill = timeline.locator('.dispatch-timeline-trip-pill').first()
+  const detailBtn = firstPill.locator('.dispatch-mini-link')
+  await expect(detailBtn).toBeVisible()
+  const pillBox = (await firstPill.boundingBox())!
+  const btnBox = (await detailBtn.boundingBox())!
+  expect(btnBox.x + btnBox.width).toBeLessThanOrEqual(pillBox.x + pillBox.width + 1)
+  expect(btnBox.x + btnBox.width).toBeLessThanOrEqual(1280)
+
+  // Switching to ทุกวัน hides the single-day 06:00–18:00 track so multi-date bars never overlap
+  await tlAllChip.click()
+  await expect(tlAllChip).toHaveAttribute('aria-pressed', 'true')
+  await expect(timeline.locator('.dispatch-timeline-track')).toHaveCount(0)
+  await expect(timeline.locator('.dispatch-timeline-all-days-note')).toContainText('เลือกวันที่ด้านบนเพื่อดูแถบช่วงเวลารายวัน (06:00–18:00 น.)')
+
+  // 2. Actionable Live Fleet Matrix: clickable active trip ref -> /dispatcher/tracking modal
+  const activeTripLink = page.locator('.dispatch-fleet-matrix .dispatch-fleet-trip-link').first()
+  await expect(activeTripLink).toContainText('งาน BK-DEMO-1003')
+  await activeTripLink.click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking\?booking=BK-DEMO-1003&dialog=tracking/)
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: 'ปิดรายละเอียด', exact: true }).click()
+
+  // Trigger a resource hold via Driver FAILED_PICKUP (so demo-vehicle-1 & demo-driver-A are held without active trip)
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await page.getByRole('button', { name: /ดูรายละเอียด/ }).first().click()
+  await page.getByRole('button', { name: 'เริ่มงาน', exact: true }).click()
+
+  // Check clean single focus ring on secondary red ยกเลิก button inside confirmation modal (keyboard focus modality)
+  const cancelModalBtn = page.getByRole('dialog').getByRole('button', { name: 'ยกเลิก', exact: true })
+  await expect(cancelModalBtn).toBeFocused()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Shift+Tab')
+  await expect(cancelModalBtn).toBeFocused()
+  expect(await cancelModalBtn.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('solid')
+  expect(await cancelModalBtn.evaluate(el => getComputedStyle(el).outlineOffset)).toBe('2px')
+
+  await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  await page.getByRole('button', { name: 'ออกจากต้นทางไปรับผู้ป่วย', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  await page.getByRole('button', { name: 'รับผู้ป่วยไม่ได้', exact: true }).click()
+  await page.getByLabel('เหตุผลที่รายงาน').fill('ติดต่อผู้ป่วยไม่ได้ที่จุดรับ')
+  await page.getByRole('button', { name: 'ยืนยันรายงานรับไม่ได้', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/history$/)
+
+  // Return to Dispatcher: verify red sidebar badge + actionable red incident card on Live Fleet Matrix -> auto-expanded readiness panel -> resolve holds clears red badge!
+  await demoBar.getByRole('button', { name: 'เจ้าหน้าที่จัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  const trackingNavLink = page.locator('#dispatcher-sidebar').getByRole('link', { name: 'ติดตามงานรับส่ง', exact: true })
+  await expect(trackingNavLink.locator('.nav-badge-count.danger')).toBeVisible()
+
+  const resolveCardBtn = page.locator('.dispatch-fleet-unit.is-incident .dispatch-fleet-action-btn').first()
+  await expect(resolveCardBtn).toContainText('คลี่คลายเหตุ / ยืนยันความพร้อม →')
+  await resolveCardBtn.click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking\?focus=readiness/)
+
+  const readinessPanel = page.locator('#resource-readiness-panel')
+  await expect(readinessPanel).toBeVisible()
+  await expect(readinessPanel.locator('.dispatch-readiness-count-badge')).toContainText('รอคลี่คลาย 2 รายการ')
+  // Vehicle is pre-selected from fleet card link & controls are immediately visible (not collapsed!)
+  await expect(readinessPanel.getByLabel('ทรัพยากรที่ตรวจสอบ')).toHaveValue('vehicles/demo-vehicle-1')
+
+  // Confirm readiness for vehicle (2 -> 1), then driver (1 -> 0, panel & red badge disappear!)
+  await readinessPanel.getByLabel('ตำแหน่งปัจจุบันที่ยืนยันแล้ว').selectOption({ index: 1 })
+  await readinessPanel.getByLabel('เหตุผลและผลตรวจสอบ').fill('ตรวจรถและกลับศูนย์พร้อมใช้งานแล้ว')
+  await readinessPanel.getByLabel('ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว').check()
+  await readinessPanel.getByRole('button', { name: 'ยืนยันความพร้อมทรัพยากรนี้' }).click()
+  await expect(readinessPanel.locator('.dispatch-readiness-count-badge')).toContainText('รอคลี่คลาย 1 รายการ')
+
+  await readinessPanel.getByLabel('ทรัพยากรที่ตรวจสอบ').selectOption('drivers/demo-driver-A')
+  await readinessPanel.getByLabel('ตำแหน่งปัจจุบันที่ยืนยันแล้ว').selectOption({ index: 1 })
+  await readinessPanel.getByLabel('เหตุผลและผลตรวจสอบ').fill('ยืนยันคนขับพร้อมปฏิบัติงานรอบถัดไป')
+  await readinessPanel.getByLabel('ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว').check()
+  await readinessPanel.getByRole('button', { name: 'ยืนยันความพร้อมทรัพยากรนี้' }).click()
+  await expect(readinessPanel).toHaveCount(0)
+  await expect(trackingNavLink.locator('.nav-badge-count.danger')).toHaveCount(0)
+
+  // 3. Sticky compact mobile header (390px) on /driver, /dispatcher, /admin + single-row Driver mobile toolbar
+  // Load 320 seed rows so pages are long enough to scroll down on 390px mobile
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await page.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  await expect(page.getByText('ข้อมูลจำลองในระบบ: 320 รายการ')).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  for (const check of [
+    { btn: 'พนักงานขับรถ', url: /\/driver$/, sidebar: '#driver-sidebar', menu: 'เมนูคนขับ', ready: '.driver-refresh-button', minScroll: 80 },
+    { btn: 'เจ้าหน้าที่จัดรถ', url: /\/dispatcher$/, sidebar: '#dispatcher-sidebar', menu: 'เมนูเจ้าหน้าที่จัดรถ', ready: '.dispatch-fleet-matrix', minScroll: 200 },
+    { btn: 'ผู้ดูแลระบบ', url: /\/admin$/, sidebar: '#admin-sidebar', menu: 'เมนูผู้ดูแลระบบ', ready: '.admin-analytics-panel', minScroll: 200 },
+  ]) {
+    await demoBar.getByRole('button', { name: check.btn }).click()
+    await expect(page).toHaveURL(check.url)
+    await expect(page.locator(check.ready)).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+    if (check.sidebar === '#driver-sidebar') {
+      // Single-row compact driver toolbar on 390px mobile
+      const refreshBox = (await page.locator('.driver-refresh-button').boundingBox())!
+      const accountBox = (await page.locator('.driver-account-link').boundingBox())!
+      expect(Math.abs(refreshBox.y - accountBox.y)).toBeLessThanOrEqual(6)
+    }
+
+    await page.evaluate(() => window.scrollTo(0, 500))
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(check.minScroll)
+    const barBottom = await demoBar.evaluate(el => el.getBoundingClientRect().bottom)
+    const headerRect = await page.locator(check.sidebar).evaluate(el => {
+      const r = el.getBoundingClientRect()
+      return { top: r.top, height: r.height }
+    })
+    expect(headerRect.top).toBeGreaterThanOrEqual(barBottom - 2)
+    expect(headerRect.top).toBeLessThanOrEqual(barBottom + 2)
+    expect(headerRect.height).toBeLessThanOrEqual(72)
+    await expect(page.getByRole('button', { name: check.menu, exact: true })).toBeVisible()
+
+    // Also verify long scrollable /driver/history keeps sticky green header + ☰ pinned after deep scroll
+    if (check.sidebar === '#driver-sidebar') {
+      await page.getByRole('button', { name: check.menu, exact: true }).click()
+      await page.getByRole('dialog', { name: check.menu, exact: true }).getByRole('link', { name: 'ประวัติ', exact: true }).click()
+      await expect(page).toHaveURL(/\/driver\/history$/)
+      await expect(page.locator('.driver-grid .driver-card').first()).toBeVisible()
+      await page.evaluate(() => window.scrollTo(0, 700))
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300)
+      const histHeaderRect = await page.locator('#driver-sidebar').evaluate(el => {
+        const r = el.getBoundingClientRect()
+        return { top: r.top, height: r.height }
+      })
+      expect(histHeaderRect.top).toBeGreaterThanOrEqual(barBottom - 2)
+      expect(histHeaderRect.top).toBeLessThanOrEqual(barBottom + 2)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    }
+  }
 })

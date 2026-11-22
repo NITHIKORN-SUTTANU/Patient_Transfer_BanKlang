@@ -51,20 +51,48 @@ export function VehicleTimelineView({
   defaultDate: string
   onSelectBooking?: (booking: Booking) => void
 }) {
-  // Prefer defaultDate when it has scheduled/assigned trips, otherwise fall back to nearest day with work.
-  const activeDates = useMemo(() => {
-    const dates = new Set<string>()
+  const [todayDate] = useState(() => bangkokDateFromMs(Date.now()))
+
+  // Collect dates with scheduled/assigned trips first, falling back to any non-terminal dates.
+  const { scheduledDates, activeDates } = useMemo(() => {
+    const scheduled = new Set<string>()
+    const all = new Set<string>()
     for (const b of bookings) {
       if (!isNonTerminalBooking(b)) continue
       const ms = Date.parse(b.schedule?.pickupAt || b.appointmentAt)
-      if (Number.isFinite(ms)) dates.add(bangkokDateFromMs(ms))
+      if (!Number.isFinite(ms)) continue
+      const day = bangkokDateFromMs(ms)
+      all.add(day)
+      if (b.vehicleId) scheduled.add(day)
     }
-    return Array.from(dates).sort()
+    return {
+      scheduledDates: Array.from(scheduled).sort(),
+      activeDates: Array.from(all).sort(),
+    }
   }, [bookings])
 
-  const [dateSelection, setDateSelection] = useState<'ALL' | string>('ALL')
+  // Default to today's date when it has scheduled trips, otherwise defaultDate (if active) or nearest active date.
+  const resolvedDefaultDate = useMemo(() => {
+    if (scheduledDates.includes(todayDate)) return todayDate
+    if (defaultDate && scheduledDates.includes(defaultDate)) return defaultDate
+    if (scheduledDates.length > 0) {
+      return scheduledDates.find(d => d >= todayDate) ?? scheduledDates[scheduledDates.length - 1]
+    }
+    if (activeDates.includes(todayDate)) return todayDate
+    if (defaultDate && activeDates.includes(defaultDate)) return defaultDate
+    return activeDates.find(d => d >= todayDate) ?? activeDates[0] ?? defaultDate ?? todayDate
+  }, [scheduledDates, activeDates, todayDate, defaultDate])
+
+  const [dateSelection, setDateSelection] = useState<'AUTO' | 'ALL' | string>('AUTO')
   const isAllDays = dateSelection === 'ALL'
-  const selectedDate = isAllDays ? '' : dateSelection || (activeDates.includes(defaultDate) ? defaultDate : activeDates[0] || defaultDate)
+  const selectedDate = isAllDays ? '' : dateSelection === 'AUTO' ? resolvedDefaultDate : dateSelection
+
+  const chipDates = useMemo(() => {
+    const source = scheduledDates.length > 0 ? scheduledDates : activeDates
+    const set = new Set<string>(source.slice(0, 4))
+    if (selectedDate) set.add(selectedDate)
+    return Array.from(set).sort().slice(0, 5)
+  }, [scheduledDates, activeDates, selectedDate])
 
   const fleetList = useMemo(() => {
     if (catalogVehicles && catalogVehicles.length > 0) {
@@ -161,7 +189,7 @@ export function VehicleTimelineView({
             >
               ทุกวัน
             </button>
-            {activeDates.slice(0, 4).map(d => {
+            {chipDates.map(d => {
               const active = !isAllDays && selectedDate === d
               return (
                 <button
@@ -169,7 +197,7 @@ export function VehicleTimelineView({
                   type="button"
                   className={`dispatch-date-chip ${active ? 'active' : ''}`}
                   aria-pressed={active}
-                  title={active ? 'แตะอีกครั้งเพื่อกลับไปดูทุกวัน' : `ดูไทม์ไลน์วันที่ ${dispatchDate(d)}`}
+                  title={active ? 'แตะอีกครั้งเพื่อสลับไปดูภาพรวมทุกวัน' : `ดูไทม์ไลน์วันที่ ${dispatchDate(d)}`}
                   onClick={() => setDateSelection(active ? 'ALL' : d)}
                 >
                   {d.slice(8, 10)}/{d.slice(5, 7)}
@@ -180,13 +208,19 @@ export function VehicleTimelineView({
         </div>
       </div>
 
-      <div className="dispatch-timeline-scale" aria-hidden="true">
-        <span>06:00</span>
-        <span>09:00</span>
-        <span>12:00</span>
-        <span>15:00</span>
-        <span>18:00 น.</span>
-      </div>
+      {isAllDays ? (
+        <p className="dispatch-timeline-all-days-note" role="status">
+          เลือกวันที่ด้านบนเพื่อดูแถบช่วงเวลารายวัน (06:00–18:00 น.) — ด้านล่างแสดงสรุปรายการงานแยกตามรถและวันที่โดยไม่ซ้อนแถบเวลาต่างวันกัน
+        </p>
+      ) : (
+        <div className="dispatch-timeline-scale" aria-hidden="true">
+          <span>06:00</span>
+          <span>09:00</span>
+          <span>12:00</span>
+          <span>15:00</span>
+          <span>18:00 น.</span>
+        </div>
+      )}
 
       <div className="dispatch-timeline-rows">
         {fleetList.map(v => {
@@ -222,23 +256,25 @@ export function VehicleTimelineView({
               </div>
 
               <div className="dispatch-timeline-track-area">
-                <div className="dispatch-timeline-track" aria-hidden="true">
-                  {dayTrips.slice(0, 12).map(({ booking, window }) => {
-                    const leftPct = pctFromClock(window.departureClock)
-                    const rightPct = pctFromClock(window.freeClock)
-                    const widthPct = Math.max(8, rightPct - leftPct)
-                    return (
-                      <div
-                        key={booking.id}
-                        className="dispatch-timeline-block"
-                        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                        title={`${booking.id} · ${window.windowLabel}`}
-                      >
-                        <span>{window.departureClock}–{window.freeClock}</span>
-                      </div>
-                    )
-                  })}
-                </div>
+                {!isAllDays && (
+                  <div className="dispatch-timeline-track" aria-hidden="true">
+                    {dayTrips.slice(0, 12).map(({ booking, window }) => {
+                      const leftPct = pctFromClock(window.departureClock)
+                      const rightPct = pctFromClock(window.freeClock)
+                      const widthPct = Math.max(8, rightPct - leftPct)
+                      return (
+                        <div
+                          key={booking.id}
+                          className="dispatch-timeline-block"
+                          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                          title={`${booking.id} · ${window.windowLabel}`}
+                        >
+                          <span>{window.departureClock}–{window.freeClock}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
                 {dayTrips.length > 0 ? (
                   <ul className="dispatch-timeline-trip-list">
@@ -246,20 +282,22 @@ export function VehicleTimelineView({
                       const tripDay = bangkokDateFromMs(Date.parse(booking.schedule?.pickupAt || booking.appointmentAt))
                       return (
                         <li key={booking.id} className="dispatch-timeline-trip-pill">
-                          <span>
+                          <span className="dispatch-timeline-trip-copy">
                             {isAllDays && <span className="dispatch-timeline-day-tag">{tripDay.slice(8, 10)}/{tripDay.slice(5, 7)}</span>}{' '}
                             <strong>{booking.id}</strong> · {booking.details?.hospital || 'ไม่ระบุโรงพยาบาล'} ·{' '}
                             <span className="dispatch-window-tag">{window.windowLabel}</span> · รับ {window.pickupClock} น.
                           </span>
-                          <span className={`dispatch-mobility-badge ${mobility}`}>
-                            <ServiceSymbol kind={mobility === 'stretcher' ? 'bed' : mobility === 'wheelchair' ? 'wheel' : 'walk'} />
-                            {capabilityBadgeText(mobility)}
-                          </span>
-                          {onSelectBooking && (
-                            <button type="button" className="dispatch-mini-link" onClick={() => onSelectBooking(booking)}>
-                              รายละเอียด →
-                            </button>
-                          )}
+                          <div className="dispatch-timeline-trip-actions">
+                            <span className={`dispatch-mobility-badge ${mobility}`}>
+                              <ServiceSymbol kind={mobility === 'stretcher' ? 'bed' : mobility === 'wheelchair' ? 'wheel' : 'walk'} />
+                              {capabilityBadgeText(mobility)}
+                            </span>
+                            {onSelectBooking && (
+                              <button type="button" className="dispatch-mini-link" onClick={() => onSelectBooking(booking)}>
+                                รายละเอียด →
+                              </button>
+                            )}
+                          </div>
                         </li>
                       )
                     })}

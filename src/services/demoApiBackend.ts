@@ -1040,6 +1040,17 @@ export async function handleDemoApiRequest<T>(
       res.held = false
       if (typeof body?.locationId === 'string') res.locationId = body.locationId
       res.revision += 1
+      for (const b of db.bookings) {
+        if (!b.resourceHold) continue
+        const matches = (kind === 'vehicles' && b.vehicleId === id) || (kind === 'drivers' && b.driverId === id)
+        if (!matches) continue
+        const vHeld = b.vehicleId ? Boolean(db.vehicles.find(v => v.id === b.vehicleId)?.held) : false
+        const dHeld = b.driverId ? Boolean(db.drivers.find(d => d.id === b.driverId)?.held) : false
+        if (!vHeld && !dHeld) {
+          b.resourceHold = false
+          b.revision += 1
+        }
+      }
       saveDb(db)
     }
     return { ok: true } as T

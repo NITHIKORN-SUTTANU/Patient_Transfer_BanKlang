@@ -126,10 +126,10 @@ details.admin-panel[open] > :not(summary) + :not(summary) { margin-top: 12px; }
 @media (max-width: 1100px) { .admin-brand strong { font-size: 19px; } .admin-shell main { padding: 28px; } .admin-panel-heading > .admin-button { width: auto; } .admin-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
   .admin-shell { --admin-sidebar-w: 0px; }
-  .admin-sidebar { position: relative; top: 0; width: 100%; height: auto; padding: 16px; overflow: visible; }
+  .admin-sidebar { position: sticky; top: var(--demo-bar-height, 0px); z-index: 25; width: 100%; height: auto; padding: 6px 14px; overflow: visible; }
   .admin-brand { position: relative; padding: 0 48px 0 0; }
-  .admin-brand strong { font-size: 20px; }
-  .admin-brand p { font-size: 16px; margin-top: 4px; }
+  .admin-brand strong { font-size: 17px; line-height: 1.25; }
+  .admin-brand p { font-size: 13px; margin-top: 2px; line-height: 1.25; }
   .admin-menu { display: block; position: absolute; top: 2px; right: 0; min-width: 44px; min-height: 44px; border: 1px solid #ffffff66; border-radius: 8px; font-size: 22px; }
   .admin-sidebar nav { display: none; margin-top: 20px; gap: 4px; }
   .admin-sidebar nav.open { display: flex; }

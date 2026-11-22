@@ -78,7 +78,11 @@ export function DispatcherPage() {
     return () => window.clearTimeout(timeout)
   }, [notice])
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer) }, [])
-  useEffect(() => { window.scrollTo(0, 0); main.current?.querySelector<HTMLHeadingElement>('h1')?.focus() }, [pathname])
+  useEffect(() => {
+    if (params.get('focus') === 'readiness') return
+    window.scrollTo(0, 0)
+    main.current?.querySelector<HTMLHeadingElement>('h1')?.focus()
+  }, [pathname, params])
   const today = bangkokDate(now)
   const queue = state.bookings.filter(b => b.status === 'pending')
     .sort((a, b) => Date.parse(a.appointmentAt) - Date.parse(b.appointmentAt) || a.id.localeCompare(b.id))
@@ -256,6 +260,7 @@ export function DispatcherPage() {
       statusText,
       locationText,
       locationTone,
+      tripId: (incidentTrip ?? currentTrip)?.id ?? '',
       tripRef: (incidentTrip ?? currentTrip)?.reference ?? (incidentTrip ?? currentTrip)?.id ?? '',
       freeClock: !hasIncident && currentTrip ? (win?.freeClock ?? '') : '',
     }
@@ -476,13 +481,35 @@ export function DispatcherPage() {
                       <span className="dispatch-fleet-driver"><ServiceSymbol kind="person" />{unit.driverName}</span>
                       <span className={`dispatch-fleet-loc tone-${unit.locationTone}`}>{unit.locationText}</span>
                     </div>
-                    <p className="dispatch-fleet-unit-meta">
-                      {unit.statusKind === 'incident'
-                        ? 'ระงับคิวชั่วคราวจนกว่าเจ้าหน้าที่จะคลี่คลายเหตุและยืนยันความพร้อม'
-                        : unit.freeClock
-                        ? `งาน ${unit.tripRef} · ว่างอีกครั้ง ${unit.freeClock} น.`
-                        : 'พร้อมจัดคิวรับ–ส่งทันที'}
-                    </p>
+                    {unit.statusKind === 'incident' ? (
+                      <>
+                        <p className="dispatch-fleet-unit-meta">
+                          ระงับคิวชั่วคราวจนกว่าเจ้าหน้าที่จะคลี่คลายเหตุและยืนยันความพร้อม
+                        </p>
+                        <button
+                          type="button"
+                          className="dispatch-fleet-action-btn is-incident"
+                          onClick={() => navigate(`/dispatcher/tracking?focus=readiness&resource=${encodeURIComponent(`vehicles/${unit.id}`)}`)}
+                        >
+                          คลี่คลายเหตุ / ยืนยันความพร้อม →
+                        </button>
+                      </>
+                    ) : unit.statusKind === 'busy' && unit.tripId ? (
+                      <p className="dispatch-fleet-unit-meta">
+                        <button
+                          type="button"
+                          className="dispatch-fleet-trip-link"
+                          onClick={() => navigate(`/dispatcher/tracking?booking=${encodeURIComponent(unit.tripId)}&dialog=tracking`)}
+                        >
+                          งาน {unit.tripRef} →
+                        </button>
+                        {unit.freeClock ? ` · ว่างอีกครั้ง ${unit.freeClock} น.` : ''}
+                      </p>
+                    ) : (
+                      <p className="dispatch-fleet-unit-meta">
+                        พร้อมจัดคิวรับ–ส่งทันที
+                      </p>
+                    )}
                   </article>
                 ))}
               </div>
@@ -541,7 +568,7 @@ export function DispatcherPage() {
         </>}
       </>}
       {screen === 'assignment' && <><div className="dispatch-assignment-grid"><section className="dispatch-panel dispatch-waiting"><h2>1. เลือกงานที่รอจัดตาราง</h2><p>เลือกงาน แล้วจัดรถและคนขับ</p><div className="dispatch-waiting-list" tabIndex={0} role="region" aria-label="รายการงานที่รอจัดตาราง">{pagedWaiting.map(b => <article key={b.id} className={selected?.id === b.id ? 'selected' : ''}><button type="button" aria-pressed={selected?.id === b.id} onClick={() => { setError(''); setParams({ booking: b.id }) }}><div className="dispatch-job-card-heading"><strong>{b.id}</strong><span>{selected?.id === b.id ? '✓ เลือกแล้ว' : 'เลือกงานนี้ →'}</span></div><span className="dispatch-job-patient">{b.patientName}</span><b>{dispatchDate(b.appointmentAt)} · นัด {dispatchTime(b.appointmentAt)} น.</b><span>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</span>{renderDecisionBadges(b)}<span className="dispatch-status approved">รอจัดตาราง</span></button><button type="button" className="dispatch-details-link" onClick={() => openDetails(b)}>ดูรายละเอียด</button></article>)}</div><PaginationControls totalItems={waiting.length} pageSize={DISPATCHER_PAGE_SIZE} page={waitingPage} onPageChange={setWaitingPage} label="แบ่งหน้างานที่รอจัดตาราง" />{!waiting.length && <p className="dispatch-empty">ไม่มีงานรอจัดตาราง กรุณาอนุมัติคำขอจากแดชบอร์ดก่อน</p>}<p className="dispatch-small">แสดงเฉพาะงานที่ยังไม่ได้จัดรถ</p></section>{selected ? <ApiDispatchAssignment key={`${selected.id}:${selected.revision}`} booking={remote.data!.rows.find(row => row.id === selected.id)!} catalog={remote.data!.catalog} previousJobs={remote.data!.rows} reload={remote.reload} onAssigned={() => { remote.reload(); setNotice(`มอบหมายงาน ${selected.id} แล้ว`); navigate('/dispatcher/tracking') }} /> : <section className="dispatch-panel dispatch-empty"><h2>{selectedId ? 'ไม่พบงานที่รอจัดตารางนี้' : 'เลือกงานที่รอจัดตาราง'}</h2><p>งานอาจถูกมอบหมายแล้ว หรือยังไม่ได้รับอนุมัติ</p><Link to="/dispatcher">กลับแดชบอร์ด</Link></section>}</div><VehicleTimelineView bookings={state.bookings} vehicles={state.vehicles} catalogVehicles={remote.data?.catalog.vehicles} defaultDate={selected ? bangkokDateFromMs(Date.parse(selected.appointmentAt)) : focusDate} onSelectBooking={openDetails} /></>}
-      {screen === 'tracking' && <>{remote.data && <ResourceReadiness key={remote.data.rows.map(row => row.revision).join(':') + remote.data.catalog.vehicles.filter(v => v.held).length + ':' + remote.data.catalog.drivers.filter(d => d.held).length} catalog={remote.data.catalog} onSaved={() => { remote.reload(); setNotice('ยืนยันความพร้อมทรัพยากรแล้ว') }} />}
+      {screen === 'tracking' && <>{remote.data && <ResourceReadiness key={remote.data.rows.map(row => row.revision).join(':') + remote.data.catalog.vehicles.filter(v => v.held).length + ':' + remote.data.catalog.drivers.filter(d => d.held).length + ':' + (params.get('resource') || '')} catalog={remote.data.catalog} initialResource={params.get('resource') ?? undefined} autoFocusPanel={params.get('focus') === 'readiness'} incidentBookings={activeIncidentBookings.filter(b => b.incidentOpen)} onOpenIncident={id => setParams({ booking: id, dialog: 'tracking' })} onSaved={() => { remote.reload(); setNotice('ยืนยันความพร้อมทรัพยากรแล้ว') }} />}
         <section className="dispatch-metrics dispatch-tracking-metrics" aria-label="ภาพรวมการรับส่งวันนี้">{[['งานทั้งหมดวันนี้', todaysJobs.length], ['อยู่ระหว่างรับส่ง', todaysJobs.filter(b => b.status === 'in_transit').length], ['ดำเนินการเสร็จแล้ว', todaysJobs.filter(b => b.status === 'completed').length]].map(([label, value]) => <article key={label}><p>{label}</p><strong>{value}</strong>{label === 'งานทั้งหมดวันนี้' && <span className="dispatch-tracking-secondary">{dispatchDate(new Date(now).toISOString())}</span>}</article>)}</section>
         <div className="dispatch-tracking-scopes" role="group" aria-label="ช่วงเวลาของงานรับส่ง">
           {([['all', 'ทั้งหมด'], ['today', 'วันนี้']] as const).map(([scope, label]) => (

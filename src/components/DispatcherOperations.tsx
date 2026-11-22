@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ApiBooking, Catalog } from '../services/dispatcherApi'
 import { dispatcherError } from '../services/dispatcherApi'
 import { staffRequest } from '../services/staffSession'
@@ -55,15 +55,36 @@ export function DispatcherOperations({ booking, catalog, rows, onSaved, onBusyCh
   </section>
 }
 
-export function ResourceReadiness({ catalog, onSaved }: { catalog: Catalog; onSaved: () => void }) {
-  const [resource, setResource] = useState('')
+export function ResourceReadiness({
+  catalog,
+  onSaved,
+  initialResource,
+  autoFocusPanel = false,
+  incidentBookings = [],
+  onOpenIncident,
+}: {
+  catalog: Catalog
+  onSaved: () => void
+  initialResource?: string
+  autoFocusPanel?: boolean
+  incidentBookings?: { id: string; reference?: string }[]
+  onOpenIncident?: (id: string) => void
+}) {
+  const resources = [...catalog.vehicles.filter(v => v.held).map(v => ({ value: `vehicles/${v.id}`, label: `รถ: ${v.name}` })), ...catalog.drivers.filter(d => d.held).map(d => ({ value: `drivers/${d.id}`, label: `คนขับ: ${d.name}` }))]
+  const [resource, setResource] = useState(() => (initialResource && resources.some(item => item.value === initialResource) ? initialResource : ''))
   const [locationId, setLocationId] = useState('')
   const [reason, setReason] = useState('')
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
   const [error, setError] = useState('')
-  const resources = [...catalog.vehicles.filter(v => v.held).map(v => ({ value: `vehicles/${v.id}`, label: `รถ: ${v.name}` })), ...catalog.drivers.filter(d => d.held).map(d => ({ value: `drivers/${d.id}`, label: `คนขับ: ${d.name}` }))]
+  const panelRef = useRef<HTMLElement>(null)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (!autoFocusPanel || !resources.length) return
+    panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    headingRef.current?.focus()
+  }, [autoFocusPanel, resources.length])
   async function submit() {
     if (pending.current || !resources.some(item => item.value === resource) || !confirmed) return
     pending.current = true; setBusy(true); setError('')
@@ -72,9 +93,25 @@ export function ResourceReadiness({ catalog, onSaved }: { catalog: Catalog; onSa
     finally { pending.current = false; setBusy(false) }
   }
   if (!resources.length) return null
-  return <details className="dispatch-panel"><summary>ยืนยันตำแหน่งและความพร้อมรถหรือคนขับ</summary><p>ยืนยันแยกแต่ละทรัพยากร ระบบจะตรวจงานที่ยังดำเนินอยู่และเวลาพักเตรียมพร้อมก่อนปล่อยการระงับ</p><form onSubmit={event => { event.preventDefault(); void submit() }}><fieldset disabled={busy}>
+  return <section ref={panelRef} id="resource-readiness-panel" className="dispatch-panel dispatch-readiness-panel" aria-labelledby="resource-readiness-title">
+    <div className="dispatch-readiness-head">
+      <h2 ref={headingRef} id="resource-readiness-title" tabIndex={-1}>ยืนยันตำแหน่งและความพร้อมรถหรือคนขับ</h2>
+      <span className="dispatch-readiness-count-badge">รอคลี่คลาย {resources.length} รายการ</span>
+    </div>
+    <p>ยืนยันแยกแต่ละทรัพยากร ระบบจะตรวจงานที่ยังดำเนินอยู่และเวลาพักเตรียมพร้อมก่อนปล่อยการระงับ</p>
+    {incidentBookings.length > 0 && onOpenIncident && (
+      <div className="dispatch-readiness-incident-links" role="status">
+        <span>งานที่ยังเปิดเหตุขัดข้องอยู่:</span>
+        {incidentBookings.map(inc => (
+          <button key={inc.id} type="button" className="dispatch-incident-secondary" onClick={() => onOpenIncident(inc.id)}>
+            เปิดเคส {inc.reference ?? inc.id} เพื่อคลี่คลาย / จัดรถทดแทน →
+          </button>
+        ))}
+      </div>
+    )}
+    <form onSubmit={event => { event.preventDefault(); void submit() }}><fieldset disabled={busy}>
     <label className="booking-field">ทรัพยากรที่ตรวจสอบ<select required value={resource} onChange={event => setResource(event.target.value)}><option value="">เลือกทรัพยากร</option>{resources.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
     <label className="booking-field">ตำแหน่งปัจจุบันที่ยืนยันแล้ว<select required value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">เลือกตำแหน่ง</option>{catalog.locations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <label className="booking-field">เหตุผลและผลตรวจสอบ<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label><label className="booking-checkbox"><input required type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว</span></label></fieldset>
-    {error && <p role="alert" className="dispatch-alert">{error}</p>}<DispatchButton type="submit" disabled={busy || !confirmed || !reason.trim() || !resource || !locationId}>{busy ? 'กำลังบันทึก…' : 'ยืนยันความพร้อมทรัพยากรนี้'}</DispatchButton></form></details>
+    {error && <p role="alert" className="dispatch-alert">{error}</p>}<DispatchButton type="submit" disabled={busy || !confirmed || !reason.trim() || !resource || !locationId}>{busy ? 'กำลังบันทึก…' : 'ยืนยันความพร้อมทรัพยากรนี้'}</DispatchButton></form></section>
 }

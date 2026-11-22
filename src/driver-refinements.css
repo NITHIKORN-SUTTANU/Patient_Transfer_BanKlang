@@ -122,16 +122,27 @@
 .driver-schedule dd { font-weight:600; }
 .driver-empty > svg { width:40px; height:40px; margin-bottom:16px; color:var(--color-primary); }
 .driver-modal h3 { color:var(--color-primary); }
+.driver-modal .booking-button.booking-danger.booking-secondary:focus-visible { outline:2.5px solid #8f2030; outline-offset:2px; border-color:#d9828c; box-shadow:none; }
 .driver-failed form { display:grid; gap:16px; }
 .driver-failed > .driver-button { margin-top:12px; }
+@media(max-width:640px) {
+ .driver-toolbar { flex-wrap:nowrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:14px; }
+ .driver-refresh-button.booking-button { min-height:44px; padding:6px 11px; font-size:13.5px; white-space:nowrap; }
+ .driver-account-link { min-height:44px; padding:4px 6px; font-size:13.5px; text-align:right; white-space:nowrap; flex-shrink:1; min-width:0; }
+}
+@media(max-width:359px) {
+ .driver-toolbar { flex-wrap:wrap; }
+ .driver-account-link { white-space:normal; }
+}
 @media(max-width:767px) {
- .driver-sidebar { position:static; height:auto; padding:16px; overflow:visible; }
- .driver-sidebar .workspace-role-label { margin:4px 0 0; }
+ .driver-sidebar { position:sticky; top:var(--demo-bar-height, 0px); z-index:25; width:100%; height:auto; padding:6px 14px; overflow:visible; }
+ .driver-sidebar .workspace-nav-heading { font-size:17px; line-height:1.25; }
+ .driver-sidebar .workspace-role-label { margin:2px 0 0; font-size:13px; line-height:1.25; }
  .driver-sidebar .driver-navigation-toggle { margin:0; color:white; background:transparent; border-color:#ffffff99; }
  .driver-sidebar .driver-navigation-toggle:focus-visible { outline-color:#ffdc8d; }
- .driver-header { padding:16px; }
+ .driver-header { padding:14px 16px; }
  .driver-header h1 { font-size:24px; }
- .driver-content { padding:16px 14px 32px; }
+ .driver-content { padding:14px 14px 32px; }
  .driver-content:has(.driver-action),
  .driver-status-page .driver-content:has(.driver-action) { padding-bottom:calc(156px + env(safe-area-inset-bottom)); }
  .driver-shell:has(.driver-action) { padding-bottom:0; }
