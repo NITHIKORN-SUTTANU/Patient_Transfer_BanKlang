@@ -58,6 +58,9 @@
   .demo-role-btn.active { background: white; color: #0f3e38; border-color: white; font-weight: 700; }
   .demo-role-btn.ghost { background: transparent; border-color: #6ea79d; color: #e6faf6; }
   .demo-role-btn.ghost:hover { background: #14534b; border-color: #a6d6ce; }
+  .demo-driver-select { min-height: 34px; max-width: 100%; padding: 4px 10px; border-radius: 9px; border: 1px solid #6ea79d; background: #14534b; color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .demo-driver-select:hover { background: #1b695f; border-color: #a6d6ce; }
+  .demo-driver-select:focus-visible { outline: 3px solid #ffdc8d; outline-offset: 2px; box-shadow: none; }
   .staff-login-form { display: flex; flex-direction: column; gap: 14px; }
   .staff-login-submit { margin-top: 0.75rem; }
   .staff-session-card .booking-card-copy { display: flex; flex-direction: column; gap: 6px; width: 100%; }

@@ -18,7 +18,7 @@ import { applyProfile, canCitizenCancel, citizenBooking, intakeFields, profileFi
 import { checkCitizenSlotCapacity, type CapacityBookingInput, type CapacityCheckResult } from '../domain/capacity'
 import { BAN_KLANG_VILLAGES } from '../data/realisticSeed'
 import { seedOverlay, useSeedOverlay } from '../services/seedOverlay'
-import { isInteractiveDemoActive } from '../services/interactiveDemo'
+import { isDemoModeAllowed, isInteractiveDemoActive } from '../services/interactiveDemo'
 import '../booking.css'
 
 const GENERIC_PIN_LABELS = new Set(['จุดรับที่เลือกบนแผนที่', 'จุดรับที่ระบุพิกัดเอง'])
@@ -204,10 +204,29 @@ export function BookingPage() {
   const effectiveVehicles = catalog.vehicles !== undefined ? catalog.vehicles : overlay.vehicles
   const effectiveHospitalName = catalog.hospitals.find(h => h.id === draft.hospital)?.name
   const effectiveBookings: CapacityBookingInput[] = (() => {
-    const byId = new Map<string, CapacityBookingInput>()
-    for (const b of catalog.activeBookings ?? []) {
-      if (b.id) byId.set(b.id, b)
+    if (catalog.activeBookings !== undefined) {
+      const slots: CapacityBookingInput[] = catalog.activeBookings.map((b, idx) => ({
+        ...b,
+        slotToken: b.slotToken ?? `slot-${idx + 1}`,
+      }))
+      if (overlay.active && !isInteractiveDemoActive()) {
+        const seen = new Set(slots.map(s => s.id).filter(Boolean))
+        for (const b of overlay.bookings) {
+          if (seen.has(b.id)) continue
+          slots.push({
+            id: b.id,
+            appointmentAt: b.appointmentAt,
+            status: b.apiStatus || b.status,
+            mobility: b.details?.assistance,
+            hospitalName: b.details?.hospital,
+            vehicleId: b.vehicleId,
+            schedule: b.schedule,
+          })
+        }
+      }
+      return slots
     }
+    const byId = new Map<string, CapacityBookingInput>()
     for (const b of overlay.active ? overlay.bookings : []) {
       byId.set(b.id, {
         id: b.id,
@@ -514,7 +533,7 @@ export function BookingPage() {
     finally { setCancelling(false) }
   }
   let content: ReactNode
-  if (!session.user || session.busy) return <div className="booking-shell"><main className="booking-screen"><BookingHeader title="จองรถไปโรงพยาบาล" /><p role="status">{session.busy ? 'กำลังยืนยันตัวตนผ่าน LINE…' : session.error}</p><p className="booking-notice">บริการรับส่งตามนัดหมาย ไม่ใช่บริการฉุกเฉิน</p><EmergencyLink />{!session.busy && <><BookingButton onClick={() => void initializeCitizen(true)}>ลองเชื่อมต่อ LINE อีกครั้ง</BookingButton><BookingButton secondary onClick={() => void enterDemoCitizen()}>เข้าใช้งานโหมดสาธิต (ไม่ใช้ LINE)</BookingButton></>}{session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>}</main></div>
+  if (!session.user || session.busy) return <div className="booking-shell"><main className="booking-screen"><BookingHeader title="จองรถไปโรงพยาบาล" /><p role="status">{session.busy ? 'กำลังยืนยันตัวตนผ่าน LINE…' : session.error}</p><p className="booking-notice">บริการรับส่งตามนัดหมาย ไม่ใช่บริการฉุกเฉิน</p><EmergencyLink />{!session.busy && <><BookingButton onClick={() => void initializeCitizen(true)}>ลองเชื่อมต่อ LINE อีกครั้ง</BookingButton>{isDemoModeAllowed() && <BookingButton secondary onClick={() => void enterDemoCitizen()}>เข้าใช้งานโหมดสาธิต (ไม่ใช้ LINE)</BookingButton>}</>}{session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>}</main></div>
   if (['patient', 'assistance', 'pickup', 'review'].includes(screen) && !currentConsent) return <Navigate to="/booking/privacy" replace />
   if (['submitted', 'status', 'cancel'].includes(screen) && !saved && !loading && !loadError) return <Navigate to="/booking/bookings" replace />
   if (loading || loadError) content = <><BookingHeader title="รายการจองรถ" /><p role={loadError ? 'alert' : 'status'}>{loadError || 'กำลังโหลดข้อมูล…'}</p><BookingButton disabled={loading} onClick={() => setVersion(value => value + 1)}>โหลดข้อมูลล่าสุด</BookingButton></>

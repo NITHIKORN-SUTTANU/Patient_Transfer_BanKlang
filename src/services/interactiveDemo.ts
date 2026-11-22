@@ -4,10 +4,13 @@ export type DemoRole = 'citizen' | 'dispatcher' | 'driver' | 'admin'
 
 const DEMO_ACTIVE_KEY = 'ban-klang-transit:interactive-demo-active:v1'
 const DEMO_ROLE_KEY = 'ban-klang-transit:interactive-demo-role:v1'
+const DEMO_DRIVER_KEY = 'ban-klang-transit:interactive-demo-driver:v1'
+const DEFAULT_DEMO_DRIVER_ID = 'demo-driver-A'
 
 export interface InteractiveDemoSnapshot {
   active: boolean
   role: DemoRole | null
+  driverId: string
   envLocked: boolean
 }
 
@@ -15,6 +18,10 @@ const listeners = new Set<() => void>()
 
 export function isEnvDemoMode(): boolean {
   return import.meta.env.VITE_DEMO_MODE === 'true'
+}
+
+export function isDemoModeAllowed(): boolean {
+  return isEnvDemoMode() || import.meta.env.DEV
 }
 
 function readRole(): DemoRole | null {
@@ -29,7 +36,25 @@ function readRole(): DemoRole | null {
   return null
 }
 
+function readDriverId(): string {
+  try {
+    const raw = sessionStorage.getItem(DEMO_DRIVER_KEY)
+    if (raw && raw.trim()) return raw.trim()
+  } catch {
+    // Ignore storage restriction.
+  }
+  return DEFAULT_DEMO_DRIVER_ID
+}
+
 function detectInitialSnapshot(): InteractiveDemoSnapshot {
+  if (!isDemoModeAllowed()) {
+    return {
+      active: false,
+      role: null,
+      driverId: DEFAULT_DEMO_DRIVER_ID,
+      envLocked: false,
+    }
+  }
   const envLocked = isEnvDemoMode()
   if (typeof window !== 'undefined') {
     try {
@@ -52,6 +77,7 @@ function detectInitialSnapshot(): InteractiveDemoSnapshot {
   return {
     active: envLocked || sessionActive,
     role: readRole(),
+    driverId: readDriverId(),
     envLocked,
   }
 }
@@ -63,6 +89,7 @@ function emit() {
 }
 
 export function isInteractiveDemoActive(): boolean {
+  if (!isDemoModeAllowed()) return false
   if (snapshot.active) return true
   if (typeof window !== 'undefined') {
     try {
@@ -77,7 +104,27 @@ export function isInteractiveDemoActive(): boolean {
   return false
 }
 
+export function getDemoDriverId(): string {
+  return snapshot.driverId || DEFAULT_DEMO_DRIVER_ID
+}
+
+export function setDemoDriverId(driverId: string) {
+  if (!isDemoModeAllowed() || !driverId.trim()) return
+  const nextDriverId = driverId.trim()
+  try {
+    sessionStorage.setItem(DEMO_DRIVER_KEY, nextDriverId)
+  } catch {
+    // Ignore storage failure.
+  }
+  snapshot = {
+    ...snapshot,
+    driverId: nextDriverId,
+  }
+  emit()
+}
+
 export function activateInteractiveDemo(role?: DemoRole) {
+  if (!isDemoModeAllowed()) return
   const nextRole = role ?? snapshot.role
   try {
     sessionStorage.setItem(DEMO_ACTIVE_KEY, '1')
@@ -88,6 +135,7 @@ export function activateInteractiveDemo(role?: DemoRole) {
   snapshot = {
     active: true,
     role: nextRole,
+    driverId: snapshot.driverId || DEFAULT_DEMO_DRIVER_ID,
     envLocked: isEnvDemoMode(),
   }
   emit()
@@ -102,12 +150,14 @@ export function deactivateInteractiveDemo() {
   try {
     sessionStorage.removeItem(DEMO_ACTIVE_KEY)
     sessionStorage.removeItem(DEMO_ROLE_KEY)
+    sessionStorage.removeItem(DEMO_DRIVER_KEY)
   } catch {
     // Ignore storage failure.
   }
   snapshot = {
     active: envLocked,
     role: null,
+    driverId: DEFAULT_DEMO_DRIVER_ID,
     envLocked,
   }
   emit()

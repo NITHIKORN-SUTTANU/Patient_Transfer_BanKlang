@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { BAN_KLANG_VILLAGES, generateRealisticSeedBookings } from '../data/realisticSeed'
 import { ApiError } from '../services/api'
 import { statusLabels } from '../services/dispatcherApi'
-import { isInteractiveDemoActive } from '../services/interactiveDemo'
+import { isDemoModeAllowed } from '../services/interactiveDemo'
 import { seedOverlay, useSeedOverlay } from '../services/seedOverlay'
 import { staffRequest } from '../services/staffSession'
 import { generateRealisticSeedCSV, parseSeedBookingsCSV } from '../utils/seedCsvImport'
@@ -135,8 +135,8 @@ export function AdminSeedDataUtility({ onChanged }: { onChanged?: () => void }) 
 
   const pagedRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // Strictly hidden in production builds connected to live APIs (shown in standalone/demo & dev verification).
-  if (import.meta.env.PROD && !isInteractiveDemoActive()) {
+  // Strictly hidden in production builds unless Demo Mode is explicitly allowed.
+  if (!isDemoModeAllowed()) {
     return null
   }
 

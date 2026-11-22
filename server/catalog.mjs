@@ -6,7 +6,8 @@ export async function catalog(client,user) {
   if(user.role==='citizen') {
     const {rows:vehicles}=await client.query(`SELECT v.id,v.name,v.plate,v.active,to_json(v.capabilities) AS capabilities,
       EXISTS(SELECT 1 FROM patient_transfer.resource_holds h WHERE h.vehicle_id=v.id AND h.ends_at IS NULL) AS held FROM patient_transfer.vehicles v ORDER BY v.name`)
-    const {rows:activeBookings}=await client.query(`SELECT b.id,b.appointment_at AS "appointmentAt",b.hospital_id AS "hospitalId",
+    const {rows:activeBookings}=await client.query(`SELECT ('slot-' || row_number() OVER (ORDER BY b.appointment_at, b.submitted_at)) AS "slotToken",
+      b.appointment_at AS "appointmentAt",b.hospital_id AS "hospitalId",
       COALESCE(b.hospital_name_snapshot,h.name) AS "hospitalName",b.mobility,b.status,s.vehicle_id AS "vehicleId",
       CASE WHEN s.departure_at IS NOT NULL THEN json_build_object('departureAt',s.departure_at,'pickupAt',s.pickup_at,'arrivalAt',s.arrival_at,'readyAt',s.ready_at) ELSE NULL END AS schedule
       FROM patient_transfer.bookings b

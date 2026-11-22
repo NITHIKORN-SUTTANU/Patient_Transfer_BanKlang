@@ -1863,3 +1863,53 @@ test('QoL convenience pack: dispatcher smart suggest & copy chips, driver 1-tap 
   await expect(page.getByRole('button', { name: 'คัดลอกสรุปแล้ว ✓', exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
+
+test('Pre-PR hardening: demo driver switcher (Driver A-E), Buddhist Era CSV date normalization, and live analytics rendering', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+
+  // 1. Assign BK-DEMO-1002 (stretcher) explicitly to Driver B (demo-driver-B) -> switch to Driver B via DemoRoleBar -> verify Driver B sees it!
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  await page.locator('.dispatch-waiting-list article', { hasText: 'BK-DEMO-1002' }).getByRole('button').first().click()
+  await page.getByRole('button', { name: /^รถรับส่ง:/ }).click()
+  await page.getByRole('option', { name: /รถคันที่ 04/ }).click()
+  await page.getByRole('button', { name: /^คนขับ:/ }).click()
+  await page.getByRole('option', { name: /คนขับ B/ }).click()
+  await page.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันตาราง', exact: true }).click()
+  await page.getByRole('button', { name: 'ตรวจสอบซ้ำและยืนยันการมอบหมาย', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันการมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking$/)
+
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  const driverSelect = demoBar.getByLabel('เลือกคนขับในโหมดสาธิต')
+  await expect(driverSelect).toBeVisible()
+  await expect(driverSelect).toHaveValue('demo-driver-A')
+  await expect(page.getByText('BK-DEMO-1003')).toBeVisible()
+  await expect(page.getByText('BK-DEMO-1002')).toHaveCount(0)
+
+  await driverSelect.selectOption('demo-driver-B')
+  await expect(page.getByText('BK-DEMO-1002')).toBeVisible()
+
+  // 2. Upload a CSV with Buddhist Era (พ.ศ. 2569-11-28) -> normalizes to Gregorian 2026-11-28 (renders 28 พ.ย. 2569, NOT 3112!)
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  const beCsv = [
+    'id,patientName,appointmentDate,appointmentTime,villageId,hospitalName,mobility,status,apiStatus',
+    'BK-CSV-BE1,นายทดสอบ พุทธศักราช,2569-11-28,09:30,village-01,โรงพยาบาลลำพูน,standard,completed,COMPLETED',
+  ].join('\n')
+  await page.locator('#admin-seed-csv-input').setInputFiles({
+    name: 'thai-be-test.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(beCsv, 'utf8'),
+  })
+  await expect(page.getByText('นำเข้าข้อมูลสำเร็จ 1 รายการ')).toBeVisible()
+  await expect(page.locator('.admin-analytics-panel')).toContainText('พ.ย. 69')
+  await expect(page.locator('.admin-analytics-panel')).not.toContainText('พ.ย. 12')
+})

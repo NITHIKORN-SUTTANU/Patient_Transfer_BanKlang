@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router'
 import { BookingButton, BookingHeader } from '../components/BookingUI'
 import { enterDemoCitizen } from '../services/citizenSession'
 import { dispatchTime } from '../services/dispatch'
-import { isInteractiveDemoActive } from '../services/interactiveDemo'
+import { isDemoModeAllowed, isInteractiveDemoActive } from '../services/interactiveDemo'
 import { staffSession, useStaffSession } from '../services/staffSession'
 import '../booking.css'
 
@@ -65,7 +65,7 @@ export function StaffLoginPage() {
         <label className="booking-field">รหัสผ่าน<input name="password" type="password" autoComplete="current-password" required maxLength={512} value={password} disabled={session.busy} onChange={event => setPassword(event.target.value)} /></label>
         <BookingButton className="staff-login-submit" type="submit" disabled={session.busy}>{session.busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}</BookingButton>
       </form>
-      <section className="staff-demo-panel" aria-labelledby="staff-demo-heading">
+      {isDemoModeAllowed() && <section className="staff-demo-panel" aria-labelledby="staff-demo-heading">
         <h2 id="staff-demo-heading">ทดลองใช้งานทันที (โหมดสาธิต)</h2>
         <p className="booking-small">สำหรับทดสอบ UI ทุกบทบาทโดยไม่ต้องเปิด PostgreSQL หรือ LINE LIFF</p>
         <div className="staff-demo-buttons">
@@ -74,7 +74,7 @@ export function StaffLoginPage() {
           <BookingButton secondary onClick={() => enterDemo('driver')}>ทดลองใช้งาน: พนักงานขับรถ (Driver)</BookingButton>
           <BookingButton secondary onClick={() => { void enterDemoCitizen(); navigate('/booking') }}>ทดลองใช้งาน: ผู้ป่วย / จองรถ (Citizen)</BookingButton>
         </div>
-      </section>
+      </section>}
     </>}
     {session.error && <p role="alert" className="booking-error-box">{session.error}</p>}
   </main></div>

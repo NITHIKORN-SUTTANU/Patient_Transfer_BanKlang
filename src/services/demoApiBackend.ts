@@ -442,8 +442,16 @@ export function resetDemoApiBackend() {
 function roleFromToken(token?: string): 'citizen' | 'dispatcher' | 'driver' | 'admin' {
   if (token === 'demo-token-admin') return 'admin'
   if (token === 'demo-token-dispatcher') return 'dispatcher'
-  if (token === 'demo-token-driver') return 'driver'
+  if (token === 'demo-token-driver' || token?.startsWith('demo-token-driver:')) return 'driver'
   return 'citizen'
+}
+
+function driverIdFromToken(token: string | undefined, db: DemoDatabase): string {
+  if (token?.startsWith('demo-token-driver:')) {
+    const requested = token.slice('demo-token-driver:'.length).trim()
+    if (requested && db.drivers.some(d => d.id === requested)) return requested
+  }
+  return db.drivers[0]?.id || 'demo-driver-A'
 }
 
 function recordAudit(db: DemoDatabase, entry: Omit<DemoAudit, 'id' | 'recordedAt'>) {
@@ -677,12 +685,13 @@ export async function handleDemoApiRequest<T>(
       return { id: 'USR-ADM-1', role: 'admin', name: 'ผู้ดูแลระบบ (โหมดสาธิต)', driverId: null } as T
     }
     if (role === 'driver') {
-      const firstDriver = db.drivers[0]
+      const driverId = driverIdFromToken(options.token, db)
+      const activeDriver = db.drivers.find(d => d.id === driverId) ?? db.drivers[0]
       return {
-        id: firstDriver?.accountId || 'USR-DRV-1',
+        id: activeDriver?.accountId || 'USR-DRV-1',
         role: 'driver',
-        name: firstDriver?.name || 'นายสมชาย ใจดี (คนขับ A)',
-        driverId: firstDriver?.id || 'demo-driver-A',
+        name: activeDriver?.name || 'นายสมชาย ใจดี (คนขับ A)',
+        driverId: activeDriver?.id || 'demo-driver-A',
       } as T
     }
     return { id: 'USR-DSP-1', role: 'dispatcher', name: 'เจ้าหน้าที่จัดรถ (โหมดสาธิต)', driverId: null } as T
@@ -734,8 +743,8 @@ export async function handleDemoApiRequest<T>(
       const allBookings = mergeWithOverlayBookings(db)
       const activeBookings = allBookings
         .filter(b => !['COMPLETED', 'CANCELLED', 'REJECTED', 'ABORTED'].includes(b.status))
-        .map(b => ({
-          id: b.id,
+        .map((b, idx) => ({
+          slotToken: `slot-${idx + 1}`,
           appointmentAt: b.appointmentAt,
           hospitalId: b.hospitalId,
           hospitalName: b.hospitalName,
@@ -787,7 +796,7 @@ export async function handleDemoApiRequest<T>(
     }
     const allBookings = mergeWithOverlayBookings(db)
     if (role === 'driver') {
-      const driverId = db.drivers[0]?.id || 'demo-driver-A'
+      const driverId = driverIdFromToken(options.token, db)
       const driverJobs = allBookings.filter(
         b =>
           b.driverId === driverId &&
@@ -1131,7 +1140,7 @@ export async function handleDemoApiRequest<T>(
 
   // --- Driver History ---
   if (pathname === '/driver/history') {
-    const driverId = db.drivers[0]?.id || 'demo-driver-A'
+    const driverId = driverIdFromToken(options.token, db)
     const allBookings = mergeWithOverlayBookings(db)
     const history = allBookings
       .filter(b => b.driverId === driverId && ['COMPLETED', 'CANCELLED', 'ABORTED'].includes(b.status))

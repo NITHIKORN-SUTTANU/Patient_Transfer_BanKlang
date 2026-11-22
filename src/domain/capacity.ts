@@ -29,6 +29,7 @@ export interface CapacityVehicleInput {
 
 export interface CapacityBookingInput {
   id?: string
+  slotToken?: string
   appointmentAt: string
   status?: string
   apiStatus?: string

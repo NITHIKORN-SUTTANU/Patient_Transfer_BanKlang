@@ -200,6 +200,35 @@ export interface CsvImportResult {
   totalRows: number
 }
 
+function normalizeCsvDateString(raw: string): string {
+  const trimmed = raw.trim()
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed)
+  if (isoMatch) {
+    const rawYear = Number(isoMatch[1])
+    const year = rawYear >= 2400 ? rawYear - 543 : rawYear
+    return `${String(year).padStart(4, '0')}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`
+  }
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed)
+  if (slashMatch) {
+    const rawYear = Number(slashMatch[3])
+    const year = rawYear >= 2400 ? rawYear - 543 : rawYear
+    return `${String(year).padStart(4, '0')}-${slashMatch[2].padStart(2, '0')}-${slashMatch[1].padStart(2, '0')}`
+  }
+  return trimmed
+}
+
+function normalizeCsvTimestampString(raw: string): string {
+  const trimmed = raw.trim()
+  const match = /^(\d{4})-(\d{2}-\d{2}[T ].*)$/.exec(trimmed)
+  if (match) {
+    const rawYear = Number(match[1])
+    if (rawYear >= 2400) {
+      return `${String(rawYear - 543).padStart(4, '0')}-${match[2]}`
+    }
+  }
+  return trimmed
+}
+
 export function parseSeedBookingsCSV(csvText: string): CsvImportResult {
   const rows = parseCsvRows(csvText)
   if (rows.length < 2) {
@@ -223,9 +252,9 @@ export function parseSeedBookingsCSV(csvText: string): CsvImportResult {
     const id = col(row, 'id', 'รหัสคำขอ') || `BK-CSV-${1000 + i}`
     const reference = col(row, 'reference') || id
     const patientName = col(row, 'patientName', 'ชื่อผู้ป่วย')
-    const appointmentDate = col(row, 'appointmentDate', 'date', 'วันนัดหมาย')
+    const appointmentDate = normalizeCsvDateString(col(row, 'appointmentDate', 'date', 'วันนัดหมาย'))
     const appointmentTime = col(row, 'appointmentTime', 'time', 'เวลานัดหมาย')
-    const rawAppt = col(row, 'appointmentAt', 'วันเวลานัดหมอ')
+    const rawAppt = normalizeCsvTimestampString(col(row, 'appointmentAt', 'วันเวลานัดหมอ'))
 
     let date = appointmentDate
     let time = appointmentTime

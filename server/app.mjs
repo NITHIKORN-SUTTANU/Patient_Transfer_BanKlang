@@ -179,8 +179,14 @@ export function createApi({pool,clock=()=>new Date().toISOString(),route=osrmRou
           if(path==='/api/profiles') return saveProfile(client,user,body,now,noticeVersion)
           const profileMatch=path.match(/^\/api\/profiles\/([^/]+)$/)
           if(profileMatch) return saveProfile(client,user,body,now,noticeVersion,profileMatch[1])
-          if(path==='/api/admin/seed-import') return importSeedBookings(client,user,body,now)
-          if(path==='/api/admin/seed-reset') return resetSeedBookings(client,user,body,now)
+          if(path==='/api/admin/seed-import') {
+            check(process.env.ALLOW_ADMIN_SEED==='true',403,'ปิดใช้งานการนำเข้าข้อมูลจำลองในโหมดระบบจริง (ต้องเปิด ALLOW_ADMIN_SEED=true)')
+            return importSeedBookings(client,user,body,now)
+          }
+          if(path==='/api/admin/seed-reset') {
+            check(process.env.ALLOW_ADMIN_SEED==='true',403,'ปิดใช้งานการล้างข้อมูลจำลองในโหมดระบบจริง (ต้องเปิด ALLOW_ADMIN_SEED=true)')
+            return resetSeedBookings(client,user,body,now)
+          }
           if(path==='/api/admin/closures') return saveClosure(client,user,body,now)
           if(path==='/api/admin/depot') return saveDepot(client,user,body,now)
           const hospitalMatch=path.match(/^\/api\/admin\/hospitals(?:\/([^/]+))?$/)

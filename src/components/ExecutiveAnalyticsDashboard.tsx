@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BAN_KLANG_VILLAGES, SUPPORTED_HOSPITALS } from '../data/realisticSeed'
 import {
   bangkokClockFromMs,
@@ -6,7 +6,8 @@ import {
   computeBackwardBlockedWindow,
   normalizeMobilityCode,
 } from '../domain/capacity'
-import { isInteractiveDemoActive } from '../services/interactiveDemo'
+import { fetchAdminAnalytics, type AdminLiveAnalytics } from '../services/adminApi'
+import { isDemoModeAllowed, isInteractiveDemoActive } from '../services/interactiveDemo'
 import { seedOverlay, useSeedOverlay } from '../services/seedOverlay'
 import { staffRequest } from '../services/staffSession'
 import { AdminButton } from './AdminForms'
@@ -31,27 +32,146 @@ export function ExecutiveAnalyticsDashboard({
   onLoadedSeed?: () => void
 }) {
   const overlay = useSeedOverlay()
+  const demoAllowed = isDemoModeAllowed()
+  const demoActive = isInteractiveDemoActive()
   const bookings = overlay.active ? overlay.bookings : []
+  const [liveData, setLiveData] = useState<AdminLiveAnalytics | null>(null)
+
+  useEffect(() => {
+    if (demoActive || overlay.active) return
+    let active = true
+    fetchAdminAnalytics()
+      .then(result => {
+        if (!active) return
+        if (result && typeof result.total_bookings === 'number' && Array.isArray(result.monthly)) {
+          setLiveData(result)
+        } else {
+          setLiveData(null)
+        }
+      })
+      .catch(() => {
+        if (active) setLiveData(null)
+      })
+    return () => { active = false }
+  }, [demoActive, overlay.active, summaryStatuses])
+
+  const liveAnalytics = !demoActive && !overlay.active ? liveData : null
+  const hasChartData = bookings.length > 0 || (liveAnalytics !== null && liveAnalytics.total_bookings > 0)
 
   const analytics = useMemo(() => {
     const activeBookings = overlay.active ? overlay.bookings : []
     const statusMap = new Map<string, number>()
-    for (const row of summaryStatuses) {
+    for (const row of liveAnalytics?.statuses?.length ? liveAnalytics.statuses : summaryStatuses) {
       statusMap.set(row.status, row.count)
     }
 
     const totalFromStatuses = Array.from(statusMap.values()).reduce((sum, n) => sum + n, 0)
-    const total = Math.max(totalFromStatuses, activeBookings.length)
+    const liveTotal = liveAnalytics?.total_bookings ?? 0
+    const total = Math.max(totalFromStatuses, activeBookings.length, liveTotal)
     const completed = statusMap.get('COMPLETED') ?? activeBookings.filter(b => (b.apiStatus || b.status) === 'COMPLETED' || b.status === 'completed').length
-    const cancelled = (statusMap.get('CANCELLED') ?? 0)
-    const rejected = (statusMap.get('REJECTED') ?? 0)
-    const aborted = (statusMap.get('ABORTED') ?? 0)
+    const cancelled = statusMap.get('CANCELLED') ?? 0
+    const rejected = statusMap.get('REJECTED') ?? 0
+    const aborted = statusMap.get('ABORTED') ?? 0
     const cancelledOrRejected = cancelled + rejected + aborted
 
     const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0
     const dropoutRate = total > 0 ? Math.round((cancelledOrRejected / total) * 1000) / 10 : 0
 
-    // Monthly & daily trends
+    // Live PostgreSQL aggregated analytics path when no local demo overlay is active.
+    if (activeBookings.length === 0 && liveAnalytics && liveAnalytics.total_bookings > 0) {
+      const monthlySeries = (liveAnalytics.monthly ?? [])
+        .filter(item => item.month)
+        .sort((a, b) => a.month.localeCompare(b.month))
+        .slice(-12)
+        .map(item => ({ ym: item.month, label: formatThaiMonth(item.month), count: Number(item.count) || 0 }))
+      const maxMonth = Math.max(1, ...monthlySeries.map(m => m.count))
+
+      const hourMap = new Map<string, number>()
+      for (let h = 6; h <= 15; h++) {
+        hourMap.set(`${String(h).padStart(2, '0')}:00`, 0)
+      }
+      for (const item of liveAnalytics.hourly ?? []) {
+        const key = `${String(Number(item.hour)).padStart(2, '0')}:00`
+        if (hourMap.has(key)) {
+          hourMap.set(key, (hourMap.get(key) ?? 0) + (Number(item.count) || 0))
+        }
+      }
+      const peakHours = Array.from(hourMap.entries()).map(([hour, count]) => ({ hour, count }))
+      const maxHour = Math.max(1, ...peakHours.map(h => h.count))
+      const topPeakHour = [...peakHours].sort((a, b) => b.count - a.count)[0]
+
+      const earlyCount = peakHours.filter(h => h.hour < '09:00').reduce((s, h) => s + h.count, 0)
+      const morningCount = peakHours.filter(h => h.hour >= '09:00' && h.hour < '12:00').reduce((s, h) => s + h.count, 0)
+      const afternoonCount = peakHours.filter(h => h.hour >= '12:00').reduce((s, h) => s + h.count, 0)
+      const peakWindowsTotal = Math.max(1, earlyCount + morningCount + afternoonCount)
+      const peakWindows = [
+        { key: 'early', label: '06:00–09:00 น.', count: earlyCount, pct: Math.round((earlyCount / peakWindowsTotal) * 1000) / 10 },
+        { key: 'morning', label: '09:00–12:00 น.', count: morningCount, pct: Math.round((morningCount / peakWindowsTotal) * 1000) / 10 },
+        { key: 'afternoon', label: '12:00–16:00 น.', count: afternoonCount, pct: Math.round((afternoonCount / peakWindowsTotal) * 1000) / 10 },
+      ]
+      const maxPeakWindow = Math.max(1, ...peakWindows.map(w => w.count))
+
+      const liveVillageRows = (liveAnalytics.villages ?? []).length > 0
+        ? liveAnalytics.villages.map(v => ({
+            id: `village-${String(v.villageNumber).padStart(2, '0')}`,
+            number: Number(v.villageNumber),
+            name: v.villageName,
+            count: Number(v.count) || 0,
+            pct: liveTotal > 0 ? Math.round(((Number(v.count) || 0) / liveTotal) * 1000) / 10 : 0,
+          }))
+        : BAN_KLANG_VILLAGES.map(v => ({ id: v.id, number: v.number, name: v.name, count: 0, pct: 0 }))
+      const maxVillage = Math.max(1, ...liveVillageRows.map(v => v.count))
+
+      const mobilityCounts = { standard: 0, wheelchair: 0, stretcher: 0 }
+      for (const m of liveAnalytics.mobility ?? []) {
+        const code = normalizeMobilityCode(m.mobility)
+        mobilityCounts[code] += Number(m.count) || 0
+      }
+      const totalMob = mobilityCounts.standard + mobilityCounts.wheelchair + mobilityCounts.stretcher
+      const mobilityBreakdown = [
+        { code: 'standard', label: 'เดินได้ (ทั่วไป)', count: mobilityCounts.standard, pct: totalMob ? Math.round((mobilityCounts.standard / totalMob) * 1000) / 10 : 0 },
+        { code: 'wheelchair', label: 'รถเข็น (Wheelchair)', count: mobilityCounts.wheelchair, pct: totalMob ? Math.round((mobilityCounts.wheelchair / totalMob) * 1000) / 10 : 0 },
+        { code: 'stretcher', label: 'เปลนอน (Stretcher)', count: mobilityCounts.stretcher, pct: totalMob ? Math.round((mobilityCounts.stretcher / totalMob) * 1000) / 10 : 0 },
+      ]
+
+      const topHospitals = (liveAnalytics.hospitals ?? []).map(h => ({
+        name: h.hospitalName,
+        count: Number(h.count) || 0,
+        pct: liveTotal > 0 ? Math.round(((Number(h.count) || 0) / liveTotal) * 1000) / 10 : 0,
+      }))
+      const maxHospital = Math.max(1, ...topHospitals.map(h => h.count))
+
+      const activeDays = Math.max(1, Number(liveAnalytics.active_days) || 1)
+      const fleetDenominator = Math.max(1, liveAnalytics.active_vehicles || activeVehicles || liveAnalytics.total_vehicles || totalVehicles || 1)
+      const effectiveTrips = Math.max(0, liveTotal - cancelled - rejected)
+      const estimatedBlockedMinutes = effectiveTrips * 150
+      const utilizationRate = Math.min(100, Math.round((estimatedBlockedMinutes / (fleetDenominator * activeDays * 600)) * 1000) / 10)
+
+      return {
+        total,
+        completed,
+        cancelledOrRejected,
+        completionRate,
+        dropoutRate,
+        utilizationRate,
+        activeDays,
+        dailyAverage: Math.round((liveTotal / activeDays) * 10) / 10,
+        monthlySeries,
+        maxMonth,
+        peakHours,
+        maxHour,
+        topPeakHour,
+        peakWindows,
+        maxPeakWindow,
+        villages: liveVillageRows,
+        maxVillage,
+        mobilityBreakdown,
+        topHospitals,
+        maxHospital,
+      }
+    }
+
+    // Monthly & daily trends from overlay/demo bookings
     const monthlyMap = new Map<string, number>()
     const daySet = new Set<string>()
     const hourMap = new Map<string, number>()
@@ -185,7 +305,7 @@ export function ExecutiveAnalyticsDashboard({
       topHospitals,
       maxHospital,
     }
-  }, [activeVehicles, overlay, summaryStatuses, totalVehicles])
+  }, [activeVehicles, liveAnalytics, overlay, summaryStatuses, totalVehicles])
 
   return (
     <section className="admin-panel admin-analytics-panel" aria-labelledby="exec-analytics-title">
@@ -196,7 +316,7 @@ export function ExecutiveAnalyticsDashboard({
             สถิติภาพรวมแบบไม่ระบุตัวตนผู้ป่วย เพื่อวางแผนกำลังรถ งบประมาณ และการจัดสรรอุปกรณ์ 12 หมู่บ้านตำบลบ้านกลาง
           </p>
         </div>
-        {!bookings.length && (
+        {demoAllowed && !hasChartData && (
           <AdminButton
             onClick={() => {
               const generated = seedOverlay.loadRealisticSeed(320)
@@ -218,7 +338,7 @@ export function ExecutiveAnalyticsDashboard({
         <article className="admin-kpi-card">
           <span>คำขอรับส่งสะสม</span>
           <strong>{analytics.total} รายการ</strong>
-          <small>{bookings.length > 0 ? `เฉลี่ย ${analytics.dailyAverage} เที่ยว/วัน (${analytics.activeDays} วันให้บริการ)` : 'อ้างอิงจากยอดสรุประบบ'}</small>
+          <small>{hasChartData ? `เฉลี่ย ${analytics.dailyAverage} เที่ยว/วัน (${analytics.activeDays} วันให้บริการ)` : 'อ้างอิงจากยอดสรุประบบ'}</small>
         </article>
         <article className="admin-kpi-card success">
           <span>อัตราเดินทางสำเร็จ</span>
@@ -237,7 +357,7 @@ export function ExecutiveAnalyticsDashboard({
         </article>
       </div>
 
-      {bookings.length > 0 ? (
+      {hasChartData ? (
         <div className="admin-analytics-grid">
           <section className="admin-chart-card" aria-labelledby="chart-monthly-title">
             <h3 id="chart-monthly-title">แนวโน้มปริมาณงานรับ–ส่งรายเดือน (12 เดือนล่าสุด)</h3>
@@ -314,23 +434,29 @@ export function ExecutiveAnalyticsDashboard({
                 </li>
               ))}
             </ul>
-            <h4 className="admin-subchart-heading">โรงพยาบาลปลายทางยอดนิยม</h4>
-            <ul className="admin-bar-list compact">
-              {analytics.topHospitals.map(h => (
-                <li key={h.name} className="admin-bar-row">
-                  <span className="admin-bar-label" title={h.name}>{h.name}</span>
-                  <span className="admin-bar-track" aria-hidden="true">
-                    <span className="admin-bar-fill secondary" style={{ width: `${h.count > 0 ? Math.max(4, Math.round((h.count / analytics.maxHospital) * 100)) : 0}%` }} />
-                  </span>
-                  <span className="admin-bar-val">{h.count} เที่ยว ({h.pct}%)</span>
-                </li>
-              ))}
-            </ul>
+            {analytics.topHospitals.length > 0 && (
+              <>
+                <h4 className="admin-subchart-heading">โรงพยาบาลปลายทางยอดนิยม</h4>
+                <ul className="admin-bar-list compact">
+                  {analytics.topHospitals.map(h => (
+                    <li key={h.name} className="admin-bar-row">
+                      <span className="admin-bar-label" title={h.name}>{h.name}</span>
+                      <span className="admin-bar-track" aria-hidden="true">
+                        <span className="admin-bar-fill secondary" style={{ width: `${h.count > 0 ? Math.max(4, Math.round((h.count / analytics.maxHospital) * 100)) : 0}%` }} />
+                      </span>
+                      <span className="admin-bar-val">{h.count} เที่ยว ({h.pct}%)</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </section>
         </div>
       ) : (
         <p className="admin-muted admin-analytics-hint">
-          ยังไม่มีข้อมูลเชิงลึกรายเที่ยวในชุดข้อมูลจำลอง — กด &quot;โหลดข้อมูลจำลอง 320 รายการเพื่อดูแนวโน้ม&quot; หรือนำเข้า CSV ด้านบน เพื่อดูกราฟรายเดือน ชั่วโมงเร่งด่วน และสถิติครบทั้ง 12 หมู่บ้าน
+          {demoAllowed
+            ? 'ยังไม่มีข้อมูลเชิงลึกรายเที่ยวในชุดข้อมูลจำลอง — กด "โหลดข้อมูลจำลอง 320 รายการเพื่อดูแนวโน้ม" หรือนำเข้า CSV ด้านล่าง เพื่อดูกราฟรายเดือน ชั่วโมงเร่งด่วน และสถิติครบทั้ง 12 หมู่บ้าน'
+            : 'ยังไม่มีข้อมูลการเดินรถในระบบสำหรับแสดงกราฟเชิงนโยบาย'}
         </p>
       )}
     </section>

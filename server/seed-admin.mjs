@@ -218,6 +218,10 @@ export async function adminAnalytics(client, user) {
         LEFT JOIN (SELECT village_id, count(*)::int AS c FROM patient_transfer.bookings GROUP BY village_id) vb ON vb.village_id = sv.id) AS villages,
       (SELECT coalesce(json_agg(json_build_object('mobility', mobility::text, 'count', c)), '[]'::json)
         FROM (SELECT mobility, count(*)::int AS c FROM patient_transfer.bookings GROUP BY mobility) m) AS mobility,
+      (SELECT coalesce(json_agg(json_build_object('hospitalName', hname, 'count', c) ORDER BY c DESC, hname), '[]'::json)
+        FROM (SELECT COALESCE(b.hospital_name_snapshot, h.name, 'ไม่ระบุโรงพยาบาล') AS hname, count(*)::int AS c
+          FROM patient_transfer.bookings b LEFT JOIN patient_transfer.hospitals h ON h.id = b.hospital_id GROUP BY 1) hs) AS hospitals,
+      (SELECT count(DISTINCT (appointment_at AT TIME ZONE 'Asia/Bangkok')::date)::int FROM patient_transfer.bookings) AS active_days,
       (SELECT count(*)::int FROM patient_transfer.vehicles WHERE active) AS active_vehicles,
       (SELECT count(*)::int FROM patient_transfer.vehicles) AS total_vehicles
   `)

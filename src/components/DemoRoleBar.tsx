@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
+import { SEED_DRIVERS } from '../data/realisticSeed'
 import { enterDemoCitizen } from '../services/citizenSession'
-import { deactivateInteractiveDemo, useInteractiveDemo, type DemoRole } from '../services/interactiveDemo'
+import { deactivateInteractiveDemo, setDemoDriverId, useInteractiveDemo, type DemoRole } from '../services/interactiveDemo'
 import { staffSession } from '../services/staffSession'
 
 const ROLE_LINKS: { role: DemoRole; label: string; path: string }[] = [
@@ -96,6 +97,25 @@ export function DemoRoleBar() {
               </button>
             )
           })}
+          {pathname.startsWith('/driver') && (
+            <select
+              className="demo-driver-select"
+              aria-label="เลือกคนขับในโหมดสาธิต"
+              value={demo.driverId}
+              onChange={event => {
+                const nextDriverId = event.target.value
+                setDemoDriverId(nextDriverId)
+                staffSession.enterDemoRole('driver', nextDriverId)
+                if (pathname !== '/driver') navigate('/driver')
+              }}
+            >
+              {SEED_DRIVERS.map((driver, idx) => (
+                <option key={driver.id} value={driver.id}>
+                  คนขับ {String.fromCharCode(65 + idx)}: {driver.name.replace(/\s*\(คนขับ [A-Z]\)$/, '')}
+                </option>
+              ))}
+            </select>
+          )}
           <button type="button" className="demo-role-btn ghost" onClick={() => navigate('/')}>
             หน้าหลัก
           </button>

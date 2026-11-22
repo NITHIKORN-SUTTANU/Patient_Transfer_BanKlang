@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { apiRequest, ApiError } from './api'
-import { activateInteractiveDemo, isInteractiveDemoActive } from './interactiveDemo'
+import { activateInteractiveDemo, isDemoModeAllowed, isInteractiveDemoActive } from './interactiveDemo'
 import { LineConnectionError } from './lineAuthentication'
 
 export interface CitizenConfig { liffId: string; lineEnabled: boolean; noticeVersion: string; noticeText: string; contactPhone: string }
@@ -78,6 +78,7 @@ export function initializeCitizen(reconnect = false) {
   return initialization
 }
 export function enterDemoCitizen() {
+  if (!isDemoModeAllowed()) return Promise.resolve()
   activateInteractiveDemo('citizen')
   if (state.user && token === 'demo-token-citizen') return Promise.resolve()
   token = undefined

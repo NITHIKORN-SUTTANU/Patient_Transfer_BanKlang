@@ -15,6 +15,21 @@ export interface AdminCatalog {
 }
 interface AdminAudit { id: string; action: string; entityType: string; entityId?: string; recordedAt: string; actor: string | null; reason?: string; before?: unknown; after?: unknown }
 export interface AdminSummary { statuses: { status: string; count: number }[] }
+export interface AdminLiveAnalytics {
+  total_bookings: number
+  statuses: { status: string; count: number }[]
+  monthly: { month: string; count: number }[]
+  hourly: { hour: number; count: number }[]
+  villages: { villageNumber: number; villageName: string; count: number }[]
+  mobility: { mobility: string; count: number }[]
+  hospitals?: { hospitalName: string; count: number }[]
+  active_days?: number
+  active_vehicles: number
+  total_vehicles: number
+}
+export function fetchAdminAnalytics() {
+  return staffRequest<AdminLiveAnalytics>('/admin/analytics')
+}
 export const roles = { admin: 'Admin', dispatcher: 'Dispatcher', driver: 'Driver' } as const
 export function accountView(account: StaffAccount): AdminAccount { return { ...account, role: roles[account.role] } }
 export function adminError(error: unknown) {
