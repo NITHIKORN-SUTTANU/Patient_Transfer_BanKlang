@@ -1606,3 +1606,166 @@ test('Comprehensive Pre-UAT Bugfix & UX Pass: zero overlaps, 2-step hospital ori
   await expect(addrInput).toHaveValue('ถนนลำพูน-ป่าซาง')
   await expect(replacePill).toHaveCount(0)
 })
+
+test('final UI polish: hug-tight form focus rings, incident modal spacing, and multi-viewport zero-overflow audit across all 4 roles', async ({ page }) => {
+  test.setTimeout(120_000)
+
+  const assertViewportClean = async (label: string) => {
+    const metrics = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+      htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+      bodyOverflowX: getComputedStyle(document.body).overflowX,
+    }))
+    expect(metrics.scrollWidth, `${label}: horizontal overflow`).toBeLessThanOrEqual(metrics.innerWidth)
+    expect(metrics.htmlOverflowX, `${label}: html overflow-x`).toBe('clip')
+    expect(metrics.bodyOverflowX, `${label}: body overflow-x`).toBe('clip')
+  }
+
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
+  await assertViewportClean('dispatcher-desktop')
+
+  // Verify Vehicle Timeline รายละเอียด → buttons are never clipped at the right edge of their card
+  const timelineLinks = page.locator('.dispatch-timeline-trip-pill .dispatch-mini-link')
+  if ((await timelineLinks.count()) > 0) {
+    const firstClipCheck = await timelineLinks.first().evaluate(btn => {
+      const card = btn.closest('.dispatch-timeline-trip-pill')!
+      const b = btn.getBoundingClientRect()
+      const c = card.getBoundingClientRect()
+      return { btnRight: b.right, cardRight: c.right, viewportRight: window.innerWidth }
+    })
+    expect(firstClipCheck.btnRight).toBeLessThanOrEqual(firstClipCheck.cardRight + 1)
+    expect(firstClipCheck.btnRight).toBeLessThanOrEqual(firstClipCheck.viewportRight)
+  }
+
+  // Navigate to Dispatcher Tracking -> open Incident Resolution Modal -> verify clean 14px/6px spacing & hug-tight focus ring
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'ติดตามงานรับส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking$/)
+  await assertViewportClean('dispatcher-tracking-desktop')
+
+  const firstTrackBtn = page.locator('.dispatch-monitoring tbody tr').first().getByRole('button', { name: /ดูสถานะ|ดูรายละเอียด/ })
+  await firstTrackBtn.click()
+  const dialog = page.getByRole('dialog')
+  const actionSelect = dialog.locator('.dispatch-operations-section > .booking-field > select')
+  await actionSelect.selectOption('REPORT_INCIDENT')
+
+  const reasonTextarea = dialog.getByLabel('เหตุผล')
+  const confirmCheckboxWrap = dialog.locator('.dispatch-operations-form .booking-checkbox')
+  const submitOpBtn = dialog.getByRole('button', { name: 'ยืนยันการดำเนินการ', exact: true })
+
+  // Verify hug-tight WCAG focus ring on select and textarea (keyboard focus triggers :focus-visible)
+  await reasonTextarea.focus()
+  await page.keyboard.press('Shift+Tab') // back to select
+  await page.keyboard.press('Tab') // keyboard-focus textarea
+  const textareaFocus = await reasonTextarea.evaluate(el => {
+    const cs = getComputedStyle(el)
+    return {
+      outlineStyle: cs.outlineStyle,
+      outlineWidth: cs.outlineWidth,
+      outlineOffset: cs.outlineOffset,
+      boxShadow: cs.boxShadow,
+    }
+  })
+  expect(textareaFocus.outlineStyle).toBe('solid')
+  expect(textareaFocus.outlineWidth).toBe('2px')
+  expect(textareaFocus.outlineOffset).toBe('0px')
+  expect(textareaFocus.boxShadow).not.toBe('none')
+
+  // Verify clean vertical spacing (gap >= 12px) between select, textarea, checkbox, and submit button
+  const selectBox = (await actionSelect.boundingBox())!
+  const reasonLabelBox = (await dialog.locator('.dispatch-operations-form .booking-field').first().boundingBox())!
+  const textareaBox = (await reasonTextarea.boundingBox())!
+  const checkboxBox = (await confirmCheckboxWrap.boundingBox())!
+  const submitBox = (await submitOpBtn.boundingBox())!
+
+  expect(reasonLabelBox.y - (selectBox.y + selectBox.height)).toBeGreaterThanOrEqual(12)
+  expect(checkboxBox.y - (textareaBox.y + textareaBox.height)).toBeGreaterThanOrEqual(12)
+  expect(submitBox.y - (checkboxBox.y + checkboxBox.height)).toBeGreaterThanOrEqual(12)
+
+  await dialog.getByRole('button', { name: 'ปิดรายละเอียด', exact: true }).click()
+
+  // Desktop audit across remaining roles
+  const demoBar = page.locator('.demo-role-bar')
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  await assertViewportClean('dispatcher-assignment-desktop')
+
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await assertViewportClean('driver-desktop')
+  await page.locator('#driver-sidebar').getByRole('link', { name: 'ประวัติ', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/history$/)
+  await assertViewportClean('driver-history-desktop')
+
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await assertViewportClean('admin-desktop')
+  await page.locator('#admin-sidebar').getByRole('link', { name: 'รถรับส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/vehicles$/)
+  await assertViewportClean('admin-vehicles-desktop')
+  await page.locator('#admin-sidebar').getByRole('link', { name: 'คนขับ', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/drivers$/)
+  await assertViewportClean('admin-drivers-desktop')
+
+  await demoBar.getByRole('button', { name: 'ผู้ป่วย / จองรถ' }).click()
+  await expect(page).toHaveURL(/\/booking$/)
+  await assertViewportClean('citizen-desktop')
+  await page.getByRole('button', { name: 'ดูสถานะการจอง', exact: true }).click()
+  await expect(page).toHaveURL(/\/booking\/bookings$/)
+  await assertViewportClean('citizen-bookings-desktop')
+
+  // Mobile 390x844 full-app sweep across all 4 workspaces + Admin modal single-column stacking + Driver CTA clearance
+  await page.setViewportSize({ width: 390, height: 844 })
+  await assertViewportClean('citizen-bookings-mobile')
+
+  await demoBar.getByRole('button', { name: 'เจ้าหน้าที่จัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await assertViewportClean('dispatcher-mobile')
+
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await assertViewportClean('driver-mobile')
+  // Open active or first job details -> verify bottom sticky CTA never covers bottom card when scrolled to end
+  await page.getByRole('button', { name: /ดูรายละเอียด|ติดตามสถานะงาน/ }).first().click()
+  await expect(page.locator('.driver-action')).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  const clearance = await page.evaluate(() => {
+    const cta = document.querySelector('.driver-action')!.getBoundingClientRect()
+    const content = document.querySelector('.driver-content')!
+    const children = Array.from(content.children).filter(el => !el.classList.contains('driver-action') && getComputedStyle(el).display !== 'none')
+    const last = children[children.length - 1]
+    return { lastBottom: last ? last.getBoundingClientRect().bottom : 0, ctaTop: cta.top }
+  })
+  expect(clearance.lastBottom).toBeLessThanOrEqual(clearance.ctaTop + 2)
+  await assertViewportClean('driver-detail-mobile')
+
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await assertViewportClean('admin-mobile')
+  await page.getByRole('button', { name: 'เมนูผู้ดูแลระบบ', exact: true }).click()
+  await page.getByRole('dialog', { name: 'เมนูผู้ดูแลระบบ', exact: true }).getByRole('link', { name: 'รถรับส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/vehicles$/)
+  await assertViewportClean('admin-vehicles-mobile')
+  await page.getByRole('button', { name: '+ เพิ่มรถ', exact: true }).click()
+  const adminDialog = page.getByRole('dialog')
+  await expect(adminDialog).toBeVisible()
+  const adminInput = adminDialog.locator('input').first()
+  await adminInput.focus()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Shift+Tab')
+  const adminInputFocus = await adminInput.evaluate(el => {
+    const cs = getComputedStyle(el)
+    return { outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth, outlineOffset: cs.outlineOffset, boxShadow: cs.boxShadow }
+  })
+  expect(adminInputFocus.outlineStyle).toBe('solid')
+  expect(adminInputFocus.outlineWidth).toBe('2px')
+  expect(adminInputFocus.outlineOffset).toBe('0px')
+  expect(adminInputFocus.boxShadow).not.toBe('none')
+  await assertViewportClean('admin-modal-mobile')
+  await adminDialog.getByRole('button', { name: 'ยกเลิก', exact: true }).click()
+})

@@ -15,8 +15,11 @@
 .driver-section-heading { align-items:center; flex-wrap:wrap; margin-bottom:12px; }
 .driver-section-heading h2 { margin:0; }
 .driver-card { padding:20px; border:1px solid var(--color-hairline); border-radius:16px; background:white; box-shadow:var(--shadow-card); }
+.driver-trip:hover { border-color:#9dc2b5; box-shadow:var(--shadow-card-hover); }
 .driver-trip.is-primary { border:2px solid var(--color-primary); box-shadow:0 4px 18px rgba(6, 90, 83, 0.12); }
+.driver-trip.is-primary:hover { border-color:var(--color-primary); box-shadow:0 6px 22px rgba(6, 90, 83, 0.16); }
 .driver-trip.is-active { border:2px solid var(--color-primary); background:#f1faf6; box-shadow:0 4px 18px rgba(6, 90, 83, 0.14); }
+.driver-trip.is-active:hover { border-color:var(--color-primary); }
 .driver-card-top { flex-wrap:wrap; align-items:center; gap:8px; }
 .driver-card-top-badges { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .driver-mobility-pill { display:inline-flex; align-items:center; gap:5px; padding:4px 11px; border-radius:999px; font-size:13px; font-weight:700; line-height:1.4; white-space:nowrap; }
@@ -96,7 +99,7 @@
 .driver-current-location span { margin-bottom:4px; color:var(--color-muted); }
 .driver-quick-actions { display:grid; gap:10px; margin-top:20px; }
 .driver-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 16px; width:100%; max-width:100%; margin-bottom:20px; padding-inline:0; box-sizing:border-box; }
-.driver-refresh-button.booking-button { width:auto; max-width:100%; min-height:44px; padding:8px 18px; border:1.5px solid #9dc2b5; border-radius:12px; background:white; color:var(--color-primary); font-size:15px; font-weight:700; flex-shrink:0; }
+.driver-refresh-button.booking-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; width:auto; min-width:162px; max-width:100%; min-height:44px; padding:8px 18px; border:1.5px solid #9dc2b5; border-radius:12px; background:white; color:var(--color-primary); font-size:15px; font-weight:700; flex-shrink:0; }
 .driver-refresh-button.booking-button:hover:not(:disabled) { background:var(--color-accent); border-color:var(--color-primary); }
 .driver-account-link { display:inline-flex; align-items:center; max-width:100%; min-height:44px; padding:6px 10px; color:var(--color-primary); font-weight:600; text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; box-sizing:border-box; }
 .driver-contact-action { display:flex; align-items:center; justify-content:center; gap:10px; min-height:56px; padding:12px; border:1px solid #5b8a7f; border-radius:12px; background:white; color:var(--color-primary); font-weight:600; }
@@ -127,7 +130,7 @@
 .driver-failed > .driver-button { margin-top:12px; }
 @media(max-width:640px) {
  .driver-toolbar { flex-wrap:nowrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:14px; }
- .driver-refresh-button.booking-button { min-height:44px; padding:6px 11px; font-size:13.5px; white-space:nowrap; }
+ .driver-refresh-button.booking-button { min-width:142px; min-height:44px; padding:6px 11px; font-size:13.5px; white-space:nowrap; }
  .driver-account-link { min-height:44px; padding:4px 6px; font-size:13.5px; text-align:right; white-space:nowrap; flex-shrink:1; min-width:0; }
 }
 @media(max-width:359px) {

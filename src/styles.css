@@ -89,6 +89,16 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes ui-modal-in {
+  from { opacity: 0; transform: translateY(6px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ui-dropdown-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Lightweight pure-CSS micro-interactions (LINE LIFF & Playwright safe) */
 @media (prefers-reduced-motion: no-preference) {
   .booking-button,
@@ -98,53 +108,134 @@
   .dispatch-refresh-icon-btn,
   .dispatch-mini-link,
   .dispatch-tracking-scopes button,
+  .dispatch-incident-cta,
+  .dispatch-incident-secondary,
+  .dispatch-fleet-action-btn,
+  .dispatch-fleet-toggle-btn,
+  .dispatch-fleet-scroll-btn,
+  .dispatch-fleet-trip-link,
+  .dispatch-held-pill,
+  .dispatch-readiness-chip,
   .booking-capacity-alt-btn,
   .booking-edit,
+  .booking-compact-refresh,
+  .booking-address-suggestion,
+  .booking-picker-jump-btn,
+  .booking-list-chip,
   .booking-tabs button,
   .booking-assistance button,
   .driver-back-link,
   .driver-contact-action,
-  .driver-shell .driver-detail-link {
-    transition: background-color .16s ease-out, border-color .16s ease-out, color .16s ease-out, box-shadow .16s ease-out, transform .15s ease-out;
+  .driver-reason-chip,
+  .driver-history-chip,
+  .driver-shell .driver-detail-link,
+  .admin-button,
+  .admin-tabs button,
+  .role-selection-shortcut,
+  .dispatch-sidebar:not(.admin-sidebar) nav a,
+  .driver-sidebar .driver-nav a,
+  .navigation-drawer nav a {
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  }
+
+  .admin-sidebar nav a {
+    transition: color 150ms ease, transform 150ms ease;
+  }
+
+  :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
   }
 
   .booking-button:active:not(:disabled),
   .dispatch-quick-approve-btn:active:not(:disabled),
+  .dispatch-incident-cta:active:not(:disabled),
+  .dispatch-incident-secondary:active:not(:disabled),
+  .dispatch-fleet-action-btn:active:not(:disabled),
   .dispatch-date-chip:active:not(:disabled),
   .dispatch-view-btn:active:not(:disabled),
   .dispatch-refresh-icon-btn:active:not(:disabled),
   .dispatch-mini-link:active:not(:disabled),
+  .dispatch-held-pill:active:not(:disabled),
+  .dispatch-readiness-chip:active:not(:disabled),
   .booking-capacity-alt-btn:active:not(:disabled),
-  .booking-edit:active:not(:disabled) {
-    transform: scale(.98);
+  .booking-compact-refresh:active:not(:disabled),
+  .booking-address-suggestion:active:not(:disabled),
+  .booking-list-chip:active:not(:disabled),
+  .booking-edit:active:not(:disabled),
+  .driver-reason-chip:active:not(:disabled),
+  .driver-history-chip:active:not(:disabled),
+  .admin-button:active:not(:disabled) {
+    transform: translateY(1px);
   }
 
   .booking-summary-card,
   .booking-card,
   .driver-card,
+  .dispatch-fleet-unit,
+  .dispatch-timeline-trip-pill,
   .dispatch-waiting-list article,
   .dispatch-metrics article,
   .admin-kpi-card,
   .admin-metrics article,
-  .dispatch-map-list-item {
-    transition: border-color .16s ease-out, box-shadow .16s ease-out, background-color .16s ease-out;
+  .dispatch-map-list-item,
+  .admin-table-scroll tbody tr {
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease, transform 150ms ease;
   }
 
-  .booking-modal[open],
+  .dispatch-fleet-unit:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+
+  .dispatch-timeline-trip-pill:hover {
+    border-color: #9dc2b5;
+    background: #f8fdfb;
+    box-shadow: 0 2px 8px rgba(6, 90, 83, 0.06);
+  }
+
+  a.booking-summary-card:hover {
+    transform: translateY(-1px);
+  }
+
+  .dispatch-waiting-list article:hover {
+    box-shadow: 0 3px 10px rgba(6, 90, 83, 0.08);
+  }
+
+  .dispatch-map-list-item:hover:not(.selected) {
+    border-color: #8bb8a9;
+    background: #f4fbf8;
+  }
+
+  .booking-modal[open] {
+    animation: ui-modal-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
   .dispatch-resource-options,
-  .pickup-map-results,
+  .pickup-map-results {
+    animation: ui-dropdown-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
   .dispatch-notice,
+  .dispatch-readiness-success,
+  .dispatch-readiness-hint,
   .dispatch-disabled-reason,
+  .dispatch-blocking-conflict,
   .dispatch-edit-proposal-banner,
+  .dispatch-dup-clear,
+  .dispatch-dup-found,
   .driver-notice,
+  .driver-incident-status-card,
   .admin-notice,
-  .booking-success-notice {
-    animation: ui-fade-in .18s ease-out;
+  .booking-success-notice,
+  .booking-out-of-zone-notice {
+    animation: ui-fade-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 }
 
 button[aria-busy="true"],
-.booking-button[aria-busy="true"] {
+.booking-button[aria-busy="true"],
+.booking-compact-refresh[aria-busy="true"],
+.dispatch-refresh-icon-btn[aria-busy="true"] {
   cursor: progress;
   opacity: .72;
 }

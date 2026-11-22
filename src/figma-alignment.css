@@ -93,7 +93,7 @@ button, a { touch-action:manipulation; }
 .booking-current-status p { font-size:16px; margin-top:8px; color:var(--color-muted); }
 .booking-timeline-details summary { min-height:48px; padding-block:12px; color:var(--color-primary); cursor:pointer; }
 .booking-modal-inner { max-height:calc(100dvh - 24px); }
-.booking-modal-content { min-height:0; overflow:auto; padding:4px; scroll-padding-block:20px; }
+.booking-modal-content { min-height:0; overflow:auto; padding:4px 6px; scroll-padding-block:20px; }
 .booking-modal-footer { flex-shrink:0; display:flex; flex-direction:column; gap:10px; padding-top:8px; background:white; }
 .booking-modal-inner > header { flex-shrink:0; }
 .booking-calendar-day { display:none; }
@@ -211,8 +211,39 @@ a.booking-summary-card .booking-summary-next { padding:8px 0 0; border-top:1px s
 .driver-shell main, .driver-card, .driver-card dd { min-width:0; }
 html { scroll-padding-bottom:100px; }
 .driver-shell :focus-visible { scroll-margin-block:24px 110px; }
-input:is([type=date],[type=time]):focus { outline:3px solid var(--color-primary-hover); outline-offset:3px; }
-label:has(input:is([type=date],[type=time])):focus-within { outline:3px solid var(--color-primary-hover); outline-offset:4px; border-radius:10px; }
+/* Hug-tight WCAG 2.2 AA form focus ring (forced-colors safe via transparent 2px outline) */
+:is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus-visible,
+input:is([type=date],[type=time],[type=datetime-local]):focus {
+ border-color:#0f5c52;
+ box-shadow:0 0 0 3px rgba(15, 92, 82, 0.18);
+ outline:2px solid transparent;
+ outline-offset:0;
+}
+:is(input:not([type="checkbox"]):not([type="radio"]), select, textarea)[aria-invalid="true"]:focus-visible {
+ border-color:var(--color-error);
+ box-shadow:0 0 0 3px rgba(169, 43, 57, 0.2);
+ outline:2px solid transparent;
+ outline-offset:0;
+}
+label:has(input:is([type=date],[type=time])):focus-within {
+ outline:2px solid transparent;
+ outline-offset:0;
+ border-radius:10px;
+}
+.dispatch-filters .dispatch-date-filter:focus-within {
+ border-color:#0f5c52;
+ box-shadow:0 0 0 3px rgba(15, 92, 82, 0.18);
+ outline:2px solid transparent;
+ outline-offset:0;
+}
+input:is([type="checkbox"],[type="radio"]):focus-visible {
+ outline:2px solid var(--color-primary-hover);
+ outline-offset:2px;
+}
+.booking-checkbox:has(input:focus-visible) {
+ border-color:#0f5c52;
+ box-shadow:0 0 0 3px rgba(15, 92, 82, 0.16);
+}
 @media(min-width:600px) { .driver-shell { box-shadow:0 6px 30px #132d2c0a; background:var(--color-canvas); } body:has(.driver-shell) { background:#eaf1ee; } }
 @media(max-width:639px) {
  .service-role-grid { grid-template-columns:minmax(0,1fr); gap:14px; }
@@ -363,7 +394,7 @@ body:has(.driver-shell) { background:var(--color-canvas); }
 @media (max-width:767px) {
  .dispatch-sidebar, .admin-sidebar { position:sticky; top:var(--demo-bar-height, 0px); z-index:25; box-shadow:0 4px 16px #132d2c24, 0 1px 4px #132d2c14; }
 }
-.navigation-drawer[open] { animation:navigation-enter .18s ease-out; }
+.navigation-drawer[open] { animation:navigation-enter 160ms cubic-bezier(0.16, 1, 0.3, 1); }
 .navigation-drawer-content { padding:16px max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) 16px; }
 .navigation-drawer header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:24px; }
 .navigation-drawer h2 { font-size:20px; font-weight:700; }
