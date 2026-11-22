@@ -104,6 +104,10 @@
 .driver-account-link { display:inline-flex; align-items:center; max-width:100%; min-height:44px; padding:6px 10px; color:var(--color-primary); font-weight:600; text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; box-sizing:border-box; }
 .driver-contact-action { display:flex; align-items:center; justify-content:center; gap:10px; min-height:56px; padding:12px; border:1px solid #5b8a7f; border-radius:12px; background:white; color:var(--color-primary); font-weight:600; }
 .driver-contact-action:hover { background:var(--color-accent); border-color:var(--color-primary); }
+.driver-utility-row { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; }
+.driver-utility-link { flex:1 1 136px; display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:42px; padding:8px 12px; border:1px solid #9dc2b5; border-radius:10px; background:#f4fbf8; color:var(--color-primary); font-size:14px; font-weight:700; text-decoration:none; text-align:center; min-width:0; }
+.driver-utility-link svg { width:18px; height:18px; flex-shrink:0; }
+.driver-utility-link:hover { background:var(--color-accent); border-color:var(--color-primary); }
 .driver-current .driver-next { margin-top:16px; padding:12px; background:var(--color-accent); color:var(--color-primary); }
 .driver-detail-link, .driver-report-link { display:flex; align-items:center; min-height:48px; margin-top:8px; }
 .driver-back-link { display:inline-flex; align-items:center; gap:10px; min-height:48px; margin-bottom:12px; padding:10px 14px; border:1px solid #5b8a7f; border-radius:10px; background:white; color:var(--color-primary); font-size:16px; font-weight:600; }

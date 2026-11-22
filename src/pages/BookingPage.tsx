@@ -8,7 +8,8 @@ import { AppointmentPicker } from '../components/AppointmentPicker'
 import { BookingButton, BookingCard, BookingHeader, BookingIcon, BookingModal, BookingProgress, EmergencyLink } from '../components/BookingUI'
 import { appointmentTimestamp, emptyBooking, formatPickupSummary, meetsLeadTime, thaiDate, validatePatient, validatePickup } from '../services/booking'
 import type { BookingDetails } from '../services/booking'
-import { dispatchTime } from '../services/dispatch'
+import { dispatchDate, dispatchTime } from '../services/dispatch'
+import { copyToClipboard } from '../services/clipboard'
 import { statusLabels } from '../services/dispatcherApi'
 import { bookingPages } from '../services/bookingPages'
 import { citizenRequest, citizenError, enterDemoCitizen, initializeCitizen, refreshCitizenConfig, useCitizenSession } from '../services/citizenSession'
@@ -106,6 +107,29 @@ async function reverseGeocodeNearby(latitude: number, longitude: number, signal:
   }
 }
 
+function buildCitizenBookingSummary(
+  b: ReturnType<typeof citizenBooking>,
+  statusLabel: string,
+): string {
+  const ref = b.reference || b.id
+  const appt = `${dispatchDate(b.appointmentAt)} เวลา ${dispatchTime(b.appointmentAt)} น.`
+  const pickupTime = b.schedule?.pickupAt
+    ? `${dispatchDate(b.schedule.pickupAt)} เวลา ${dispatchTime(b.schedule.pickupAt)} น.`
+    : 'รอเจ้าหน้าที่ยืนยันเวลารับ'
+  const pickupAddr = formatPickupSummary(b.details?.pickup?.label) || 'ตามจุดรับที่ระบุ'
+  const hospital = b.details?.hospital || 'โรงพยาบาลตามนัดหมาย'
+  return [
+    'สรุปการจองรถรับส่งผู้ป่วย (เทศบาลตำบลบ้านกลาง)',
+    `รหัสคิว: ${ref}`,
+    `ผู้ป่วย: ${b.patientName}`,
+    `วัน/เวลานัดหมาย: ${appt}`,
+    `วัน/เวลารับ: ${pickupTime}`,
+    `จุดรับ: ${pickupAddr}`,
+    `โรงพยาบาลปลายทาง: ${hospital}`,
+    `สถานะ: ${statusLabel}`,
+  ].join('\n')
+}
+
 const initialBookingForm = (): BookingDetails => ({ ...emptyBooking(), pickupAddress: '', villageId: '', landmark: '' })
 export function BookingPage() {
   const navigate = useNavigate()
@@ -117,6 +141,15 @@ export function BookingPage() {
   const [catalog, setCatalog] = useState<CitizenCatalog>({ hospitals: [], villages: [] })
   const [rows, setRows] = useState<CitizenBooking[]>([])
   const [capacitySuggestionTimes, setCapacitySuggestionTimes] = useState<string[]>([])
+  const [copiedSummary, setCopiedSummary] = useState(false)
+  const copySummaryTimerRef = useRef<number | null>(null)
+  useEffect(() => () => { if (copySummaryTimerRef.current !== null) window.clearTimeout(copySummaryTimerRef.current) }, [])
+  async function handleCopySummary(b: ReturnType<typeof citizenBooking>, statusLabel: string) {
+    await copyToClipboard(buildCitizenBookingSummary(b, statusLabel))
+    setCopiedSummary(true)
+    if (copySummaryTimerRef.current !== null) window.clearTimeout(copySummaryTimerRef.current)
+    copySummaryTimerRef.current = window.setTimeout(() => setCopiedSummary(false), 2000)
+  }
   const [profiles, setProfiles] = useState<PatientProfile[]>([])
   const [loadedKey, setLoadedKey] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -581,6 +614,7 @@ export function BookingPage() {
   else if (screen === 'submitted' && saved) content = <>
     <BookingHeader title="ส่งคำขอแล้ว" subtitle="เก็บหมายเลขคำขอไว้เพื่อติดตามสถานะ" />
     <BookingSummaryCard booking={saved} statusLabel={statusLabels[saved.apiStatus!]} />
+    <BookingButton secondary className="booking-copy-summary-btn" onClick={() => void handleCopySummary(saved, statusLabels[saved.apiStatus!] || 'รอตรวจสอบ')}>{copiedSummary ? 'คัดลอกสรุปแล้ว ✓' : 'คัดลอกข้อความสรุปการจอง'}</BookingButton>
     <p className="booking-small">แจ้งผลการพิจารณาและเวลารับผ่าน LINE</p>
     <BookingButton onClick={() => go(`status/${saved.id}`)}>ดูสถานะการจอง</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
   </>
@@ -720,6 +754,11 @@ export function BookingPage() {
       </div>
     </div>
     <BookingSummaryCard booking={saved} statusLabel={statusLabels[saved.apiStatus!]} />
+    {!['cancelled', 'rejected', 'completed'].includes(saved.status) && saved.apiStatus !== 'ABORTED' && (
+      <BookingButton secondary className="booking-copy-summary-btn" onClick={() => void handleCopySummary(saved, statusLabels[saved.apiStatus!] || 'รอตรวจสอบ')}>
+        {copiedSummary ? 'คัดลอกสรุปแล้ว ✓' : 'คัดลอกข้อความสรุปการจอง'}
+      </BookingButton>
+    )}
     {saved.apiStatus === 'ABORTED' ? <BookingCard title="ยุติการเดินทาง"><p>ไม่ได้ส่งถึงโรงพยาบาล กรุณาติดต่อเทศบาลเพื่อทราบการจัดการต่อ</p></BookingCard> : saved.status === 'cancelled' ? <BookingCard title="ยกเลิกการจองแล้ว"><p>{saved.cancellation?.reason}</p><p>การยกเลิกได้รับการบันทึกแล้ว</p></BookingCard> : saved.status === 'rejected' ? <BookingCard title="ผลการพิจารณา"><p>ไม่อนุมัติคำขอนี้</p><p>เหตุผล: {saved.rejectionReason || 'ยังไม่มีเหตุผลที่บันทึกไว้'}</p><p>หากต้องการความช่วยเหลือ กรุณาติดต่อเทศบาล</p></BookingCard> : saved.status === 'completed' ? <BookingCard title="ผลการเดินทาง"><p>ผู้ป่วยเดินทางถึงโรงพยาบาลแล้ว</p><p>หมายเลขการจอง {saved.reference}</p></BookingCard> : <><h2 className="booking-section-title">ความคืบหน้า</h2><BookingTripTimeline booking={saved} /></>}
     <div className="booking-status-actions">
       {citizenCanCancel() && <BookingButton secondary danger onClick={() => { setCancelError(''); go(`cancel/${saved.id}`) }}>ยกเลิกการจอง</BookingButton>}

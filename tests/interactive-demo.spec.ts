@@ -1794,3 +1794,72 @@ test('final UI polish: hug-tight form focus rings, incident modal spacing, and m
   await assertViewportClean('admin-modal-mobile')
   await adminDialog.getByRole('button', { name: 'ยกเลิก', exact: true }).click()
 })
+
+test('QoL convenience pack: dispatcher smart suggest & copy chips, driver 1-tap tel/maps & roadside incident chips, and citizen summary copy', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+
+  // 1a. Dispatcher Section 3 Smart Suggest (แนะนำรถและคนขับที่ว่าง)
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  const suggestBtn = page.getByRole('button', { name: /แนะนำรถและคนขับที่ว่าง/ })
+  await expect(suggestBtn).toBeEnabled()
+  await suggestBtn.click()
+  await expect(page.locator('.dispatch-smart-suggest-hint')).toContainText('เลือกคู่รถและคนขับที่ว่างให้อัตโนมัติแล้ว')
+  await expect(page.locator('.dispatch-blocking-conflict')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true })).toBeEnabled()
+
+  // 1b. Dispatcher 1-click Copy Booking ID & Contact Phone in tracking/details modal
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'ติดตามงานรับส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/tracking$/)
+  await page.locator('.dispatch-monitoring tbody tr').first().getByRole('button', { name: /ดูสถานะ|ดูรายละเอียด/ }).click()
+  const trackModal = page.getByRole('dialog')
+  const copyIdBtn = trackModal.getByRole('button', { name: /คัดลอก.*รหัสงาน/ })
+  await copyIdBtn.click()
+  await expect(copyIdBtn).toContainText('คัดลอกแล้ว ✓')
+  const copyPhoneBtn = trackModal.getByRole('button', { name: /คัดลอก.*เบอร์ติดต่อ/ })
+  await copyPhoneBtn.click()
+  await expect(copyPhoneBtn).toContainText('คัดลอกแล้ว ✓')
+  await trackModal.getByRole('button', { name: 'ปิดรายละเอียด', exact: true }).click()
+
+  // 2. Driver 1-tap tel:/Google Maps links + roadside incident quick-reason chips at 390px mobile
+  const demoBar = page.locator('.demo-role-bar')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  const firstCard = page.locator('.driver-trip').first()
+  const telLink = firstCard.locator('a.driver-utility-link[href^="tel:"]')
+  await expect(telLink).toBeVisible()
+  expect(await telLink.getAttribute('href')).toMatch(/^tel:[+0-9]+$/)
+  const mapsLink = firstCard.locator('a.driver-utility-link[href^="https://www.google.com/maps/search/?api=1&query="]')
+  await expect(mapsLink).toBeVisible()
+  expect(await mapsLink.getAttribute('href')).toMatch(/^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=.+/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // Open job -> go to incident report -> verify 4 roadside quick chips populate textarea cleanly
+  await firstCard.getByRole('button', { name: /ดูรายละเอียด|ติดตามสถานะงาน/ }).click()
+  await page.getByRole('button', { name: 'รายงานเหตุขัดข้อง', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/incident/)
+  for (const label of ['รถเสีย / ยางแบน', 'ผู้ป่วยอาการฉุกเฉิน (แจ้ง 1669)', 'ติดต่อผู้ป่วยไม่ได้', 'การจราจรติดขัดล่าช้า']) {
+    await expect(page.locator('.driver-reason-chip', { hasText: label })).toBeVisible()
+  }
+  await page.locator('.driver-reason-chip', { hasText: 'รถเสีย / ยางแบน' }).click()
+  await expect(page.getByRole('textbox', { name: 'เหตุผลที่รายงาน', exact: true })).toHaveValue('รถเสีย / ยางแบน')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // 3. Citizen 1-click คัดลอกข้อความสรุปการจอง on active booking status detail view
+  await demoBar.getByRole('button', { name: 'ผู้ป่วย / จองรถ' }).click()
+  await expect(page).toHaveURL(/\/booking$/)
+  await page.getByRole('button', { name: 'ดูสถานะการจอง', exact: true }).click()
+  await expect(page).toHaveURL(/\/booking\/bookings$/)
+  await page.locator('a.booking-summary-card').first().click()
+  await expect(page).toHaveURL(/\/booking\/status\//)
+  const copySummaryBtn = page.getByRole('button', { name: 'คัดลอกข้อความสรุปการจอง', exact: true })
+  await expect(copySummaryBtn).toBeVisible()
+  await copySummaryBtn.click()
+  await expect(page.getByRole('button', { name: 'คัดลอกสรุปแล้ว ✓', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})

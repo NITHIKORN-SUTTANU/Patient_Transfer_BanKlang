@@ -116,6 +116,8 @@
   .dispatch-fleet-trip-link,
   .dispatch-held-pill,
   .dispatch-readiness-chip,
+  .dispatch-smart-suggest-btn,
+  .dispatch-copy-btn,
   .booking-capacity-alt-btn,
   .booking-edit,
   .booking-compact-refresh,
@@ -126,6 +128,7 @@
   .booking-assistance button,
   .driver-back-link,
   .driver-contact-action,
+  .driver-utility-link,
   .driver-reason-chip,
   .driver-history-chip,
   .driver-shell .driver-detail-link,
@@ -216,6 +219,7 @@
   }
 
   .dispatch-notice,
+  .dispatch-smart-suggest-hint,
   .dispatch-readiness-success,
   .dispatch-readiness-hint,
   .dispatch-disabled-reason,

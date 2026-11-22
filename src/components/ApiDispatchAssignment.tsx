@@ -39,6 +39,7 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
   const [error, setError] = useState('')
   const [staleConflict, setStaleConflict] = useState(false)
   const [autoPairedDriver, setAutoPairedDriver] = useState(false)
+  const [smartSuggestHint, setSmartSuggestHint] = useState('')
   const [confirm, setConfirm] = useState(false)
   const [reason, setReason] = useState('')
   const [arrangementNote, setArrangementNote] = useState('')
@@ -313,10 +314,30 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
   const countPriorJobsAtLocation = (locId: string) =>
     previousJobs.filter(row => isSameDayPriorJob(row, locId, false)).length
 
-  const hasFreeCompatibleVehicle = catalog.vehicles.some(v => {
+  const freeCompatibleVehicles = catalog.vehicles.filter(v => {
     const info = vehicleInsights.get(v.id)
     return v.active && info && info.supportsCase && !info.heldOrIncident && !info.overlapWin
   })
+  const freeDrivers = catalog.drivers.filter(d => {
+    const info = driverInsights.get(d.id)
+    return d.active && info && !info.heldOrIncident && !info.overlapWin
+  })
+  const hasFreeCompatibleVehicle = freeCompatibleVehicles.length > 0
+  const smartSuggestion = (() => {
+    if (freeCompatibleVehicles.length === 0 || freeDrivers.length === 0) return null
+    for (const v of freeCompatibleVehicles) {
+      const vInfo = vehicleInsights.get(v.id)!
+      const pairedId = findSmartPairedDriver(v.id)
+      if (pairedId && freeDrivers.some(d => d.id === pairedId)) {
+        return { vehicleId: v.id, driverId: pairedId }
+      }
+      const sameLocDriver = freeDrivers.find(d => driverInsights.get(d.id)?.locationKey === vInfo.locationKey)
+      if (sameLocDriver) {
+        return { vehicleId: v.id, driverId: sameLocDriver.id }
+      }
+    }
+    return { vehicleId: freeCompatibleVehicles[0].id, driverId: freeDrivers[0].id }
+  })()
 
   const disabledReason = (() => {
     if (busy) return null
@@ -454,7 +475,31 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     )}
     <p className="dispatch-small">ข้อมูลเส้นทาง © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> / OSRM · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noreferrer">แก้ไขแผนที่</a></p>
     <fieldset ref={resourceSectionRef} className={editingProposal ? 'is-editing-proposal' : undefined} disabled={busy || assigning}>
-      <h2>3. เลือกรถและคนขับ</h2>
+      <div className="dispatch-section-head">
+        <h2>3. เลือกรถและคนขับ</h2>
+        {!assigning && (
+          <button
+            type="button"
+            className="dispatch-smart-suggest-btn"
+            disabled={busy || !smartSuggestion}
+            title={smartSuggestion ? 'เลือกคู่รถที่รองรับและคนขับที่ว่างให้อัตโนมัติ' : 'ไม่มีคู่รถที่รองรับและคนขับว่างพร้อมกันในช่วงเวลานี้'}
+            onClick={() => {
+              if (!smartSuggestion) return
+              setVehicleId(smartSuggestion.vehicleId)
+              setDriverId(smartSuggestion.driverId)
+              setAutoPairedDriver(false)
+              setPreviousId('')
+              setStaleConflict(false)
+              setSmartSuggestHint('เลือกคู่รถและคนขับที่ว่างให้อัตโนมัติแล้ว')
+            }}
+          >
+            <span aria-hidden="true">✦</span> แนะนำรถและคนขับที่ว่าง
+          </button>
+        )}
+      </div>
+      {!assigning && smartSuggestHint && (
+        <p className="dispatch-smart-suggest-hint" role="status">✓ {smartSuggestHint}</p>
+      )}
       {assigning && (
         <p className="dispatch-locked-caption" role="status">
           ล็อกข้อมูลตามตารางที่ยืนยันแล้ว — กด &quot;แก้ไขข้อเสนอตารางและทรัพยากร&quot; ด้านบนหากต้องการเปลี่ยนรถหรือต้นทาง
@@ -486,6 +531,7 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
               setVehicleId(nextVehicleId)
               setPreviousId('')
               setStaleConflict(false)
+              setSmartSuggestHint('')
               if (!driverId) {
                 const paired = findSmartPairedDriver(nextVehicleId)
                 if (paired) {
@@ -521,7 +567,7 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
                 tone: info?.tone,
               }
             })}
-            onChange={nextDriverId => { setDriverId(nextDriverId); setAutoPairedDriver(false); setPreviousId(''); setStaleConflict(false) }}
+            onChange={nextDriverId => { setDriverId(nextDriverId); setAutoPairedDriver(false); setSmartSuggestHint(''); setPreviousId(''); setStaleConflict(false) }}
           />
           {selectedDriverInfo && (
             <div className="dispatch-selected-meta-pills" aria-label="สถานะคนขับที่เลือก">

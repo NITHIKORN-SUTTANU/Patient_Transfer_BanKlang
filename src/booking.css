@@ -207,3 +207,5 @@
 .booking-list-chip { min-height: 44px; padding: 6px 12px; border: 1.5px solid #b5d6cb; border-radius: 999px; background: white; color: var(--color-primary); font: inherit; font-size: 13.5px; font-weight: 600; }
 .booking-list-chip[aria-pressed=true] { background: var(--color-primary); border-color: var(--color-primary); color: white; font-weight: 700; }
 .booking-list-filter-reset { min-height: 44px; padding: 4px 8px; border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: 14px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.booking-copy-summary-btn.booking-button.booking-secondary { min-height: 48px; border: 1.5px dashed #5b9a8a; background: #f2fbf8; color: var(--color-primary); font-size: 16px; font-weight: 700; }
+.booking-copy-summary-btn.booking-button.booking-secondary:hover:not(:disabled) { background: var(--color-accent); border-style: solid; border-color: var(--color-primary); }

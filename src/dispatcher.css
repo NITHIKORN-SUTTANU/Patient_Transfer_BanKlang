@@ -264,7 +264,17 @@
 .dispatch-tracking-scopes button:focus-visible { outline: 3px solid #276ac0; outline-offset: 3px; }
 .dispatch-tracking-secondary { display: block; margin-top: 5px; font-weight: 400; font-size: 14px; color: #52685f; }
 .dispatch-assignment-form > fieldset { display: flex; flex-direction: column; gap: 18px; border: 0; border-top: 1px solid #e1ede9; padding: 22px 0 0; margin: 26px 0 0; min-inline-size: 0; }
-.dispatch-assignment-form > fieldset > h2 { margin: 0 0 4px; }
+.dispatch-assignment-form > fieldset > h2, .dispatch-section-head h2 { margin: 0; }
+.dispatch-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px; }
+.dispatch-smart-suggest-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 7px 14px; border: 1.5px solid #0f5c52; border-radius: 10px; background: #ebf7f3; color: var(--color-primary); font: inherit; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.dispatch-smart-suggest-btn:hover:not(:disabled) { background: var(--color-accent-strong); border-color: var(--color-primary); }
+.dispatch-smart-suggest-btn:disabled { opacity: 0.48; border-color: #cbd5e1; background: #f1f5f9; color: #64748b; cursor: not-allowed; }
+.dispatch-smart-suggest-hint { margin: -8px 0 0; padding: 9px 13px; border: 1px solid #a7f3d0; border-left: 4px solid #059669; border-radius: 10px; background: #ecfdf5; color: #065f46; font-size: 13.5px; font-weight: 600; line-height: 1.45; }
+.dispatch-copy-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.dispatch-copy-inline > p { margin: 0; font-weight: 700; color: var(--color-primary); font-variant-numeric: tabular-nums; }
+.dispatch-copy-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; min-width: 58px; padding: 3px 10px; border: 1px solid #b5d6cb; border-radius: 999px; background: #f5fbf9; color: var(--color-primary); font: inherit; font-size: 12.5px; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.dispatch-copy-btn:hover { background: var(--color-accent); border-color: var(--color-primary); }
+.dispatch-copy-btn.is-copied { background: #ecfdf5; border-color: #059669; color: #065f46; }
 .dispatch-assignment-form > .dispatch-assignment-readiness-heading { margin-top: 28px; padding-top: 22px; border-top: 1px solid #e1ede9; }
 @media (max-width: 640px) { .dispatch-resource-row { grid-template-columns: minmax(0, 1fr); gap: 14px; } }
 .dispatch-detail-section fieldset, .dispatch-panel > form > fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
