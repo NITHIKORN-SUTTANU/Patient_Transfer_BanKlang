@@ -44,6 +44,23 @@
 .driver-reason-chips { display:flex; flex-wrap:wrap; gap:8px; }
 .driver-reason-chip { min-height:44px; padding:8px 14px; border:1.5px solid #9dc2b5; border-radius:999px; background:white; color:var(--color-primary); font:inherit; font-size:14px; font-weight:600; }
 .driver-reason-chip.active, .driver-reason-chip:hover:not(:disabled) { background:var(--color-accent); border-color:var(--color-primary); font-weight:700; }
+.driver-history-controls { display:flex; flex-direction:column; gap:12px; margin-bottom:18px; padding:16px; border:1px solid var(--color-hairline); border-radius:16px; background:white; box-shadow:var(--shadow-card); }
+.driver-history-search-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,220px); gap:10px; }
+.driver-history-search-row input, .driver-history-search-row select { width:100%; min-width:0; min-height:46px; padding:10px 14px; border:1px solid #b5d6cb; border-radius:12px; background:#f6fbf9; color:var(--color-ink); font:inherit; font-size:15px; }
+.driver-history-chips { display:flex; flex-wrap:wrap; gap:8px; }
+.driver-history-chip { min-height:44px; padding:6px 14px; border:1.5px solid #b5d6cb; border-radius:999px; background:white; color:var(--color-primary); font:inherit; font-size:14px; font-weight:600; }
+.driver-history-chip[aria-pressed=true] { background:var(--color-primary); border-color:var(--color-primary); color:white; font-weight:700; }
+.driver-history-summary { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin:0 2px 14px; font-size:14.5px; font-weight:600; color:var(--color-muted); font-variant-numeric:tabular-nums; }
+.driver-history-card-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.driver-history-card-head h3 { margin:0; font-variant-numeric:tabular-nums; }
+.driver-history-status-pill { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:13px; font-weight:700; background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; }
+.driver-history-status-pill.aborted, .driver-history-status-pill.cancelled { background:#fff1f2; color:var(--color-error); border-color:#fecdd3; }
+.driver-history-route { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:6px 0 4px; padding:7px 10px; border-radius:10px; background:#f4faf7; border:1px solid #dcece6; font-size:14px; font-weight:600; color:var(--color-ink); }
+.driver-history-route svg { width:16px; height:16px; flex-shrink:0; color:var(--color-primary); }
+.driver-history-date { margin:4px 0 0; font-size:14px; color:var(--color-muted); }
+.driver-history-load-more { margin-top:18px; display:flex; justify-content:center; }
+.driver-history-load-more .driver-button { max-width:420px; width:100%; }
+@media (max-width: 600px) { .driver-history-search-row { grid-template-columns:minmax(0,1fr); } }
 .driver-history-page .driver-card-top > span:last-child { color:var(--color-primary); font-weight:600; }
 .driver-history-page .driver-trip.is-cancelled .driver-card-top > span:last-child { color:var(--color-error); }
 .driver-history-page .driver-trip.is-cancelled :is(.driver-trip-state, .driver-badge) { background:#fff0f1; color:var(--color-error); }

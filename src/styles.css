@@ -27,6 +27,7 @@
 }
 @layer base {
   :root { --demo-bar-height: 0px; }
+  html, body { overscroll-behavior: none; overflow-x: hidden; max-width: 100%; }
   body { margin: 0; min-width: 320px; font-family: var(--font-sans); line-height: 1.6; color: var(--color-ink); background: var(--color-canvas); -webkit-font-smoothing: antialiased; }
   button { cursor: pointer; }
   button, a { -webkit-tap-highlight-color: transparent; }
@@ -42,16 +43,16 @@
   .actor-number { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--color-accent-strong); color: var(--color-primary); font-weight: 600; font-size: 20px; }
   .skip-link { position: absolute; left: 16px; top: -100px; z-index: 10; background: white; padding: 16px; border-radius: 14px; }
   .skip-link:focus { top: 16px; }
-  .demo-role-bar { position: sticky; top: 0; z-index: 60; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 6px 12px; background: #0f3e38; color: white; border-bottom: 1px solid #1b5e54; box-shadow: 0 2px 10px #09262229; }
+  .demo-role-bar { position: sticky; top: 0; z-index: 60; width: 100%; max-width: 100%; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 6px 12px; background: #0f3e38; color: white; border-bottom: 1px solid #1b5e54; box-shadow: 0 2px 10px #09262229; }
   .demo-role-bar.is-collapsed { padding: 4px 12px; }
-  .demo-role-bar-head { display: inline-flex; align-items: center; gap: 8px; }
+  .demo-role-bar-head { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; }
   .demo-role-pill-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; background: #fef3c7; color: #78350f; font-size: 12px; font-weight: 700; white-space: nowrap; }
   .demo-role-toggle { min-height: 32px; min-width: 44px; padding: 4px 10px; border-radius: 8px; border: 1px solid #6ea79d; background: #14534b; color: #f0fdf9; font: inherit; font-size: 12px; font-weight: 600; transition: background-color .15s ease-out, border-color .15s ease-out, transform .15s ease-out; }
   .demo-role-toggle:hover { background: #1a675d; border-color: #a6d6ce; }
   .demo-role-toggle:active { transform: scale(.98); }
   .demo-role-toggle:focus-visible, .demo-role-btn:focus-visible { outline: 3px solid #ffdc8d; outline-offset: 2px; }
-  .demo-role-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .demo-role-btn { min-height: 34px; min-width: 44px; padding: 5px 11px; border-radius: 9px; border: 1px solid #3f7e74; background: #14534b; color: white; font: inherit; font-size: 13px; font-weight: 600; transition: background-color .15s ease-out, border-color .15s ease-out, color .15s ease-out, transform .15s ease-out; }
+  .demo-role-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+  .demo-role-btn { min-height: 34px; min-width: 44px; max-width: 100%; padding: 5px 11px; border-radius: 9px; border: 1px solid #3f7e74; background: #14534b; color: white; font: inherit; font-size: 13px; font-weight: 600; transition: background-color .15s ease-out, border-color .15s ease-out, color .15s ease-out, transform .15s ease-out; }
   .demo-role-btn:hover:not(.active) { background: #1b695f; border-color: #77b7ad; }
   .demo-role-btn:active { transform: scale(.98); }
   .demo-role-btn.active { background: white; color: #0f3e38; border-color: white; font-weight: 700; }

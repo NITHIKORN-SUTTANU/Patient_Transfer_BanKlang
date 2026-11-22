@@ -37,6 +37,9 @@ export const statusLabels: Record<string, string> = {
 }
 export function dispatcherError(error: unknown) {
   if (error instanceof ApiError) {
+    if (error.status === 409 && (error.code === 'RESOURCE_TIME_CONFLICT' || error.code === 'RESOURCE_INCIDENT_HOLD') && error.message) {
+      return error.message
+    }
     if (error.status === 409) return 'ข้อมูลหรือความพร้อมเปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดและตรวจสอบอีกครั้ง'
     if (error.status === 503) return 'บริการคำนวณเส้นทางยังไม่พร้อม ไม่มีการยืนยันตารางใหม่'
     if (error.status === 401) return 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง'

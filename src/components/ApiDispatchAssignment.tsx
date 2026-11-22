@@ -6,6 +6,7 @@ import {
   normalizeMobilityCode,
   parseVehicleCapabilities,
 } from '../domain/capacity'
+import { ApiError } from '../services/api'
 import type { ApiBooking, Catalog, Schedule } from '../services/dispatcherApi'
 import { dispatcherError } from '../services/dispatcherApi'
 import { staffRequest } from '../services/staffSession'
@@ -36,6 +37,8 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
   const pending = useRef(false)
   const resourceSectionRef = useRef<HTMLFieldSetElement>(null)
   const [error, setError] = useState('')
+  const [staleConflict, setStaleConflict] = useState(false)
+  const [autoPairedDriver, setAutoPairedDriver] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const [reason, setReason] = useState('')
   const [arrangementNote, setArrangementNote] = useState('')
@@ -80,8 +83,11 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     existingSchedule: proposal,
   })
   const [todayBkk] = useState(() => bangkokDateFromMs(Date.now()))
+  const bookingDay = bangkokDateFromMs(Date.parse(booking.appointmentAt))
   const resolveHospitalName = (row: ApiBooking) =>
     row.hospitalName ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.name ?? 'โรงพยาบาล'
+  const resolveHospitalLocationKey = (row: ApiBooking) =>
+    row.hospitalLocationId ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.location_id ?? row.hospitalId ?? resolveHospitalName(row)
 
   const vehicleInsights = new Map(
     catalog.vehicles.map(v => {
@@ -94,16 +100,23 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
       const heldOrIncident = Boolean(incidentPeer || (v.held && !(modifying && v.id === booking.vehicleId)))
       let overlapWin: ReturnType<typeof computeBackwardBlockedWindow> = null
       let overlapHospital = ''
+      let overlapRef = ''
       if (currentWin) {
+        const waitMs = Math.max(0, Number(waiting) || 0) * 60_000
+        const newStart = currentWin.startMs - waitMs
+        const newEnd = currentWin.endMs
         for (const peer of previousJobs) {
           if (peer.id === booking.id || peer.vehicleId !== v.id || ['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(peer.status)) continue
+          const peerSchedule = peer.schedule ?? peer.proposedSchedule
+          if (!peerSchedule && !['ASSIGNED', 'PICKING_UP', 'PICKED_UP', 'IN_TRANSIT', 'SCHEDULED'].includes(peer.status)) continue
           const peerWin = computeBackwardBlockedWindow(peer.appointmentAt, {
             hospitalName: resolveHospitalName(peer),
-            existingSchedule: peer.schedule,
+            existingSchedule: peerSchedule,
           })
-          if (peerWin && currentWin.startMs < peerWin.endMs && peerWin.startMs < currentWin.endMs) {
+          if (peerWin && newStart < peerWin.endMs && newEnd > peerWin.startMs) {
             overlapWin = peerWin
             overlapHospital = shortHospital(resolveHospitalName(peer))
+            overlapRef = peer.reference
             break
           }
         }
@@ -117,6 +130,9 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
         .filter(row => row.vehicleId === v.id && row.status === 'COMPLETED' && bangkokDateFromMs(Date.parse(row.schedule?.arrivalAt || row.appointmentAt)) === todayBkk)
         .sort((a, b) => Date.parse(b.schedule?.readyAt || b.appointmentAt) - Date.parse(a.schedule?.readyAt || a.appointmentAt))[0]
 
+      const locationTrip = activeTrip ?? completedToday
+      const locationKey = locationTrip ? resolveHospitalLocationKey(locationTrip) : 'depot'
+      const isDepot = !locationTrip
       const locationShort = activeTrip
         ? shortHospital(resolveHospitalName(activeTrip))
         : completedToday
@@ -126,7 +142,7 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
         ? `ปลายทาง ${shortHospital(resolveHospitalName(activeTrip))}`
         : completedToday
         ? `จบงานล่าสุดที่ ${shortHospital(resolveHospitalName(completedToday))}`
-        : 'ศูนย์รถ ทต.บ้านกลาง'
+        : 'ประจำที่ศูนย์รถ ทต.บ้านกลาง'
 
       let statusText = `ว่าง (${locationShort})`
       let badgeText = 'ว่างพร้อมจัด'
@@ -145,7 +161,7 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
         tone = 'busy'
       }
       const meta = `${statusText} · ${capText}`
-      return [v.id, { meta, statusText, badgeText, locationFull, supportsCase, tone, capText }] as const
+      return [v.id, { meta, statusText, badgeText, locationKey, locationShort, locationFull, isDepot, supportsCase, tone, capText, heldOrIncident, incidentRef: incidentPeer?.reference ?? '', overlapWin, overlapRef }] as const
     }),
   )
 
@@ -156,19 +172,49 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
       )
       const heldOrIncident = Boolean(incidentPeer || (d.held && !(modifying && d.id === booking.driverId)))
       let overlapWin: ReturnType<typeof computeBackwardBlockedWindow> = null
+      let overlapRef = ''
       if (currentWin) {
+        const waitMs = Math.max(0, Number(waiting) || 0) * 60_000
+        const newStart = currentWin.startMs - waitMs
+        const newEnd = currentWin.endMs
         for (const peer of previousJobs) {
           if (peer.id === booking.id || peer.driverId !== d.id || ['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(peer.status)) continue
+          const peerSchedule = peer.schedule ?? peer.proposedSchedule
+          if (!peerSchedule && !['ASSIGNED', 'PICKING_UP', 'PICKED_UP', 'IN_TRANSIT', 'SCHEDULED'].includes(peer.status)) continue
           const peerWin = computeBackwardBlockedWindow(peer.appointmentAt, {
             hospitalName: resolveHospitalName(peer),
-            existingSchedule: peer.schedule,
+            existingSchedule: peerSchedule,
           })
-          if (peerWin && currentWin.startMs < peerWin.endMs && peerWin.startMs < currentWin.endMs) {
+          if (peerWin && newStart < peerWin.endMs && newEnd > peerWin.startMs) {
             overlapWin = peerWin
+            overlapRef = peer.reference
             break
           }
         }
       }
+      const activeTrip = previousJobs.find(
+        row => row.id !== booking.id && row.driverId === d.id && ['PICKING_UP', 'PICKED_UP', 'IN_TRANSIT'].includes(row.status),
+      ) ?? previousJobs.find(
+        row => row.id !== booking.id && row.driverId === d.id && row.status === 'ASSIGNED' && bangkokDateFromMs(Date.parse(row.schedule?.pickupAt || row.appointmentAt)) === todayBkk,
+      )
+      const completedToday = previousJobs
+        .filter(row => row.driverId === d.id && row.status === 'COMPLETED' && bangkokDateFromMs(Date.parse(row.schedule?.arrivalAt || row.appointmentAt)) === todayBkk)
+        .sort((a, b) => Date.parse(b.schedule?.readyAt || b.appointmentAt) - Date.parse(a.schedule?.readyAt || a.appointmentAt))[0]
+
+      const locationTrip = activeTrip ?? completedToday
+      const locationKey = locationTrip ? resolveHospitalLocationKey(locationTrip) : 'depot'
+      const isDepot = !locationTrip
+      const locationShort = activeTrip
+        ? shortHospital(resolveHospitalName(activeTrip))
+        : completedToday
+        ? shortHospital(resolveHospitalName(completedToday))
+        : 'ศูนย์รถฯ'
+      const locationFull = activeTrip
+        ? `ปลายทาง ${shortHospital(resolveHospitalName(activeTrip))}`
+        : completedToday
+        ? `จบงานล่าสุดที่ ${shortHospital(resolveHospitalName(completedToday))}`
+        : 'ประจำที่ศูนย์รถ ทต.บ้านกลาง'
+
       let statusText = 'ว่าง'
       let tone: 'free' | 'busy' | 'warn' | 'incident' | 'inactive' = 'free'
       if (!d.active) {
@@ -184,12 +230,73 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
         statusText = 'นอกกะเวลา'
         tone = 'warn'
       }
-      return [d.id, { statusText, tone }] as const
+      const meta = `${statusText} (${locationShort})`
+      return [d.id, { statusText, meta, tone, locationKey, locationShort, locationFull, isDepot, heldOrIncident, incidentRef: incidentPeer?.reference ?? '', overlapWin, overlapRef }] as const
     }),
   )
 
   const selectedVehicleInfo = vehicleId ? vehicleInsights.get(vehicleId) : undefined
   const selectedDriverInfo = driverId ? driverInsights.get(driverId) : undefined
+  const selectedDriver = catalog.drivers.find(d => d.id === driverId)
+
+  const locationMismatchWarning = (() => {
+    if (!selectedVehicleInfo || !selectedDriverInfo) return ''
+    if (selectedVehicleInfo.locationKey === selectedDriverInfo.locationKey) return ''
+    const vLoc = selectedVehicleInfo.isDepot ? 'ศูนย์รถ ทต.บ้านกลาง' : selectedVehicleInfo.locationShort
+    const dLoc = selectedDriverInfo.isDepot ? 'ศูนย์รถ ทต.บ้านกลาง' : selectedDriverInfo.locationShort
+    return `ตำแหน่งล่าสุดไม่ตรงกัน: รถอยู่ที่ ${vLoc} แต่คนขับอยู่ที่ ${dLoc}`
+  })()
+
+  const blockingConflict = (() => {
+    if (selectedVehicle && !selectedVehicle.active) {
+      return `ไม่สามารถมอบหมายได้: ${selectedVehicle.name} ถูกปิดใช้งานอยู่`
+    }
+    if (selectedDriver && !selectedDriver.active) {
+      return `ไม่สามารถมอบหมายได้: ${selectedDriver.name} ถูกปิดใช้งานอยู่`
+    }
+    if (selectedVehicleInfo?.heldOrIncident) {
+      return `ไม่สามารถมอบหมายได้: รถรับส่งมีเหตุขัดข้องหรือรอยืนยันความพร้อม${selectedVehicleInfo.incidentRef ? ` (งาน ${selectedVehicleInfo.incidentRef})` : ''} กรุณาเลือกรถคันอื่น`
+    }
+    if (selectedDriverInfo?.heldOrIncident) {
+      return `ไม่สามารถมอบหมายได้: คนขับมีเหตุขัดข้องหรือรอยืนยันความพร้อม${selectedDriverInfo.incidentRef ? ` (งาน ${selectedDriverInfo.incidentRef})` : ''} กรุณาเลือกคนขับคนอื่น`
+    }
+    const vOverlap = selectedVehicleInfo?.overlapWin
+    const dOverlap = selectedDriverInfo?.overlapWin
+    if (vOverlap && dOverlap && selectedVehicleInfo?.overlapRef === selectedDriverInfo?.overlapRef) {
+      return `ไม่สามารถมอบหมายได้: รถรับส่งและคนขับติดงานซ้อนกับ ${selectedVehicleInfo.overlapRef} (${vOverlap.windowLabel})`
+    }
+    if (vOverlap) {
+      return `ไม่สามารถมอบหมายได้: รถรับส่งติดงานซ้อนกับ ${selectedVehicleInfo.overlapRef} (${vOverlap.windowLabel})`
+    }
+    if (dOverlap) {
+      return `ไม่สามารถมอบหมายได้: คนขับติดงานซ้อนกับ ${selectedDriverInfo.overlapRef} (${dOverlap.windowLabel})`
+    }
+    return ''
+  })()
+
+  function findSmartPairedDriver(nextVehicleId: string): string {
+    const vInfo = vehicleInsights.get(nextVehicleId)
+    if (!vInfo) return ''
+    const sameDayTrips = previousJobs
+      .filter(
+        row =>
+          row.id !== booking.id &&
+          row.vehicleId === nextVehicleId &&
+          row.driverId &&
+          !['CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status) &&
+          bangkokDateFromMs(Date.parse(row.schedule?.pickupAt || row.appointmentAt)) === bookingDay,
+      )
+      .sort((a, b) => Date.parse(b.schedule?.readyAt || b.appointmentAt) - Date.parse(a.schedule?.readyAt || a.appointmentAt))
+    for (const trip of sameDayTrips) {
+      const candidateId = trip.driverId!
+      const candidate = catalog.drivers.find(d => d.id === candidateId)
+      const dInfo = driverInsights.get(candidateId)
+      if (candidate?.active && dInfo && !dInfo.heldOrIncident && !dInfo.overlapWin && dInfo.locationKey === vInfo.locationKey) {
+        return candidateId
+      }
+    }
+    return ''
+  }
 
   const countPriorJobsAtLocation = (locId: string) =>
     previousJobs.filter(
@@ -202,27 +309,6 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
         !['CANCELLED', 'REJECTED', 'ABORTED'].includes(row.status),
     ).length
 
-  const resourceOverlapWarning = (() => {
-    if (!vehicleId && !driverId) return ''
-    if (!currentWin) return ''
-    for (const peer of previousJobs) {
-      if (peer.id === booking.id || ['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(peer.status)) continue
-      const sameVehicle = Boolean(vehicleId && peer.vehicleId === vehicleId)
-      const sameDriver = Boolean(driverId && peer.driverId === driverId)
-      if (!sameVehicle && !sameDriver) continue
-      const peerWin = computeBackwardBlockedWindow(peer.appointmentAt, {
-        hospitalName: resolveHospitalName(peer),
-        existingSchedule: peer.schedule,
-      })
-      if (!peerWin) continue
-      if (currentWin.startMs < peerWin.endMs && peerWin.startMs < currentWin.endMs) {
-        const who = sameVehicle && sameDriver ? 'รถรับส่งและคนขับ' : sameVehicle ? 'รถรับส่ง' : 'คนขับ'
-        return `พบช่วงเวลาทับซ้อนของ${who}กับงาน ${peer.reference} (${peerWin.windowLabel}) — ระบบจะตรวจสอบซ้ำเมื่อยืนยัน`
-      }
-    }
-    return ''
-  })()
-
   const disabledReason = (() => {
     if (busy) return null
     if (booking.scheduleReviewRequired && !booking.startedAt && !acceptConfiguration) {
@@ -230,6 +316,9 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     }
     if (!vehicleId || !driverId) {
       return 'กรุณาเลือกรถรับส่งและคนขับให้ครบก่อนตรวจสอบและยืนยันตาราง'
+    }
+    if (blockingConflict) {
+      return blockingConflict
     }
     if (incompatibleMobility) {
       return `รถที่เลือกไม่รองรับประเภทการเดินทางของผู้ป่วย (${MOBILITY_LABELS[requiredMobility]}) กรุณาเลือกรถคันอื่น`
@@ -258,22 +347,28 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     return null
   })()
 
+  function focusResourceSection() {
+    requestAnimationFrame(() => {
+      const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      resourceSectionRef.current?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' })
+      resourceSectionRef.current?.querySelector<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled)')?.focus({ preventScroll: true })
+    })
+  }
+
   function toggleEditProposal() {
     const next = !editingProposal
     setEditingProposal(next)
     setError('')
+    setStaleConflict(false)
     setConfirm(false)
     setVehicleId(baselineProposal?.vehicleId ?? '')
     setDriverId(baselineProposal?.driverId ?? '')
+    setAutoPairedDriver(false)
     setOriginId(baselineProposal?.originLocationId ?? depotOriginId)
     setPreviousId(baselineProposal?.previousBookingId ?? '')
     setWaiting(String(baselineProposal?.pickupWaitingMinutes ?? 0))
     if (next) {
-      requestAnimationFrame(() => {
-        const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-        resourceSectionRef.current?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' })
-        resourceSectionRef.current?.querySelector<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled)')?.focus({ preventScroll: true })
-      })
+      focusResourceSection()
     }
   }
 
@@ -291,7 +386,7 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
   }
   async function submit() {
     if (pending.current) return
-    pending.current = true; setBusy(true); onBusyChange?.(true); setError('')
+    pending.current = true; setBusy(true); onBusyChange?.(true); setError(''); setStaleConflict(false)
     try {
       await staffRequest(`/bookings/${encodeURIComponent(booking.id)}/${modifying ? 'modification' : assigning ? 'assignment' : 'schedule'}`, {
         eventId: crypto.randomUUID(), expectedRevision: booking.revision, vehicleId, driverId,
@@ -304,10 +399,15 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
       setConfirm(false)
       if (modifying || assigning) onAssigned()
       else reload()
-    } catch (error) { setError(dispatcherError(error)) }
+    } catch (error) {
+      setError(dispatcherError(error))
+      if (error instanceof ApiError && error.status === 409) {
+        setStaleConflict(true)
+      }
+    }
     finally { pending.current = false; setBusy(false); onBusyChange?.(false) }
   }
-  const confirmDisabled = busy || incompatibleMobility || (booking.scheduleReviewRequired && !booking.startedAt && !acceptConfiguration) || (acceptConfiguration && (!currentPreview || !reason.trim())) || !vehicleId || !driverId || !originId || (!needsHandoff && origin?.kind === 'hospital' && !previousId) || !Number.isFinite(Number(waiting)) || Number(waiting) < 0 || (scheduled && !proposal) || (modifying && !reason.trim()) || (needsHandoff && (!confirmedAt || !arrangementNote.trim()))
+  const confirmDisabled = busy || Boolean(blockingConflict) || incompatibleMobility || (booking.scheduleReviewRequired && !booking.startedAt && !acceptConfiguration) || (acceptConfiguration && (!currentPreview || !reason.trim())) || !vehicleId || !driverId || !originId || (!needsHandoff && origin?.kind === 'hospital' && !previousId) || !Number.isFinite(Number(waiting)) || Number(waiting) < 0 || (scheduled && !proposal) || (modifying && !reason.trim()) || (needsHandoff && (!confirmedAt || !arrangementNote.trim()))
   return <section className="dispatch-panel dispatch-assignment-form">
     <div className="dispatch-selected-job">
       <div className="dispatch-selected-job-top">
@@ -363,7 +463,18 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
                 tone: info?.tone,
               }
             })}
-            onChange={nextVehicleId => { setVehicleId(nextVehicleId); setPreviousId('') }}
+            onChange={nextVehicleId => {
+              setVehicleId(nextVehicleId)
+              setPreviousId('')
+              setStaleConflict(false)
+              if (!driverId) {
+                const paired = findSmartPairedDriver(nextVehicleId)
+                if (paired) {
+                  setDriverId(paired)
+                  setAutoPairedDriver(true)
+                }
+              }
+            }}
           />
           {selectedVehicleInfo && (
             <div className="dispatch-selected-meta-pills" aria-label="สถานะรถที่เลือก">
@@ -387,19 +498,26 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
                 label: d.name,
                 active: d.active && (!d.held || (modifying && d.id === booking.driverId)),
                 selectable: true,
-                meta: info?.statusText,
+                meta: info?.meta ?? info?.statusText,
                 tone: info?.tone,
               }
             })}
-            onChange={nextDriverId => { setDriverId(nextDriverId); setPreviousId('') }}
+            onChange={nextDriverId => { setDriverId(nextDriverId); setAutoPairedDriver(false); setPreviousId(''); setStaleConflict(false) }}
           />
           {selectedDriverInfo && (
             <div className="dispatch-selected-meta-pills" aria-label="สถานะคนขับที่เลือก">
               <span className={`dispatch-readiness-pill tone-${selectedDriverInfo.tone}`}>คนขับ: {selectedDriverInfo.statusText}</span>
+              <span className="dispatch-readiness-pill neutral">{selectedDriverInfo.locationFull}</span>
+              {autoPairedDriver && <span className="dispatch-readiness-pill match">จับคู่คนขับล่าสุดอัตโนมัติ</span>}
             </div>
           )}
         </div>
       </div>
+      {locationMismatchWarning && (
+        <div role="status" className="dispatch-location-mismatch">
+          <strong>⚠ {locationMismatchWarning}</strong>
+        </div>
+      )}
       <label className="booking-field">ต้นทาง
         <select
           id="dispatch-origin-select"
@@ -454,11 +572,46 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
     {acceptConfiguration && <><DispatchButton secondary disabled={busy || !vehicleId || !driverId || !originId} aria-busy={busy} onClick={() => void preview()}>{busy ? 'กำลังคำนวณ…' : 'คำนวณข้อเสนอใหม่โดยยังไม่เปลี่ยนตาราง'}</DispatchButton>{currentPreview && <p className="dispatch-small">ข้อเสนอคำนวณจากเส้นทางที่ตรวจสอบแล้ว กรุณาตรวจเวลาข้างต้นก่อนยืนยัน</p>}</>}
     <h2 className="dispatch-assignment-readiness-heading">4. ตรวจสอบความพร้อม</h2><p className="dispatch-small">ตรวจรถและคนขับใหม่เมื่อยืนยัน รวมกะทำงาน วันปิด และงานก่อนหน้า</p>
     {outsideServiceHours && <p role="status" className="dispatch-advisory-banner">หมายเหตุ: ช่วงเวลาเดินรถที่คำนวณอาจอยู่นอกเวลาทำการ (06:00–16:00 น.) ระบบจะตรวจสอบสิทธิ์และเวลาทำการอีกครั้งเมื่อยืนยัน</p>}
-    {resourceOverlapWarning && <p role="status" className="dispatch-advisory-banner">{resourceOverlapWarning}</p>}
-    {disabledReason && <div role="status" className="dispatch-disabled-reason"><strong>ยังไม่สามารถกดยืนยันได้:</strong> <span>{disabledReason}</span></div>}
+    {blockingConflict && <div role="status" className="dispatch-blocking-conflict"><strong>⛔ พบข้อขัดแย้งของทรัพยากร:</strong> <span>{blockingConflict}</span></div>}
+    {disabledReason && !blockingConflict && <div role="status" className="dispatch-disabled-reason"><strong>ยังไม่สามารถกดยืนยันได้:</strong> <span>{disabledReason}</span></div>}
     {error && !confirm && <p role="alert" className="dispatch-alert">{error}</p>}
-    <DispatchButton disabled={confirmDisabled} aria-busy={busy} onClick={() => { setError(''); setConfirm(true) }}>{modifying ? 'ตรวจสอบและยืนยันการเปลี่ยนแปลง' : assigning ? 'ตรวจสอบซ้ำและยืนยันการมอบหมาย' : 'ตรวจสอบและยืนยันตาราง'}</DispatchButton>
-    {confirm && <DispatchModal title={modifying ? 'ยืนยันการเปลี่ยนแปลง' : assigning ? 'ยืนยันการมอบหมาย' : 'ยืนยันตารางเวลา'} onClose={() => { if (!pending.current) setConfirm(false) }}><p>{modifying ? 'ระบบจะตรวจความพร้อมใหม่และเก็บประวัติตารางเดิม หากไม่ผ่านจะคงตารางเดิมไว้' : assigning ? 'ระบบจะตรวจความพร้อมล่าสุดและจองรถกับคนขับเมื่อสำเร็จ' : 'ระบบจะคำนวณเส้นทางและยืนยันตาราง โดยยังไม่จองรถหรือคนขับ'}</p>{error && <p role="alert" className="dispatch-alert">{error}</p>}<DispatchButton disabled={busy} aria-busy={busy} onClick={() => void submit()}>{busy ? 'กำลังตรวจสอบ…' : modifying ? 'ยืนยันการเปลี่ยนแปลง' : assigning ? 'ยืนยันการมอบหมาย' : 'ยืนยันตาราง'}</DispatchButton><DispatchButton secondary disabled={busy} onClick={() => setConfirm(false)}>กลับไปตรวจสอบ</DispatchButton></DispatchModal>}
+    <DispatchButton disabled={confirmDisabled} aria-busy={busy} onClick={() => { setError(''); setStaleConflict(false); setConfirm(true) }}>{modifying ? 'ตรวจสอบและยืนยันการเปลี่ยนแปลง' : assigning ? 'ตรวจสอบซ้ำและยืนยันการมอบหมาย' : 'ตรวจสอบและยืนยันตาราง'}</DispatchButton>
+    {confirm && (
+      <DispatchModal title={modifying ? 'ยืนยันการเปลี่ยนแปลง' : assigning ? 'ยืนยันการมอบหมาย' : 'ยืนยันตารางเวลา'} onClose={() => { if (!pending.current) { setConfirm(false); setStaleConflict(false) } }}>
+        <p>{modifying ? 'ระบบจะตรวจความพร้อมใหม่และเก็บประวัติตารางเดิม หากไม่ผ่านจะคงตารางเดิมไว้' : assigning ? 'ระบบจะตรวจความพร้อมล่าสุดและจองรถกับคนขับเมื่อสำเร็จ' : 'ระบบจะคำนวณเส้นทางและยืนยันตาราง โดยยังไม่จองรถหรือคนขับ'}</p>
+        {error && <p role="alert" className="dispatch-alert">{error}</p>}
+        <div className="dispatch-modal-recovery-actions">
+          <DispatchButton disabled={busy || (!modifying && staleConflict)} aria-busy={busy} onClick={() => void submit()}>
+            {busy ? 'กำลังตรวจสอบ…' : modifying ? 'ยืนยันการเปลี่ยนแปลง' : assigning ? 'ยืนยันการมอบหมาย' : 'ยืนยันตาราง'}
+          </DispatchButton>
+          {staleConflict && (
+            <DispatchButton
+              secondary
+              disabled={busy}
+              onClick={() => {
+                setConfirm(false)
+                setError('')
+                setStaleConflict(false)
+                reload()
+              }}
+            >
+              <span aria-hidden="true">↻</span> โหลดข้อมูลล่าสุด
+            </DispatchButton>
+          )}
+          <DispatchButton
+            secondary
+            disabled={busy}
+            onClick={() => {
+              setConfirm(false)
+              setStaleConflict(false)
+              focusResourceSection()
+            }}
+          >
+            กลับไปตรวจสอบ
+          </DispatchButton>
+        </div>
+      </DispatchModal>
+    )}
   </section>
 }
 

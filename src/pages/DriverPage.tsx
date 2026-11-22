@@ -24,6 +24,13 @@ const DRIVER_MOBILITY_META = {
 }
 const FAILED_PICKUP_REASONS = ['ติดต่อผู้ป่วยไม่ได้', 'ผู้ป่วยไม่พร้อมเดินทาง', 'ญาติรับส่งเองแล้ว', 'ไม่พบผู้ป่วย ณ จุดรับ']
 const INCIDENT_REASONS = ['รถขัดข้องระหว่างทาง', 'เส้นทางปิด / อุบัติเหตุจราจร', 'ผู้ป่วยมีอาการฉุกเฉิน (แจ้ง 1669)']
+const HISTORY_PAGE_SIZE = 12
+
+function formatThaiYearMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  if (!y || !m) return ym
+  return new Intl.DateTimeFormat('th-TH', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 15)))
+}
 
 import '../booking.css'
 import '../driver.css'
@@ -47,6 +54,12 @@ export function DriverPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [historySearch, setHistorySearch] = useState('')
+  const [historyStatus, setHistoryStatus] = useState<'' | 'COMPLETED' | 'ABORTED' | 'CANCELLED'>('')
+  const [historyMonth, setHistoryMonth] = useState('')
+  const historyFilterKey = `${historySearch}|${historyStatus}|${historyMonth}`
+  const [historyLimitState, setHistoryLimitState] = useState({ key: historyFilterKey, count: HISTORY_PAGE_SIZE })
+  const historyVisibleCount = historyLimitState.key === historyFilterKey ? historyLimitState.count : HISTORY_PAGE_SIZE
   const [now, setNow] = useState(Date.now)
   const main = useRef<HTMLElement>(null)
 
@@ -133,7 +146,105 @@ export function DriverPage() {
         {!driver ? <section className="driver-card driver-empty"><h2>บัญชีนี้ยังไม่พร้อมใช้งาน</h2><p>กรุณาติดต่อเจ้าหน้าที่จัดรถเพื่อตรวจสอบบัญชี</p></section> : <>
           {(screen === 'history' ? remote.more.history : remote.more.jobs) && <div className="driver-notice"><p>แสดงเฉพาะรายการที่โหลดแล้ว</p><BookingButton secondary disabled={remote.loading || busy} onClick={() => remote.loadMore(screen === 'history')}>{screen === 'history' ? 'โหลดประวัติเพิ่มเติม' : 'โหลดงานเพิ่มเติม'}</BookingButton></div>}
           {screen === 'dashboard' && <><div className="driver-grid"><section><div className="driver-section-heading"><h2>งานที่ต้องทำ</h2>{todays.some(b => !!b.startedAt) && <span className="driver-badge active">● กำลังดำเนินการ</span>}</div>{todays.length ? tripCard(todays.find(b => !!b.startedAt) || todays[0], true) : <div className="driver-card driver-empty"><ServiceSymbol kind="check" /><h3>ไม่มีงานรับส่งวันนี้</h3><p>งานใหม่จะแสดงที่นี่เมื่อเจ้าหน้าที่มอบหมาย</p></div>}</section>{todays.length > 1 && <section><h2>งานถัดไป</h2>{todays.filter(b => b.id !== (todays.find(b => !!b.startedAt) || todays[0]).id).map(b => tripCard(b))}</section>}</div>{future.length > 0 && <section><h2>งานที่ได้รับมอบหมายวันอื่น</h2><div className="driver-grid">{future.map(b => <div key={b.id}><h3>{dispatchDate(b.schedule!.pickupAt)}</h3>{tripCard(b)}</div>)}</div></section>}</>}
-          {screen === 'history' && (history.length ? <div className="driver-grid">{history.map(b => <section key={b.id}><h2>{dispatchDate(b.appointmentAt)}</h2><article className="driver-card"><h3>{b.reference}</h3><p>{statusLabels[b.status] || b.status}</p><p>วันนัดหมาย {dispatchDate(b.appointmentAt)}</p></article></section>)}</div> : <section className="driver-card driver-empty"><h2>ยังไม่มีประวัติงาน</h2><p>แสดงเฉพาะรหัส สถานะ และวันที่ของงานที่จบแล้ว</p></section>)}
+          {screen === 'history' && (() => {
+            const availableMonths = Array.from(new Set(history.map(b => bangkokDate(Date.parse(b.appointmentAt)).slice(0, 7)).filter(Boolean))).sort().reverse()
+            const needle = historySearch.trim().toLocaleLowerCase()
+            const filteredHistory = history.filter(b => {
+              const ym = bangkokDate(Date.parse(b.appointmentAt)).slice(0, 7)
+              const matchesSearch = !needle || `${b.reference} ${b.id}`.toLocaleLowerCase().includes(needle)
+              const matchesStatus = !historyStatus
+                || (historyStatus === 'ABORTED' ? b.status === 'ABORTED' || b.status === 'CANCELLED' : b.status === historyStatus)
+              const matchesMonth = !historyMonth || ym === historyMonth
+              return matchesSearch && matchesStatus && matchesMonth
+            })
+            const visibleHistory = filteredHistory.slice(0, historyVisibleCount)
+            const remaining = Math.max(0, filteredHistory.length - visibleHistory.length)
+            if (!history.length) {
+              return <section className="driver-card driver-empty"><h2>ยังไม่มีประวัติงาน</h2><p>แสดงเฉพาะรหัส สถานะ และวันที่ของงานที่จบแล้ว</p></section>
+            }
+            return <>
+              <div className="driver-history-controls" role="region" aria-label="ตัวกรองประวัติงาน">
+                <div className="driver-history-search-row">
+                  <input
+                    type="search"
+                    aria-label="ค้นหารหัสงาน"
+                    placeholder="ค้นหารหัสงาน เช่น BK-SEED-1001"
+                    value={historySearch}
+                    onChange={e => setHistorySearch(e.target.value)}
+                  />
+                  <select aria-label="เลือกเดือน" value={historyMonth} onChange={e => setHistoryMonth(e.target.value)}>
+                    <option value="">ทุกเดือน</option>
+                    {availableMonths.map(ym => <option key={ym} value={ym}>{formatThaiYearMonth(ym)}</option>)}
+                  </select>
+                </div>
+                <div className="driver-history-chips" role="group" aria-label="กรองสถานะประวัติงาน">
+                  {([['', 'ทั้งหมด'], ['COMPLETED', 'ส่งถึงโรงพยาบาลแล้ว'], ['ABORTED', 'ยุติการเดินทาง']] as const).map(([code, label]) => (
+                    <button
+                      key={code || 'all'}
+                      type="button"
+                      className="driver-history-chip"
+                      aria-pressed={historyStatus === code}
+                      onClick={() => setHistoryStatus(code)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="driver-history-summary" role="status">
+                <span>แสดง {visibleHistory.length} จาก {filteredHistory.length} งาน</span>
+                {(historySearch || historyStatus || historyMonth) && (
+                  <button
+                    type="button"
+                    className="driver-next-preview-link"
+                    onClick={() => { setHistorySearch(''); setHistoryStatus(''); setHistoryMonth('') }}
+                  >
+                    ล้างตัวกรอง
+                  </button>
+                )}
+              </p>
+              {visibleHistory.length ? (
+                <>
+                  <div className="driver-grid">
+                    {visibleHistory.map(b => (
+                      <section key={b.id}>
+                        <h2>{dispatchDate(b.appointmentAt)}</h2>
+                        <article className="driver-card">
+                          <div className="driver-history-card-head">
+                            <h3>{b.reference}</h3>
+                            <span className={`driver-history-status-pill ${b.status.toLowerCase()}`}>{statusLabels[b.status] || b.status}</span>
+                          </div>
+                          {(b.villageName || b.hospitalName) && (
+                            <p className="driver-history-route">
+                              <ServiceSymbol kind="route" />
+                              <span>{b.villageName || 'เขตตำบลบ้านกลาง'} → {b.hospitalName || 'โรงพยาบาลปลายทาง'}</span>
+                            </p>
+                          )}
+                          <p className="driver-history-date">วันนัดหมาย {dispatchDate(b.appointmentAt)}</p>
+                        </article>
+                      </section>
+                    ))}
+                  </div>
+                  {remaining > 0 && (
+                    <div className="driver-history-load-more">
+                      <BookingButton
+                        secondary
+                        className="driver-button"
+                        onClick={() => setHistoryLimitState({ key: historyFilterKey, count: historyVisibleCount + HISTORY_PAGE_SIZE })}
+                      >
+                        แสดงเพิ่มเติม (เหลืออีก {remaining} งาน)
+                      </BookingButton>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <section className="driver-card driver-empty">
+                  <h2>ไม่พบประวัติงานตามตัวกรอง</h2>
+                  <p>ลองเปลี่ยนรหัสงาน สถานะ หรือเดือนที่เลือก</p>
+                </section>
+              )}
+            </>
+          })()}
           {['failed-pickup', 'incident'].includes(screen) && <section className="driver-failed">
             <h2>{screen === 'incident' ? 'รายงานเหตุขัดข้อง' : 'รับผู้ป่วยไม่ได้'}</h2>
             <div className="driver-caution-box" role="note">

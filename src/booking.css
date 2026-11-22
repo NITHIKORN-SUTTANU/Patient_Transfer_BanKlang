@@ -193,3 +193,9 @@
 .booking-picker-jump-btn { min-height: 44px; padding: 8px 14px; border: 1.5px solid var(--color-primary); border-radius: 10px; background: white; color: var(--color-primary); font: inherit; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; width: fit-content; max-width: 100%; }
 .booking-picker-jump-btn:hover { background: var(--color-accent); }
 .booking-picker-jump-btn.secondary { border-color: #cbd5e1; color: #334155; font-weight: 600; }
+.booking-modal-content { overscroll-behavior: contain; }
+.booking-shell, .booking-workspace, .booking-screen { max-width: 100%; box-sizing: border-box; }
+.booking-village-auto-hint { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--color-primary); margin-top: 2px; }
+.booking-address-suggestion-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.booking-address-suggestion { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; max-width: 100%; padding: 7px 14px; border: 1.5px dashed #5b9a8a; border-radius: 999px; background: #f2fbf8; color: var(--color-primary); font: inherit; font-size: 14px; font-weight: 700; text-align: left; overflow-wrap: anywhere; }
+.booking-address-suggestion:hover { background: var(--color-accent); border-color: var(--color-primary); }

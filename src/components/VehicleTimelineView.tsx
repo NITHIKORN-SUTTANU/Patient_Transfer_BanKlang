@@ -62,10 +62,9 @@ export function VehicleTimelineView({
     return Array.from(dates).sort()
   }, [bookings])
 
-  const [manualDate, setManualDate] = useState('')
-  const selectedDate =
-    manualDate ||
-    (activeDates.includes(defaultDate) ? defaultDate : activeDates[0] || defaultDate)
+  const [dateSelection, setDateSelection] = useState<'ALL' | string>('ALL')
+  const isAllDays = dateSelection === 'ALL'
+  const selectedDate = isAllDays ? '' : dateSelection || (activeDates.includes(defaultDate) ? defaultDate : activeDates[0] || defaultDate)
 
   const fleetList = useMemo(() => {
     if (catalogVehicles && catalogVehicles.length > 0) {
@@ -104,7 +103,7 @@ export function VehicleTimelineView({
     for (const b of bookings) {
       if (!isNonTerminalBooking(b) || !b.vehicleId) continue
       const day = bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt))
-      if (day !== selectedDate) continue
+      if (!isAllDays && day !== selectedDate) continue
       const win = computeBackwardBlockedWindow(b.appointmentAt, {
         hospitalName: b.details?.hospital,
         existingSchedule: b.schedule,
@@ -124,7 +123,13 @@ export function VehicleTimelineView({
       bucket.sort((a, b) => a.window.startMs - b.window.startMs)
     }
     return map
-  }, [bookings, fleetList, selectedDate])
+  }, [bookings, fleetList, isAllDays, selectedDate])
+
+  const totalTimelineTrips = useMemo(() => {
+    let total = 0
+    for (const bucket of tripsByVehicle.values()) total += bucket.length
+    return total
+  }, [tripsByVehicle])
 
   if (fleetList.length === 0) return null
 
@@ -134,34 +139,44 @@ export function VehicleTimelineView({
         <div>
           <h2 id="vehicle-timeline-title">ไทม์ไลน์รถและช่วงเวลาว่าง (Backward-Scheduled Timeline)</h2>
           <p className="dispatch-muted">
-            แสดงช่วงเวลาที่รถและคนขับถูกใช้งานจริงรวมเวลาตีรถและพักเตรียมรถ 30 นาที ({dispatchDate(selectedDate)})
+            แสดงช่วงเวลาที่รถและคนขับถูกใช้งานจริงรวมเวลาตีรถและพักเตรียมรถ 30 นาที ({isAllDays ? `ภาพรวมทุกวัน · ${totalTimelineTrips} งาน` : `${dispatchDate(selectedDate)} · ${totalTimelineTrips} งาน`})
           </p>
         </div>
         <div className="dispatch-timeline-controls">
           <label className="dispatch-date-filter">
-            <span>วันที่ดูไทม์ไลน์</span>
+            <span>{isAllDays ? 'ทุกวัน · เลือกวัน' : 'วันที่ดูไทม์ไลน์'}</span>
             <input
               type="date"
               aria-label="วันที่ดูไทม์ไลน์รถ"
               value={selectedDate}
-              onChange={e => setManualDate(e.target.value)}
+              onChange={e => setDateSelection(e.target.value ? e.target.value : 'ALL')}
             />
           </label>
-          {activeDates.length > 0 && (
-            <div className="dispatch-timeline-date-chips" role="group" aria-label="วันที่มีงาน">
-              {activeDates.slice(0, 4).map(d => (
+          <div className="dispatch-timeline-date-chips" role="group" aria-label="วันที่มีงาน">
+            <button
+              type="button"
+              className={`dispatch-date-chip dispatch-date-chip-all ${isAllDays ? 'active' : ''}`}
+              aria-pressed={isAllDays}
+              onClick={() => setDateSelection('ALL')}
+            >
+              ทุกวัน
+            </button>
+            {activeDates.slice(0, 4).map(d => {
+              const active = !isAllDays && selectedDate === d
+              return (
                 <button
                   key={d}
                   type="button"
-                  className={`dispatch-date-chip ${selectedDate === d ? 'active' : ''}`}
-                  aria-pressed={selectedDate === d}
-                  onClick={() => setManualDate(d)}
+                  className={`dispatch-date-chip ${active ? 'active' : ''}`}
+                  aria-pressed={active}
+                  title={active ? 'แตะอีกครั้งเพื่อกลับไปดูทุกวัน' : `ดูไทม์ไลน์วันที่ ${dispatchDate(d)}`}
+                  onClick={() => setDateSelection(active ? 'ALL' : d)}
                 >
                   {d.slice(8, 10)}/{d.slice(5, 7)}
                 </button>
-              ))}
-            </div>
-          )}
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -182,7 +197,9 @@ export function VehicleTimelineView({
             : v.held
             ? 'รอยืนยันความพร้อม'
             : dayTrips.length > 0
-            ? `ว่างอีกครั้ง ${latestFree} น.`
+            ? isAllDays
+              ? `มี ${dayTrips.length} งานตามแผน`
+              : `ว่างอีกครั้ง ${latestFree} น.`
             : 'พร้อมใช้งานทันที'
 
           return (
@@ -206,7 +223,7 @@ export function VehicleTimelineView({
 
               <div className="dispatch-timeline-track-area">
                 <div className="dispatch-timeline-track" aria-hidden="true">
-                  {dayTrips.map(({ booking, window }) => {
+                  {dayTrips.slice(0, 12).map(({ booking, window }) => {
                     const leftPct = pctFromClock(window.departureClock)
                     const rightPct = pctFromClock(window.freeClock)
                     const widthPct = Math.max(8, rightPct - leftPct)
@@ -225,26 +242,30 @@ export function VehicleTimelineView({
 
                 {dayTrips.length > 0 ? (
                   <ul className="dispatch-timeline-trip-list">
-                    {dayTrips.map(({ booking, window, mobility }) => (
-                      <li key={booking.id} className="dispatch-timeline-trip-pill">
-                        <span>
-                          <strong>{booking.id}</strong> · {booking.details?.hospital || 'ไม่ระบุโรงพยาบาล'} ·{' '}
-                          <span className="dispatch-window-tag">{window.windowLabel}</span> · รับ {window.pickupClock} น.
-                        </span>
-                        <span className={`dispatch-mobility-badge ${mobility}`}>
-                          <ServiceSymbol kind={mobility === 'stretcher' ? 'bed' : mobility === 'wheelchair' ? 'wheel' : 'walk'} />
-                          {capabilityBadgeText(mobility)}
-                        </span>
-                        {onSelectBooking && (
-                          <button type="button" className="dispatch-mini-link" onClick={() => onSelectBooking(booking)}>
-                            รายละเอียด →
-                          </button>
-                        )}
-                      </li>
-                    ))}
+                    {dayTrips.slice(0, 10).map(({ booking, window, mobility }) => {
+                      const tripDay = bangkokDateFromMs(Date.parse(booking.schedule?.pickupAt || booking.appointmentAt))
+                      return (
+                        <li key={booking.id} className="dispatch-timeline-trip-pill">
+                          <span>
+                            {isAllDays && <span className="dispatch-timeline-day-tag">{tripDay.slice(8, 10)}/{tripDay.slice(5, 7)}</span>}{' '}
+                            <strong>{booking.id}</strong> · {booking.details?.hospital || 'ไม่ระบุโรงพยาบาล'} ·{' '}
+                            <span className="dispatch-window-tag">{window.windowLabel}</span> · รับ {window.pickupClock} น.
+                          </span>
+                          <span className={`dispatch-mobility-badge ${mobility}`}>
+                            <ServiceSymbol kind={mobility === 'stretcher' ? 'bed' : mobility === 'wheelchair' ? 'wheel' : 'walk'} />
+                            {capabilityBadgeText(mobility)}
+                          </span>
+                          {onSelectBooking && (
+                            <button type="button" className="dispatch-mini-link" onClick={() => onSelectBooking(booking)}>
+                              รายละเอียด →
+                            </button>
+                          )}
+                        </li>
+                      )
+                    })}
                   </ul>
                 ) : (
-                  <p className="dispatch-timeline-empty-note">ไม่มีงานมอบหมายในวันที่เลือก — รถว่างตลอดวัน (06:00–18:00 น.)</p>
+                  <p className="dispatch-timeline-empty-note">{isAllDays ? 'ไม่มีงานมอบหมายค้างอยู่ — รถว่างพร้อมใช้งาน' : 'ไม่มีงานมอบหมายในวันที่เลือก — รถว่างตลอดวัน (06:00–18:00 น.)'}</p>
                 )}
               </div>
             </article>

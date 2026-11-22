@@ -801,8 +801,41 @@ export async function handleDemoApiRequest<T>(
 
       const win = computeBackwardBlockedWindow(booking.appointmentAt, { hospitalName: booking.hospitalName })!
       const waitMin = Number(body?.pickupWaitingMinutes ?? 0) || 0
+      const newStartMs = win.startMs - waitMin * 60_000
+      const newEndMs = win.endMs
+
+      for (const peer of allBookings) {
+        if (peer.id === booking.id || ['CANCELLED', 'REJECTED', 'ABORTED', 'COMPLETED'].includes(peer.status)) continue
+        const sameVehicle = peer.vehicleId === vehicleId
+        const sameDriver = peer.driverId === driverId
+        if (!sameVehicle && !sameDriver) continue
+        if (peer.incidentOpen) {
+          throw new ApiError(
+            409,
+            undefined,
+            'RESOURCE_INCIDENT_HOLD',
+            `ไม่สามารถมอบหมายได้: ${sameVehicle ? 'รถรับส่ง' : 'คนขับ'}มีเหตุขัดข้องค้างอยู่ในงาน ${peer.reference}`,
+          )
+        }
+        const peerSchedule = peer.schedule ?? peer.proposedSchedule
+        if (!peerSchedule && !['ASSIGNED', 'PICKING_UP', 'PICKED_UP', 'IN_TRANSIT', 'SCHEDULED'].includes(peer.status)) continue
+        const peerWin = computeBackwardBlockedWindow(peer.appointmentAt, {
+          hospitalName: peer.hospitalName,
+          existingSchedule: peerSchedule,
+        })
+        if (peerWin && newStartMs < peerWin.endMs && newEndMs > peerWin.startMs) {
+          const who = sameVehicle && sameDriver ? 'รถรับส่งและคนขับ' : sameVehicle ? 'รถรับส่ง' : 'คนขับ'
+          throw new ApiError(
+            409,
+            undefined,
+            'RESOURCE_TIME_CONFLICT',
+            `ช่วงเวลาทับซ้อนกับงาน ${peer.reference} (${peerWin.windowLabel}) — ${who}ไม่ว่างในช่วงเวลานี้`,
+          )
+        }
+      }
+
       const scheduleObj = {
-        departureAt: win.departureAt,
+        departureAt: new Date(newStartMs).toISOString(),
         pickupAt: win.pickupAt,
         arrivalAt: win.arrivalAt,
         readyAt: win.freeAt,
@@ -957,15 +990,20 @@ export async function handleDemoApiRequest<T>(
     const allBookings = mergeWithOverlayBookings(db)
     const history = allBookings
       .filter(b => b.driverId === driverId && ['COMPLETED', 'CANCELLED', 'ABORTED'].includes(b.status))
-      .map(b => ({
-        id: b.id,
-        reference: b.reference,
-        status: b.status,
-        appointmentAt: b.appointmentAt,
-        hospitalName: b.hospitalName || SUPPORTED_HOSPITALS[0].name,
-        schedule: b.schedule,
-        completedAt: b.schedule?.arrivalAt || b.appointmentAt,
-      }))
+      .sort((a, b) => Date.parse(b.appointmentAt) - Date.parse(a.appointmentAt))
+      .map(b => {
+        const village = db.villages.find(v => v.id === b.villageId)
+        return {
+          id: b.id,
+          reference: b.reference,
+          status: b.status,
+          appointmentAt: b.appointmentAt,
+          villageName: village ? `หมู่ ${village.number} ${village.name}` : undefined,
+          hospitalName: b.hospitalName || SUPPORTED_HOSPITALS[0].name,
+          schedule: b.schedule,
+          completedAt: b.schedule?.arrivalAt || b.appointmentAt,
+        }
+      })
     return { bookings: history, nextCursor: null, hasMore: false } as T
   }
 

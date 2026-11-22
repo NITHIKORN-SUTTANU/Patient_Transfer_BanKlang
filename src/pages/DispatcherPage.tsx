@@ -66,6 +66,8 @@ export function DispatcherPage() {
   const setMonitoringPage = (nextPage: number) => setMonitoringPageState({ key: monitoringFilterKey, page: nextPage })
   const [dashboardView, setDashboardView] = useState<'board' | 'map'>('board')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [fleetMatrixExpanded, setFleetMatrixExpanded] = useState(false)
+  const fleetRailRef = useRef<HTMLDivElement>(null)
   const [now, setNow] = useState(() => Date.now())
   const main = useRef<HTMLElement>(null)
   const reloadRef = useRef(remote.silentReload)
@@ -327,6 +329,10 @@ export function DispatcherPage() {
 
   if (!Object.hasOwn(headers, screen)) return <Navigate to="/dispatcher" replace />
   const [title, subtitle] = headers[screen as keyof typeof headers]
+  const heldVehiclesCount = remote.data?.catalog.vehicles.filter(v => v.held).length ?? 0
+  const heldDriversCount = remote.data?.catalog.drivers.filter(d => d.held).length ?? 0
+  const sidebarIncidentCount = Math.max(activeIncidentBookings.length, heldVehiclesCount, heldDriversCount)
+
   const renderSidebarIndicator = (path: string) => {
     if (path === '/dispatcher') {
       return queue.length > 0 ? <i className="nav-badge-count amber" aria-hidden="true">{queue.length > 99 ? '99+' : queue.length}</i> : null
@@ -335,8 +341,8 @@ export function DispatcherPage() {
       return waiting.length > 0 ? <i className="nav-badge-count amber" aria-hidden="true">{waiting.length > 99 ? '99+' : waiting.length}</i> : null
     }
     if (path.endsWith('tracking')) {
-      if (activeIncidentBookings.length > 0) {
-        return <i className="nav-badge-count danger" aria-hidden="true">{activeIncidentBookings.length > 99 ? '99+' : activeIncidentBookings.length}</i>
+      if (sidebarIncidentCount > 0) {
+        return <i className="nav-badge-count danger" aria-hidden="true">{sidebarIncidentCount > 99 ? '99+' : sidebarIncidentCount}</i>
       }
       if (inProgressTripsCount > 0) {
         return <i className="nav-status-dot active" aria-hidden="true" />
@@ -408,10 +414,50 @@ export function DispatcherPage() {
           {screen === 'dashboard' && activeFleetLiveStatus.length > 0 && (
             <div className="dispatch-fleet-matrix-wrap">
               <div className="dispatch-fleet-matrix-head">
-                <strong>สถานะรถปฏิบัติงานจริง (Live Fleet Matrix)</strong>
-                <span className="dispatch-fleet-source-note">ตำแหน่งอ้างอิงจากสถานะงานล่าสุด</span>
+                <div className="dispatch-fleet-matrix-title-group">
+                  <strong>สถานะรถปฏิบัติงานจริง (Live Fleet Matrix)</strong>
+                  <span className="dispatch-fleet-source-note">ตำแหน่งอ้างอิงจากสถานะงานล่าสุด</span>
+                </div>
+                <div className="dispatch-fleet-matrix-controls">
+                  {!fleetMatrixExpanded && activeFleetLiveStatus.length > 5 && (
+                    <div className="dispatch-fleet-scroll-btns" role="group" aria-label="เลื่อนดูสถานะรถรับส่ง">
+                      <button
+                        type="button"
+                        className="dispatch-fleet-scroll-btn"
+                        aria-label="เลื่อนดูรถก่อนหน้า"
+                        title="เลื่อนดูรถก่อนหน้า"
+                        onClick={() => fleetRailRef.current?.scrollBy({ left: -320, behavior: 'smooth' })}
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        className="dispatch-fleet-scroll-btn"
+                        aria-label="เลื่อนดูรถถัดไป"
+                        title="เลื่อนดูรถถัดไป"
+                        onClick={() => fleetRailRef.current?.scrollBy({ left: 320, behavior: 'smooth' })}
+                      >
+                        ›
+                      </button>
+                    </div>
+                  )}
+                  {activeFleetLiveStatus.length > 4 && (
+                    <button
+                      type="button"
+                      className="dispatch-fleet-toggle-btn"
+                      aria-expanded={fleetMatrixExpanded}
+                      onClick={() => setFleetMatrixExpanded(prev => !prev)}
+                    >
+                      {fleetMatrixExpanded ? 'ย่อเป็นแถวเดียว' : `ดูทั้งหมด (${activeFleetLiveStatus.length})`}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="dispatch-fleet-live-strip dispatch-fleet-matrix" aria-label="สถานะความพร้อมรถแต่ละคัน">
+              <div
+                ref={fleetRailRef}
+                className={`dispatch-fleet-live-strip dispatch-fleet-matrix ${fleetMatrixExpanded ? 'is-expanded' : ''}`}
+                aria-label="สถานะความพร้อมรถแต่ละคัน"
+              >
                 {activeFleetLiveStatus.map(unit => (
                   <article key={unit.id} className={`dispatch-fleet-unit is-${unit.statusKind}`}>
                     <div className="dispatch-fleet-unit-head">

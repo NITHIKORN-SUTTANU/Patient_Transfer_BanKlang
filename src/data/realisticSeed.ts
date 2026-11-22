@@ -188,6 +188,11 @@ export function generateRealisticSeedBookings(count = 320, anchorDate = '2026-11
     for (let i = 0; i < w; i++) villagePool.push(idx)
   })
 
+  const bookedByVehicle = new Map<string, [number, number][]>()
+  const bookedByDriver = new Map<string, [number, number][]>()
+  const hasOverlap = (list: [number, number][] | undefined, startMs: number, endMs: number) =>
+    Boolean(list?.some(([s, e]) => startMs < e && endMs > s))
+
   for (let i = 0; i < count; i++) {
     const idNum = 1001 + i
     const id = `BK-SEED-${idNum}`
@@ -245,7 +250,6 @@ export function generateRealisticSeedBookings(count = 320, anchorDate = '2026-11
       else apiStatus = activeStates[Math.floor(rand() * activeStates.length)]
     }
 
-    const status = mapApiToDemoStatus(apiStatus)
     const firstName = FIRST_NAMES[Math.floor(rand() * FIRST_NAMES.length)]
     const lastName = LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]
     const patientName = `${firstName} ${lastName}`
@@ -264,16 +268,48 @@ export function generateRealisticSeedBookings(count = 320, anchorDate = '2026-11
       if (assistance === 'รถเข็น') return v.support?.includes('รถเข็น')
       return true
     })
-    const vehicleIdx = i % compatibleVehicles.length
-    const assignedVehicle = compatibleVehicles[vehicleIdx]
-    const assignedDriver = SEED_DRIVERS[SEED_VEHICLES.findIndex(v => v.id === assignedVehicle.id) % SEED_DRIVERS.length]
 
-    const hasAssignedSchedule = ['SCHEDULED', 'ASSIGNED', 'PICKING_UP', 'PICKED_UP', 'IN_TRANSIT', 'COMPLETED'].includes(apiStatus)
+    const wantsSchedule = ['SCHEDULED', 'ASSIGNED', 'PICKING_UP', 'PICKED_UP', 'IN_TRANSIT', 'COMPLETED'].includes(apiStatus)
       || (apiStatus === 'CANCELLED' && rand() < 0.5)
-
-    const schedule = hasAssignedSchedule
+    const candidateSchedule = wantsSchedule
       ? buildDemoScheduleFromAppt(appointmentAt, centerMinutes, hospitalMinutes)
       : undefined
+    const blockStartMs = candidateSchedule ? Date.parse(candidateSchedule.departureAt) : 0
+    const blockEndMs = candidateSchedule ? appointmentMs + (hospitalMinutes + 30) * 60000 : 0
+
+    let assignedVehicle = compatibleVehicles[i % compatibleVehicles.length]
+    let assignedDriver = SEED_DRIVERS[SEED_VEHICLES.findIndex(v => v.id === assignedVehicle.id) % SEED_DRIVERS.length]
+    let schedule = candidateSchedule
+
+    if (wantsSchedule && candidateSchedule && apiStatus !== 'CANCELLED') {
+      let chosenVehicle: Vehicle | null = null
+      let chosenDriver: Driver | null = null
+      for (let offset = 0; offset < compatibleVehicles.length; offset++) {
+        const candV = compatibleVehicles[(i + offset) % compatibleVehicles.length]
+        const candD = SEED_DRIVERS[SEED_VEHICLES.findIndex(v => v.id === candV.id) % SEED_DRIVERS.length]
+        if (!hasOverlap(bookedByVehicle.get(candV.id), blockStartMs, blockEndMs) && !hasOverlap(bookedByDriver.get(candD.id), blockStartMs, blockEndMs)) {
+          chosenVehicle = candV
+          chosenDriver = candD
+          break
+        }
+      }
+      if (chosenVehicle && chosenDriver) {
+        assignedVehicle = chosenVehicle
+        assignedDriver = chosenDriver
+        const vList = bookedByVehicle.get(chosenVehicle.id) ?? []
+        vList.push([blockStartMs, blockEndMs])
+        bookedByVehicle.set(chosenVehicle.id, vList)
+        const dList = bookedByDriver.get(chosenDriver.id) ?? []
+        dList.push([blockStartMs, blockEndMs])
+        bookedByDriver.set(chosenDriver.id, dList)
+      } else {
+        // Avoid impossible double-booked seed rows: leave overflow requests as APPROVED (unassigned).
+        apiStatus = 'APPROVED'
+        schedule = undefined
+      }
+    }
+
+    const status = mapApiToDemoStatus(apiStatus)
 
     const driverProgress = schedule
       ? mapApiToDriverProgress(

@@ -15,9 +15,56 @@ import { citizenRequest, citizenError, enterDemoCitizen, initializeCitizen, refr
 import { ApiError } from '../services/api'
 import { applyProfile, canCitizenCancel, citizenBooking, intakeFields, profileFields, type CitizenBooking, type CitizenCatalog, type PatientProfile } from '../services/citizenApi'
 import { checkCitizenSlotCapacity, type CapacityBookingInput, type CapacityCheckResult } from '../domain/capacity'
+import { BAN_KLANG_VILLAGES } from '../data/realisticSeed'
 import { seedOverlay, useSeedOverlay } from '../services/seedOverlay'
 import { isInteractiveDemoActive } from '../services/interactiveDemo'
 import '../booking.css'
+
+const GENERIC_PIN_LABELS = new Set(['จุดรับที่เลือกบนแผนที่', 'จุดรับที่ระบุพิกัดเอง'])
+
+function approxDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLat = (lat2 - lat1) * 111.32
+  const dLon = (lon2 - lon1) * 111.32 * Math.cos(((lat1 + lat2) / 2) * (Math.PI / 180))
+  return Math.hypot(dLat, dLon)
+}
+
+function findNearestServiceVillage(
+  latitude: number,
+  longitude: number,
+  catalogVillages: CitizenCatalog['villages'],
+): { id: string; number: number; name: string } | null {
+  let best: { id: string; number: number; name: string } | null = null
+  let bestDist = Infinity
+  for (const cv of catalogVillages) {
+    const seedMatch = BAN_KLANG_VILLAGES.find(v => v.id === cv.id || v.number === cv.number)
+    if (!seedMatch) continue
+    const dist = approxDistanceKm(latitude, longitude, seedMatch.latitude, seedMatch.longitude)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = { id: cv.id, number: cv.number, name: cv.name }
+    }
+  }
+  return best && bestDist <= 8 ? best : null
+}
+
+async function reverseGeocodeNearby(latitude: number, longitude: number, signal: AbortSignal): Promise<string> {
+  try {
+    const base = import.meta.env.VITE_MAP_REVERSE_URL || 'https://photon.komoot.io/reverse'
+    const url = new URL(base)
+    url.search = new URLSearchParams({ lat: String(latitude), lon: String(longitude), lang: 'default' }).toString()
+    const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(2500)]) })
+    if (!response.ok) return ''
+    const data = await response.json() as { features?: { properties?: Record<string, string> }[] }
+    const props = data.features?.[0]?.properties
+    if (!props) return ''
+    const parts = [props.name, props.street, props.district || props.locality]
+      .map(value => (value ?? '').trim().replace(/^[\s,·]+|[\s,·]+$/g, ''))
+      .filter(Boolean)
+    return [...new Set(parts)].slice(0, 2).join(' ')
+  } catch {
+    return ''
+  }
+}
 
 const initialBookingForm = (): BookingDetails => ({ ...emptyBooking(), pickupAddress: '', villageId: '', landmark: '' })
 export function BookingPage() {
@@ -57,6 +104,10 @@ export function BookingPage() {
   const [locatingPath, setLocatingPath] = useState<string | null>(null)
   const locating = locatingPath === pathname
   const locationRequest = useRef(0)
+  const manualVillageRef = useRef(false)
+  const [villageAutoMatched, setVillageAutoMatched] = useState(false)
+  const [addressSuggestion, setAddressSuggestion] = useState('')
+  const [pinLookup, setPinLookup] = useState<{ lat: number; lng: number; explicitLabel?: string; seq: number } | null>(null)
   const gpsActive = draft.pickup?.accuracy !== undefined
   const [sending, setSending] = useState(false)
   const [intakeUncertain, setIntakeUncertain] = useState(false)
@@ -182,6 +233,45 @@ export function BookingPage() {
   useEffect(() => {
     return () => { locationRequest.current += 1 }
   }, [pathname])
+  useEffect(() => {
+    if (!pinLookup || screen !== 'assistance') return
+    const controller = new AbortController()
+    const { lat, lng, explicitLabel } = pinLookup
+    const timer = window.setTimeout(async () => {
+      const nearest = findNearestServiceVillage(lat, lng, catalog.villages)
+      if (nearest && !manualVillageRef.current) {
+        setDraft(current => (current.villageId === nearest.id ? current : { ...current, villageId: nearest.id }))
+        setErrors(current => { const next = { ...current }; delete next.villageId; return next })
+        setVillageAutoMatched(true)
+      }
+      const cleanExplicit = explicitLabel && !GENERIC_PIN_LABELS.has(explicitLabel.trim()) && !explicitLabel.startsWith('ตำแหน่งปัจจุบัน')
+        ? explicitLabel.trim()
+        : ''
+      const geocoded = cleanExplicit || await reverseGeocodeNearby(lat, lng, controller.signal)
+      if (controller.signal.aborted) return
+      const fallbackLabel = nearest ? `ใกล้หมู่ ${nearest.number} ${nearest.name} ต.บ้านกลาง` : ''
+      const candidate = (geocoded || fallbackLabel).trim()
+      if (!candidate) return
+      setDraft(current => {
+        const existing = (current.pickupAddress ?? '').trim()
+        if (!existing) {
+          setAddressSuggestion('')
+          setErrors(errs => { const next = { ...errs }; delete next.pickupAddress; return next })
+          return { ...current, pickupAddress: candidate }
+        }
+        if (!existing.includes(candidate)) {
+          setAddressSuggestion(candidate)
+        } else {
+          setAddressSuggestion('')
+        }
+        return current
+      })
+    }, 400)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [pinLookup, screen, catalog.villages])
   function useCurrentLocation() {
     if (locating) return
     setLocationError('')
@@ -197,6 +287,7 @@ export function BookingPage() {
       const { latitude, longitude, accuracy } = position.coords
       const pickup = { x: 50, y: 50, latitude, longitude, accuracy, label: `ตำแหน่งปัจจุบัน (${latitude.toFixed(6)}, ${longitude.toFixed(6)})` }
       update('pickup', pickup)
+      setPinLookup(prev => ({ lat: latitude, lng: longitude, seq: (prev?.seq ?? 0) + 1 }))
     }, error => {
       if (request !== locationRequest.current) { setLocatingPath(null); return }
       setLocatingPath(null)
@@ -296,6 +387,10 @@ export function BookingPage() {
     submittedId.current = null
     pendingIntake.current = null
     setIntakeUncertain(false)
+    manualVillageRef.current = false
+    setVillageAutoMatched(false)
+    setAddressSuggestion('')
+    setPinLookup(null)
     setDraft(next)
     setLocationError('')
     setConsent(null); setSaveProfile(false); setSaveError('')
@@ -306,6 +401,7 @@ export function BookingPage() {
     locationRequest.current += 1
     setLocatingPath(null)
     update('pickup', { x: 50, y: 50, latitude, longitude, label: label || 'จุดรับที่เลือกบนแผนที่' })
+    setPinLookup(prev => ({ lat: latitude, lng: longitude, explicitLabel: label, seq: (prev?.seq ?? 0) + 1 }))
   }
   async function decideConsent(accepted: boolean) {
     if (consentBusy || !session.config || !session.user) return
@@ -356,7 +452,7 @@ export function BookingPage() {
     <BookingHeader title="ข้อมูลผู้ป่วย" subtitle="ใครต้องการใช้รถรับส่ง?" /><BookingProgress step={1} />
     <div className="booking-tabs" role="group" aria-label="ประเภทการจอง">{(['self', 'other'] as const).map(value => <button type="button" aria-pressed={draft.bookingFor === value} key={value} onClick={() => { update('bookingFor', value); setErrors({}) }}>{value === 'self' ? 'จองให้ตนเอง' : 'จองให้ผู้อื่น'}</button>)}</div>
     <p className="booking-small">ช่องที่มี * จำเป็นต้องกรอก</p><form className="booking-form" noValidate onSubmit={e => { e.preventDefault(); patientNext() }}>
-      {profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select><span className="booking-small">โปรดตรวจสอบข้อมูลก่อนส่งคำขอ</span></label>}
+      {profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; manualVillageRef.current = Boolean(profile?.villageId); setVillageAutoMatched(false); setAddressSuggestion(''); setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select><span className="booking-small">โปรดตรวจสอบข้อมูลก่อนส่งคำขอ</span></label>}
       {field('patientName', 'ชื่อผู้ป่วย', 'ชื่อและนามสกุล')}
       {draft.bookingFor === 'other' && field('contactName', 'ชื่อผู้ดูแล / ผู้ติดต่อ', 'ชื่อผู้จองหรือผู้ดูแล')}
       {field('phone', draft.bookingFor === 'self' ? 'เบอร์โทรศัพท์ของคุณ' : 'เบอร์โทรศัพท์ผู้ติดต่อ', '08X-XXX-XXXX')}
@@ -377,10 +473,25 @@ export function BookingPage() {
     <div className="booking-location-controls"><PickupMap value={draft.pickup} onChange={selectPoint} />
     <BookingButton secondary className="booking-location-button" aria-pressed={gpsActive} disabled={locating} onClick={useCurrentLocation}>{locating ? 'กำลังค้นหาตำแหน่ง…' : gpsActive ? '✓ ใช้ตำแหน่งปัจจุบันแล้ว' : 'ใช้ตำแหน่งปัจจุบัน'}</BookingButton>
     </div>
-    <label className="booking-field">หมู่บ้านในเขตบริการ *<select value={draft.villageId ?? ''} aria-invalid={!!errors.villageId} onChange={event => update('villageId', event.target.value)}><option value="">เลือกหมู่บ้าน</option>{catalog.villages.map(village => <option key={village.id} value={village.id}>หมู่ {village.number} · {village.name}</option>)}</select>{error('villageId')}</label>
+    <label className="booking-field">หมู่บ้านในเขตบริการ *<select value={draft.villageId ?? ''} aria-invalid={!!errors.villageId} onChange={event => { manualVillageRef.current = Boolean(event.target.value); setVillageAutoMatched(false); update('villageId', event.target.value) }}><option value="">เลือกหมู่บ้าน</option>{catalog.villages.map(village => <option key={village.id} value={village.id}>หมู่ {village.number} · {village.name}</option>)}</select>{villageAutoMatched && draft.villageId && <span className="booking-village-auto-hint">อิงจากตำแหน่งบนแผนที่</span>}{error('villageId')}</label>
     <label className="booking-field">ที่อยู่จุดรับ *<input value={draft.pickupAddress ?? ''} autoComplete="street-address" placeholder="บ้านเลขที่ หมู่บ้าน ตำบล" aria-invalid={!!errors.pickupAddress} onChange={event => update('pickupAddress', event.target.value)} />{error('pickupAddress')}</label>
+    {addressSuggestion && !(draft.pickupAddress ?? '').includes(addressSuggestion) && (
+      <div className="booking-address-suggestion-wrap">
+        <button
+          type="button"
+          className="booking-address-suggestion"
+          onClick={() => {
+            const current = (draft.pickupAddress ?? '').trim()
+            update('pickupAddress', current ? `${current} ${addressSuggestion}` : addressSuggestion)
+            setAddressSuggestion('')
+          }}
+        >
+          + เติมจุดใกล้เคียง: {addressSuggestion}
+        </button>
+      </div>
+    )}
     <label className="booking-field">จุดสังเกต<input value={draft.landmark ?? ''} aria-invalid={!!errors.landmark} onChange={event => update('landmark', event.target.value)} />{error('landmark')}</label>
-    <details className="booking-address-fallback"><summary>เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง</summary><p className="booking-small">ที่อยู่ต้องมีพิกัดและอยู่ในหมู่บ้านที่ให้บริการ หากไม่ทราบพิกัด กรุณาติดต่อเทศบาล</p>{(['latitude', 'longitude'] as const).map(key => <label key={key} className="booking-field">{key === 'latitude' ? 'ละติจูด' : 'ลองจิจูด'}<input type="number" step="any" value={draft.pickup?.[key] ?? ''} onChange={event => { locationRequest.current += 1; setLocatingPath(null); const value = event.target.value === '' ? undefined : Number(event.target.value); update('pickup', { x: 50, y: 50, label: 'จุดรับที่ระบุพิกัดเอง', ...draft.pickup, [key]: value, accuracy: undefined }) }} /></label>)}</details>
+    <details className="booking-address-fallback"><summary>เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง</summary><p className="booking-small">ที่อยู่ต้องมีพิกัดและอยู่ในหมู่บ้านที่ให้บริการ หากไม่ทราบพิกัด กรุณาติดต่อเทศบาล</p>{(['latitude', 'longitude'] as const).map(key => <label key={key} className="booking-field">{key === 'latitude' ? 'ละติจูด' : 'ลองจิจูด'}<input type="number" step="any" value={draft.pickup?.[key] ?? ''} onChange={event => { locationRequest.current += 1; setLocatingPath(null); const value = event.target.value === '' ? undefined : Number(event.target.value); const nextPickup = { x: 50, y: 50, label: 'จุดรับที่ระบุพิกัดเอง', ...draft.pickup, [key]: value, accuracy: undefined }; update('pickup', nextPickup); if (typeof nextPickup.latitude === 'number' && Number.isFinite(nextPickup.latitude) && typeof nextPickup.longitude === 'number' && Number.isFinite(nextPickup.longitude)) { setPinLookup(prev => ({ lat: nextPickup.latitude!, lng: nextPickup.longitude!, seq: (prev?.seq ?? 0) + 1 })) } }} /></label>)}</details>
     <section className="booking-pickup-value" tabIndex={errors.pickup ? -1 : undefined} aria-invalid={!!errors.pickup} aria-describedby={errors.pickup ? 'pickup-error' : undefined}><p>จุดรับที่เลือก</p>{(draft.pickup || !errors.pickup) && <strong>{draft.pickup ? formatPickupSummary(draft.pickupAddress, draft.pickup.label) : 'กรุณาเลือกจุดรับก่อนดำเนินการ'}</strong>}{error('pickup')}</section>
     <p className="booking-info">ตรวจสอบจุดรับบนแผนที่ หรือที่อยู่ที่ระบุ ก่อนดำเนินการต่อ</p>
     <div className="booking-pickup-actions"><BookingButton onClick={assistanceNext}>ถัดไป →</BookingButton><BookingButton secondary onClick={() => go('patient')}>ย้อนกลับ</BookingButton></div>

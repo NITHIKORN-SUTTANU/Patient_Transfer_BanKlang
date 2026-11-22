@@ -263,6 +263,7 @@ test('UX clarity elevation: disabled reasons, hospital origin helper, edit-propo
   await page.goto('/')
   await page.locator('[data-actor-id="ACT-02"]').click()
   await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
   await page.getByRole('button', { name: 'ดูรายละเอียด →' }).first().click()
   const apptBox = (await page.locator('.dispatch-details-summary-grid .dispatch-appointment').boundingBox())!
   const contactBox = (await page.locator('.dispatch-details-summary-grid .dispatch-detail-contact').boundingBox())!
@@ -331,6 +332,7 @@ test('Field-readiness & layout geometry audit across 1440px, 1280px, and 390px v
   await page.goto('/')
   await page.locator('[data-actor-id="ACT-02"]').click()
   await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
   // Live Fleet Status Strip visible with active vehicle status pills
@@ -506,6 +508,7 @@ test('Master operational visibility: Live Fleet Matrix, upfront dropdown readine
   await page.goto('/')
   await page.locator('[data-actor-id="ACT-02"]').click()
   await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
 
   const matrix = page.locator('.dispatch-fleet-matrix')
   await expect(matrix).toBeVisible()
@@ -653,4 +656,256 @@ test('Citizen 48-hour smart time picker default & 1-click jump + muted PDPA decl
   await expect(page.getByRole('button', { name: 'ยืนยันเวลา', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
   await expect(page.locator('#time-value')).toContainText(/14:2[01] น\./)
+})
+
+test('Pre-UAT polish: pickup map auto-village & non-destructive suggestion pill, 390px overflow lock, hard overlap block, mismatch warning, timeline ทุกวัน toggle, fleet scroll row & driver history pagination', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line|photon).*/, route => route.abort())
+
+  // 1. Mobile 390px overscroll/overflow lock + Pickup map non-destructive suggestion pill & auto-village hint
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-01"]').click()
+  await expect(page).toHaveURL(/\/booking$/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehavior)).toBe('none')
+
+  await page.getByRole('button', { name: 'เริ่มจองรถ →' }).click()
+  await page.getByLabel(/รับทราบการใช้ข้อมูล/).check()
+  await page.getByRole('button', { name: 'รับทราบและถัดไป' }).click()
+  await page.getByLabel(/ชื่อผู้ป่วย/).fill('นางทดสอบ ปักหมุด')
+  await page.getByLabel(/เบอร์โทรศัพท์ของคุณ/).fill('0892223344')
+  await page.getByLabel(/โรงพยาบาล/).selectOption('hospital-lamphun')
+  await page.locator('button.booking-input-trigger').first().click()
+  await page.getByRole('button', { name: 'เดือนถัดไป', exact: true }).click()
+  await page.locator('.booking-calendar button:not([disabled])', { hasText: /^\s*(?:[\u0E00-\u0E7F]+\.\s*)?22$/ }).first().click()
+  await page.getByRole('button', { name: 'ยืนยันวันที่', exact: true }).click()
+  await page.locator('button.booking-input-trigger').nth(1).click()
+  await setPickerTime(page, 'ชั่วโมง', '10')
+  await setPickerTime(page, 'นาที', '30')
+  await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
+  await page.getByRole('button', { name: 'ถัดไป →' }).click()
+  await expect(page).toHaveURL(/\/booking\/assistance$/)
+
+  // Type manual house number first -> then trigger pin coordinates near หมู่ 1 บ้านกลาง -> manual input MUST NOT be overwritten!
+  const addressInput = page.getByLabel(/ที่อยู่จุดรับ/)
+  await addressInput.fill('82 13')
+  await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง').click()
+  await page.getByLabel('ละติจูด').fill('18.5795')
+  await page.getByLabel('ลองจิจูด').fill('99.0435')
+
+  await expect(page.locator('.booking-village-auto-hint')).toContainText('อิงจากตำแหน่งบนแผนที่')
+  await expect(page.getByLabel(/หมู่บ้านในเขตบริการ/)).toHaveValue('village-01')
+  await expect(addressInput).toHaveValue('82 13')
+  const suggestionPill = page.locator('.booking-address-suggestion')
+  await expect(suggestionPill).toBeVisible()
+  await expect(suggestionPill).toContainText('+ เติมจุดใกล้เคียง:')
+  await suggestionPill.click()
+  await expect(addressInput).toHaveValue(/^82 13 .+/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // 2. Desktop 1280px: Load 320 seed rows -> check Timeline ทุกวัน toggle, Live Fleet Matrix horizontal scroll row, & Driver History 12-item pagination + filters
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await page.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  await expect(page.getByText('ข้อมูลจำลองในระบบ: 320 รายการ')).toBeVisible()
+
+  await demoBar.getByRole('button', { name: 'เจ้าหน้าที่จัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+
+  // Live Fleet Matrix horizontal flex scroll track on desktop >=1024px + expand toggle
+  const matrix = page.locator('.dispatch-fleet-matrix')
+  await expect(matrix).toBeVisible()
+  expect(await matrix.evaluate(el => getComputedStyle(el).display)).toBe('flex')
+  expect(await matrix.evaluate(el => getComputedStyle(el).flexWrap)).toBe('nowrap')
+  expect(await matrix.locator('.dispatch-fleet-unit').count()).toBe(5)
+  await page.getByRole('button', { name: 'ดูทั้งหมด (5)' }).click()
+  expect(await matrix.evaluate(el => getComputedStyle(el).display)).toBe('grid')
+  await page.getByRole('button', { name: 'ย่อเป็นแถวเดียว' }).click()
+  expect(await matrix.evaluate(el => getComputedStyle(el).display)).toBe('flex')
+
+  // Timeline date chips: default ทุกวัน -> click single date -> click same date again toggles back to ทุกวัน
+  const timeline = page.locator('.dispatch-timeline-panel')
+  const tlAllChip = timeline.locator('.dispatch-date-chip-all')
+  await expect(tlAllChip).toHaveAttribute('aria-pressed', 'true')
+  await expect(timeline).toContainText('ภาพรวมทุกวัน')
+  const firstDateChip = timeline.locator('.dispatch-timeline-date-chips .dispatch-date-chip').nth(1)
+  await firstDateChip.click()
+  await expect(firstDateChip).toHaveAttribute('aria-pressed', 'true')
+  await expect(tlAllChip).toHaveAttribute('aria-pressed', 'false')
+  await firstDateChip.click()
+  await expect(tlAllChip).toHaveAttribute('aria-pressed', 'true')
+  await expect(timeline).toContainText('ภาพรวมทุกวัน')
+
+  // Driver History 12-item progressive pagination, route summary, and quick filters
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await page.locator('#driver-sidebar').getByRole('link', { name: 'ประวัติ', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/history$/)
+  await expect(page.locator('.driver-history-summary')).toContainText(/แสดง 12 จาก \d+ งาน/)
+  expect(await page.locator('.driver-grid .driver-card').count()).toBe(12)
+  await expect(page.locator('.driver-history-route').first()).toContainText('→')
+
+  const loadMoreBtn = page.getByRole('button', { name: /แสดงเพิ่มเติม \(เหลืออีก \d+ งาน\)/ })
+  await expect(loadMoreBtn).toBeVisible()
+  await loadMoreBtn.click()
+  expect(await page.locator('.driver-grid .driver-card').count()).toBeGreaterThan(12)
+
+  // Quick search filter by booking ID & status chip
+  const firstRef = (await page.locator('.driver-history-card-head h3').first().textContent())?.trim() ?? ''
+  await page.getByLabel('ค้นหารหัสงาน').fill(firstRef)
+  await expect(page.locator('.driver-grid .driver-card')).toHaveCount(1)
+  await page.getByRole('button', { name: 'ล้างตัวกรอง' }).click()
+  await page.getByRole('button', { name: 'ส่งถึงโรงพยาบาลแล้ว', exact: true }).click()
+  await expect(page.locator('.driver-history-summary')).toContainText(/แสดง \d+ จาก \d+ งาน/)
+})
+
+test('Hard-block double-booking overlap & vehicle/driver location mismatch warning on /dispatcher/assignment', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  await expect(page.locator('.dispatch-fleet-matrix')).toBeVisible()
+
+  // Inject an overlapping APPROVED booking (15m after BK-DEMO-1003 today) + completed trip for demo-driver-2 at รพ.สารภี
+  await page.evaluate(() => {
+    const key = 'ban-klang-transit:interactive-demo-db:v1'
+    const raw = localStorage.getItem(key)
+    if (!raw) return
+    const db = JSON.parse(raw)
+    const todayAssigned = db.bookings.find((b: { id: string }) => b.id === 'BK-DEMO-1003')
+    if (!todayAssigned) return
+    const overlapAppt = new Date(Date.parse(todayAssigned.appointmentAt) + 15 * 60000).toISOString()
+    db.bookings.unshift({
+      ...todayAssigned,
+      id: 'BK-DEMO-OVERLAP',
+      reference: 'BK-DEMO-OVERLAP',
+      status: 'APPROVED',
+      revision: 2,
+      patientName: 'นายทดสอบ ซ้อนเวลา',
+      mobility: 'standard',
+      appointmentAt: overlapAppt,
+      vehicleId: null,
+      driverId: null,
+      vehicleName: undefined,
+      schedule: null,
+      proposedSchedule: null,
+    })
+    const doneEarlier = new Date(Date.parse(todayAssigned.appointmentAt) - 180 * 60000).toISOString()
+    db.bookings.push({
+      ...todayAssigned,
+      id: 'BK-DEMO-SARAPHI-DONE',
+      reference: 'BK-DEMO-SARAPHI-DONE',
+      status: 'COMPLETED',
+      revision: 5,
+      hospitalId: 'hospital-saraphi',
+      hospitalName: 'โรงพยาบาลสารภี',
+      hospitalLocationId: 'hospital-saraphi',
+      appointmentAt: doneEarlier,
+      vehicleId: 'demo-vehicle-2',
+      driverId: 'demo-driver-2',
+    })
+    localStorage.setItem(key, JSON.stringify(db))
+  })
+
+  await page.locator('#dispatcher-sidebar').getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+  await page.getByRole('button', { name: 'โหลดข้อมูลล่าสุด', exact: true }).click()
+  await page.locator('.dispatch-waiting-list article', { hasText: 'BK-DEMO-OVERLAP' }).locator('button').first().click()
+
+  // Selecting demo-vehicle-1 (assigned to BK-DEMO-1003 at overlapping window) MUST show red blocking conflict & HARD-DISABLE submit!
+  await page.getByRole('button', { name: 'รถรับส่ง: เลือกรถ', exact: true }).click()
+  await page.getByRole('option', { name: /รถคันที่ 01/ }).click()
+  // Also pick demo-driver-2 (at รพ.สารภี, conflicting with demo-vehicle-1 at รพ.ลำพูน!)
+  await page.getByRole('button', { name: /คนขับ:/ }).click()
+  await page.getByRole('option', { name: /นายประสิทธิ์/ }).click()
+
+  await expect(page.locator('.dispatch-location-mismatch')).toContainText('ตำแหน่งล่าสุดไม่ตรงกัน')
+  await expect(page.locator('.dispatch-blocking-conflict')).toContainText('BK-DEMO-1003')
+  await expect(page.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true })).toBeDisabled()
+})
+
+test('Stale-readiness confirmation modal disables confirm button and offers 1-click reload recovery', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis).*/, route => route.abort())
+  const row = {
+    id: 'bk-stale-1',
+    reference: 'BK-STALE-1',
+    status: 'APPROVED',
+    revision: 2,
+    executionVersion: 0,
+    startedAt: null,
+    patientName: 'นางทดสอบ รีเฟรช',
+    appointmentAt: '2030-01-15T03:00:00Z',
+    hospitalId: 'hosp-1',
+    contactPhone: '0811112222',
+    pickupAddress: 'หมู่ 1 บ้านกลาง',
+    latitude: 18.58,
+    longitude: 99.04,
+    mobility: 'standard',
+    vehicleId: null,
+    driverId: null,
+    incidentOpen: false,
+    resourceHold: false,
+    scheduleReviewRequired: false,
+    schedule: null,
+    proposedSchedule: null,
+  }
+  let bookingsFetches = 0
+  await page.route('**/api/auth/**', route =>
+    route.fulfill({
+      json: route.request().url().endsWith('/login')
+        ? { token: 'synthetic-token' }
+        : { id: 'dsp-1', role: 'dispatcher', name: 'เจ้าหน้าที่ทดสอบ', driverId: null },
+    }),
+  )
+  await page.route('**/api/catalog', route =>
+    route.fulfill({
+      json: {
+        hospitals: [{ id: 'hosp-1', name: 'โรงพยาบาลลำพูน' }],
+        villages: [],
+        vehicles: [{ id: 'veh-1', name: 'รถคันที่ 01', plate: 'กข 1101', active: true, held: false, capabilities: ['standard'] }],
+        drivers: [{ id: 'drv-1', name: 'นายสมชาย', active: true, held: false }],
+        locations: [{ id: 'depot', name: 'ศูนย์รถเทศบาลตำบลบ้านกลาง', kind: 'depot' }],
+        depotLocationId: 'depot',
+      },
+    }),
+  )
+  await page.route('**/api/dispatcher-alerts**', route => route.fulfill({ json: { alerts: [], unread: 0, nextCursor: null } }))
+  await page.route('**/api/notification-failures**', route => route.fulfill({ json: { failures: [], total: 0, pending: 0, nextCursor: null } }))
+  await page.route('**/api/bookings**', route => {
+    if (route.request().method() === 'GET') {
+      bookingsFetches++
+      return route.fulfill({ json: { bookings: [row] } })
+    }
+    return route.fulfill({ status: 409, json: { error: 'Changed' } })
+  })
+
+  await page.goto('/staff/login?next=%2Fdispatcher%2Fassignment')
+  await page.getByLabel('ชื่อผู้ใช้').fill('dispatcher')
+  await page.getByLabel('รหัสผ่าน').fill('pass')
+  await page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
+  await page.getByRole('link', { name: 'เปิดหน้าจัดรถ' }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment$/)
+
+  await page.getByRole('button', { name: 'รถรับส่ง: เลือกรถ', exact: true }).click()
+  await page.getByRole('option', { name: /รถคันที่ 01/ }).click()
+  await page.getByRole('button', { name: 'คนขับ: เลือกคนขับ', exact: true }).click()
+  await page.getByRole('option', { name: /นายสมชาย/ }).click()
+  await page.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true }).click()
+
+  const dialog = page.getByRole('dialog')
+  const confirmBtn = dialog.getByRole('button', { name: 'ยืนยันตาราง', exact: true })
+  const beforeFetches = bookingsFetches
+  await confirmBtn.click()
+
+  await expect(dialog.getByRole('alert')).toContainText('ข้อมูลหรือความพร้อมเปลี่ยนแล้ว')
+  await expect(confirmBtn).toBeDisabled()
+  const reloadBtn = dialog.getByRole('button', { name: 'โหลดข้อมูลล่าสุด', exact: true })
+  await expect(reloadBtn).toBeVisible()
+  await reloadBtn.click()
+  await expect(dialog).toHaveCount(0)
+  await expect.poll(() => bookingsFetches).toBeGreaterThan(beforeFetches)
 })
