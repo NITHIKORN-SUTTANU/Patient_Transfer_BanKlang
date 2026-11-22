@@ -18,6 +18,26 @@
 .driver-trip.is-primary { border:2px solid var(--color-primary); box-shadow:0 4px 18px rgba(6, 90, 83, 0.12); }
 .driver-trip.is-active { border:2px solid var(--color-primary); background:#f1faf6; box-shadow:0 4px 18px rgba(6, 90, 83, 0.14); }
 .driver-card-top { flex-wrap:wrap; align-items:center; gap:8px; }
+.driver-card-top-badges { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.driver-mobility-pill { display:inline-flex; align-items:center; gap:5px; padding:4px 11px; border-radius:999px; font-size:13px; font-weight:700; line-height:1.4; white-space:nowrap; }
+.driver-mobility-pill svg { width:15px; height:15px; flex-shrink:0; }
+.driver-mobility-pill.standard { background:#ecfdf5; color:#0f5132; border:1px solid #b7e4cf; }
+.driver-mobility-pill.wheelchair { background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; }
+.driver-mobility-pill.stretcher { background:#fff1f0; color:#9a241c; border:1px solid #fecaca; }
+.driver-next-preview { margin-top:16px; display:flex; flex-direction:column; gap:8px; border-left:4px solid var(--color-primary); background:#f8fdfb; }
+.driver-next-preview-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+.driver-next-preview-tag { display:block; font-size:13px; font-weight:700; color:var(--color-muted); }
+.driver-next-preview-time { font-size:20px; font-weight:700; color:var(--color-primary); font-variant-numeric:tabular-nums; }
+.driver-next-preview-meta { margin:0; font-size:15px; color:var(--color-ink); }
+.driver-next-preview-link { display:inline-flex; align-items:center; min-height:44px; color:var(--color-primary); font-weight:700; text-decoration:underline; text-underline-offset:3px; width:fit-content; }
+.driver-caution-box { padding:14px 16px; border:1px solid #f4c2c7; border-left:4px solid var(--color-error); border-radius:12px; background:#fff1f2; color:#7c1b29; }
+.driver-caution-box strong { display:block; font-size:16px; margin-bottom:4px; }
+.driver-caution-box p { margin:0; font-size:15px; line-height:1.55; }
+.driver-reason-quick { display:flex; flex-direction:column; gap:8px; }
+.driver-reason-quick-label { font-size:14px; font-weight:600; color:var(--color-muted); }
+.driver-reason-chips { display:flex; flex-wrap:wrap; gap:8px; }
+.driver-reason-chip { min-height:44px; padding:8px 14px; border:1.5px solid #9dc2b5; border-radius:999px; background:white; color:var(--color-primary); font:inherit; font-size:14px; font-weight:600; }
+.driver-reason-chip.active, .driver-reason-chip:hover:not(:disabled) { background:var(--color-accent); border-color:var(--color-primary); font-weight:700; }
 .driver-history-page .driver-card-top > span:last-child { color:var(--color-primary); font-weight:600; }
 .driver-history-page .driver-trip.is-cancelled .driver-card-top > span:last-child { color:var(--color-error); }
 .driver-history-page .driver-trip.is-cancelled :is(.driver-trip-state, .driver-badge) { background:#fff0f1; color:var(--color-error); }

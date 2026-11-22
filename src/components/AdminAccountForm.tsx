@@ -7,7 +7,7 @@ import { BookingModal } from './BookingUI'
 import { adminError, type StaffAccount } from '../services/adminApi'
 import { staffRequest, staffSession, useStaffSession } from '../services/staffSession'
 
-export function AdminAccountForm({ previous, onClose, onSaved }: { previous?: AdminAccount; onClose: () => void; onSaved: () => void }) {
+export function AdminAccountForm({ previous, accounts = [], onClose, onSaved }: { previous?: AdminAccount; accounts?: AdminAccount[]; onClose: () => void; onSaved: () => void }) {
   const session = useStaffSession()
   const [name, setName] = useState(previous?.name ?? '')
   const [username, setUsername] = useState(previous?.username ?? '')
@@ -19,10 +19,18 @@ export function AdminAccountForm({ previous, onClose, onSaved }: { previous?: Ad
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
   const [error, setError] = useState('')
+  const activeAdminsCount = accounts.filter(account => account.role === 'Admin' && account.active).length
+  const lastActiveAdminBlocked = Boolean(
+    previous &&
+      previous.role === 'Admin' &&
+      previous.active &&
+      activeAdminsCount <= 1 &&
+      (!active || role !== 'Admin'),
+  )
   const accessChange = previous && (previous.role !== role || previous.active && !active || password.length > 0)
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (pending.current) return
+    if (pending.current || lastActiveAdminBlocked) return
     if (accessChange && !confirmed) { setConfirmed(true); return }
     pending.current = true; setBusy(true); setError('')
     try {
@@ -45,9 +53,10 @@ export function AdminAccountForm({ previous, onClose, onSaved }: { previous?: Ad
         <AdminField label={previous ? 'รหัสผ่านใหม่ (เว้นว่างเพื่อคงเดิม)' : 'รหัสผ่านเริ่มต้น'}><input type="password" autoComplete="new-password" required={!previous} minLength={12} maxLength={512} value={password} onChange={event => { setPassword(event.target.value); setConfirmed(false) }} /></AdminField>
         <AdminField label="สถานะบัญชี"><select value={String(active)} onChange={event => { setActive(event.target.value === 'true'); setConfirmed(false) }}><option value="true">ใช้งานอยู่</option><option value="false">ระงับการใช้งาน</option></select></AdminField>
         <AdminField label="เหตุผลในการเปลี่ยนแปลง"><input required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></AdminField>
-        {confirmed && <p className="admin-warning">การเปลี่ยนสิทธิ์ ระงับบัญชี หรือเปลี่ยนรหัสผ่าน จะยกเลิกเซสชันเดิม กดบันทึกอีกครั้งเพื่อยืนยัน</p>}
+        {lastActiveAdminBlocked && <p role="status" className="admin-warning">ไม่สามารถปิดใช้งานหรือลดสิทธิ์ผู้ดูแลระบบคนสุดท้ายได้</p>}
+        {confirmed && !lastActiveAdminBlocked && <p className="admin-warning">การเปลี่ยนสิทธิ์ ระงับบัญชี หรือเปลี่ยนรหัสผ่าน จะยกเลิกเซสชันเดิม กดบันทึกอีกครั้งเพื่อยืนยัน</p>}
         {error && <p role="alert" className="admin-error">{error}</p>}
-        <div className="admin-form-actions"><AdminButton secondary onClick={onClose}>ยกเลิก</AdminButton><AdminButton type="submit">{busy ? 'กำลังบันทึก…' : 'บันทึก'}</AdminButton></div>
+        <div className="admin-form-actions"><AdminButton secondary onClick={onClose}>ยกเลิก</AdminButton><AdminButton type="submit" disabled={busy || lastActiveAdminBlocked}>{busy ? 'กำลังบันทึก…' : 'บันทึก'}</AdminButton></div>
       </fieldset>
     </form>
   </BookingModal>

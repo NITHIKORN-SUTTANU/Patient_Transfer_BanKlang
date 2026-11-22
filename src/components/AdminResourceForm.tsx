@@ -8,8 +8,8 @@ import { AdminButton, AdminField } from './AdminForms'
 import { BookingModal } from './BookingUI'
 
 const support = { standard: 'เดินได้', wheelchair: 'รถเข็น', stretcher: 'เปลนอน' }
-export function AdminResourceForm({ kind, previous, catalog, accounts, onClose, onSaved }: {
-  kind: 'vehicles' | 'drivers'; previous?: AdminResource; catalog: AdminCatalog; accounts: AdminAccount[]; onClose: () => void; onSaved: () => void;
+export function AdminResourceForm({ kind, previous, catalog, accounts, activeTripCount = 0, onGoAccounts, onClose, onSaved }: {
+  kind: 'vehicles' | 'drivers'; previous?: AdminResource; catalog: AdminCatalog; accounts: AdminAccount[]; activeTripCount?: number; onGoAccounts?: () => void; onClose: () => void; onSaved: () => void;
 }) {
   const [name, setName] = useState(previous?.name ?? '')
   const [plate, setPlate] = useState(previous?.plate ?? '')
@@ -28,6 +28,8 @@ export function AdminResourceForm({ kind, previous, catalog, accounts, onClose, 
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
   const noun = kind === 'vehicles' ? 'รถ' : 'คนขับ'
+  const driverAccounts = accounts.filter(account => account.role === 'Driver')
+  const unlinkedDriverAccounts = driverAccounts.filter(account => !catalog.drivers.some(driver => driver.id !== previous?.id && driver.accountId === account.id))
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (pending.current) return
@@ -53,8 +55,14 @@ export function AdminResourceForm({ kind, previous, catalog, accounts, onClose, 
           <AdminField label="ทะเบียนรถ"><input required maxLength={120} value={plate} onChange={event => setPlate(event.target.value)} /></AdminField>
           <AdminField label="ประเภทรถ"><input required maxLength={120} value={vehicleType} onChange={event => setVehicleType(event.target.value)} /></AdminField>
         </> : <>
-          <AdminField label="บัญชีผู้ใช้งาน Role: Driver"><select required value={userId} onChange={event => { setUserId(event.target.value); setSameDriverConfirmed(false); const account = accounts.find(account => account.id === event.target.value); if (account) setName(account.name) }}><option value="">เลือกบัญชีคนขับ</option>{accounts.filter(account => account.role === 'Driver').map(account => { const alreadyLinked = catalog.drivers.some(driver => driver.id !== previous?.id && driver.accountId === account.id); return <option key={account.id} value={account.id} disabled={alreadyLinked}>{account.name} · {account.username}{!account.active ? ' (ระงับ)' : ''}{alreadyLinked ? ' (ผูกข้อมูลคนขับแล้ว)' : ''}</option> })}</select></AdminField>
+          <AdminField label="บัญชีผู้ใช้งาน Role: Driver"><select required value={userId} onChange={event => { setUserId(event.target.value); setSameDriverConfirmed(false); const account = accounts.find(account => account.id === event.target.value); if (account) setName(account.name) }}><option value="">เลือกบัญชีคนขับ</option>{driverAccounts.map(account => { const alreadyLinked = catalog.drivers.some(driver => driver.id !== previous?.id && driver.accountId === account.id); return <option key={account.id} value={account.id} disabled={alreadyLinked}>{account.name} · {account.username}{!account.active ? ' (ระงับ)' : ''}{alreadyLinked ? ' (ผูกข้อมูลคนขับแล้ว)' : ''}</option> })}</select></AdminField>
           <p className="admin-field-hint">ต้องสร้างบัญชีผู้ใช้งานสิทธิ์ <strong>พนักงานขับรถ</strong> ในหน้า <strong>ผู้ใช้งานและสิทธิ์</strong> ก่อน จึงจะเลือกผูกเป็นโปรไฟล์คนขับใหม่ได้ (บัญชีที่แสดง "(ผูกข้อมูลคนขับแล้ว)" ถูกใช้งานโดยคนขับรายอื่นแล้ว)</p>
+          {!previous && unlinkedDriverAccounts.length === 0 && (
+            <div className="admin-empty-driver-callout" role="status">
+              <p>ขณะนี้ไม่มีบัญชีพนักงานขับรถที่ว่างสำหรับผูกข้อมูลคนขับใหม่</p>
+              {onGoAccounts && <AdminButton secondary onClick={onGoAccounts}>ไปสร้างบัญชีพนักงานขับรถ →</AdminButton>}
+            </div>
+          )}
           <AdminField label="เบอร์ติดต่อ"><input required type="tel" value={phone} onChange={event => setPhone(event.target.value)} /></AdminField>
           {previous && userId !== previous.accountId && <label className="booking-checkbox"><input type="checkbox" required checked={sameDriverConfirmed} onChange={event => setSameDriverConfirmed(event.target.checked)} />ยืนยันว่าเป็นคนขับรายเดิม เปลี่ยนเฉพาะบัญชีเข้าสู่ระบบ</label>}
         </>}
@@ -67,6 +75,7 @@ export function AdminResourceForm({ kind, previous, catalog, accounts, onClose, 
           <p className="admin-muted">เพิ่มช่วงเวลาปฏิบัติงานหลังบันทึก ก่อนนำไปมอบหมายงาน</p>
         </> : <p className="admin-muted">ตำแหน่งและสถานะรอยืนยันความพร้อมยังคงเดิม เจ้าหน้าที่จัดรถเป็นผู้ยืนยันความพร้อมเดินรถ</p>}
         <AdminField label="เหตุผลในการเปลี่ยนแปลง"><input required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></AdminField>
+        {previous && !active && activeTripCount > 0 && <p role="status" className="admin-warning">พบงานมอบหมายที่ยังไม่เสร็จสิ้น {activeTripCount} งาน — กรุณาตรวจสอบและย้ายคิวก่อนปิดใช้งาน</p>}
         {confirmation && <p className="admin-warning">กดบันทึกอีกครั้งเพื่อยืนยันการปิดใช้งาน งานที่ยังไม่เสร็จต้องได้รับการจัดการก่อน</p>}
         {error && <p role="alert" className="admin-error">{error}</p>}
         <div className="admin-form-actions"><AdminButton secondary onClick={onClose}>ยกเลิก</AdminButton><AdminButton type="submit">{busy ? 'กำลังบันทึก…' : 'บันทึก'}</AdminButton></div>

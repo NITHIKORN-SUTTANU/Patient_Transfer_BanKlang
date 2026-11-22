@@ -181,6 +181,23 @@ export function DispatcherPage() {
       .filter(b => isNonTerminalBooking(b) && b.vehicleId && (bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === today || bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === focusDate))
       .map(b => b.vehicleId!),
   )
+  const activeFleetLiveStatus = activeFleetVehicles.map(v => {
+    const activeTrips = state.bookings
+      .filter(b => isNonTerminalBooking(b) && b.vehicleId === v.id && (bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === today || bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === focusDate))
+      .sort((a, b) => Date.parse(a.schedule?.pickupAt || a.appointmentAt) - Date.parse(b.schedule?.pickupAt || b.appointmentAt))
+    const currentTrip = activeTrips.find(b => b.status === 'in_transit') ?? activeTrips[0]
+    const win = currentTrip
+      ? computeBackwardBlockedWindow(currentTrip.appointmentAt, { hospitalName: currentTrip.details?.hospital, existingSchedule: currentTrip.schedule })
+      : null
+    return {
+      id: v.id,
+      label: v.label || v.id,
+      busy: Boolean(currentTrip),
+      tripRef: currentTrip?.reference ?? currentTrip?.id ?? '',
+      hospital: currentTrip?.details?.hospital ?? '',
+      freeClock: win?.freeClock ?? '',
+    }
+  })
   const fleetInUseCount = busyVehicleIdsOnFocusDate.size
   const fleetAvailableCount = Math.max(0, activeFleetVehicles.length - fleetInUseCount)
   const wheelchairCapCount = activeFleetVehicles.filter(v => parseVehicleCapabilities(v).includes('wheelchair')).length
@@ -259,22 +276,43 @@ export function DispatcherPage() {
 
       {(screen === 'dashboard' || screen === 'assignment') && totalFleetCount > 0 && (
         <section className="dispatch-fleet-bar" aria-label="สถานะรถรับส่งทั้งหมด">
-          <div className="dispatch-fleet-pill">
-            <span>รถทั้งหมด / เปิดใช้งาน</span>
-            <strong>{activeFleetVehicles.length} / {totalFleetCount} คัน</strong>
+          <div className="dispatch-fleet-bar-top">
+            <div className="dispatch-fleet-pill">
+              <span>รถทั้งหมด / เปิดใช้งาน</span>
+              <strong>{activeFleetVehicles.length} / {totalFleetCount} คัน</strong>
+            </div>
+            <div className="dispatch-fleet-pill busy">
+              <span>กำลังใช้งาน</span>
+              <strong>{fleetInUseCount} คัน</strong>
+            </div>
+            <div className="dispatch-fleet-pill free">
+              <span>ว่างพร้อมจัด</span>
+              <strong>{fleetAvailableCount} คัน</strong>
+            </div>
+            <div className="dispatch-fleet-caps">
+              <span className="dispatch-mobility-badge wheelchair"><ServiceSymbol kind="wheel" />รถเข็น {wheelchairCapCount} คัน</span>
+              <span className="dispatch-mobility-badge stretcher"><ServiceSymbol kind="bed" />เปลนอน {stretcherCapCount} คัน</span>
+            </div>
           </div>
-          <div className="dispatch-fleet-pill busy">
-            <span>กำลังใช้งาน</span>
-            <strong>{fleetInUseCount} คัน</strong>
-          </div>
-          <div className="dispatch-fleet-pill free">
-            <span>ว่างพร้อมจัด</span>
-            <strong>{fleetAvailableCount} คัน</strong>
-          </div>
-          <div className="dispatch-fleet-caps">
-            <span className="dispatch-mobility-badge wheelchair"><ServiceSymbol kind="wheel" />รถเข็น {wheelchairCapCount} คัน</span>
-            <span className="dispatch-mobility-badge stretcher"><ServiceSymbol kind="bed" />เปลนอน {stretcherCapCount} คัน</span>
-          </div>
+          {screen === 'dashboard' && activeFleetLiveStatus.length > 0 && (
+            <div className="dispatch-fleet-live-strip" aria-label="สถานะความพร้อมรถแต่ละคัน">
+              {activeFleetLiveStatus.map(unit => (
+                <div key={unit.id} className={`dispatch-fleet-unit ${unit.busy ? 'is-busy' : 'is-free'}`}>
+                  <div className="dispatch-fleet-unit-head">
+                    <strong>{unit.label}</strong>
+                    <span className={`dispatch-unit-badge ${unit.busy ? 'busy' : 'free'}`}>
+                      {unit.busy ? 'กำลังวิ่งงาน' : 'ว่างพร้อมรับงาน'}
+                    </span>
+                  </div>
+                  <p className="dispatch-fleet-unit-meta">
+                    {unit.busy
+                      ? `${unit.tripRef}${unit.hospital ? ` · ${unit.hospital}` : ''}${unit.freeClock ? ` · ว่างอีกครั้ง ${unit.freeClock} น.` : ''}`
+                      : 'พร้อมจัดคิวรับ–ส่งทันที'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 

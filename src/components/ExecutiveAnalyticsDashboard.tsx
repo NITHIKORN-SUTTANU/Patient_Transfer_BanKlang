@@ -124,6 +124,17 @@ export function ExecutiveAnalyticsDashboard({
     const maxHour = Math.max(1, ...peakHours.map(h => h.count))
     const topPeakHour = [...peakHours].sort((a, b) => b.count - a.count)[0]
 
+    const earlyCount = peakHours.filter(h => h.hour < '09:00').reduce((s, h) => s + h.count, 0)
+    const morningCount = peakHours.filter(h => h.hour >= '09:00' && h.hour < '12:00').reduce((s, h) => s + h.count, 0)
+    const afternoonCount = peakHours.filter(h => h.hour >= '12:00').reduce((s, h) => s + h.count, 0)
+    const peakWindowsTotal = Math.max(1, earlyCount + morningCount + afternoonCount)
+    const peakWindows = [
+      { key: 'early', label: '06:00–09:00 น.', count: earlyCount, pct: Math.round((earlyCount / peakWindowsTotal) * 1000) / 10 },
+      { key: 'morning', label: '09:00–12:00 น.', count: morningCount, pct: Math.round((morningCount / peakWindowsTotal) * 1000) / 10 },
+      { key: 'afternoon', label: '12:00–16:00 น.', count: afternoonCount, pct: Math.round((afternoonCount / peakWindowsTotal) * 1000) / 10 },
+    ]
+    const maxPeakWindow = Math.max(1, ...peakWindows.map(w => w.count))
+
     const villages = BAN_KLANG_VILLAGES.map(v => {
       const count = villageCounts.get(v.id) ?? 0
       return {
@@ -144,8 +155,13 @@ export function ExecutiveAnalyticsDashboard({
     ]
 
     const topHospitals = Array.from(hospitalCounts.entries())
-      .map(([name, count]) => ({ name, count }))
+      .map(([name, count]) => ({
+        name,
+        count,
+        pct: activeBookings.length > 0 ? Math.round((count / activeBookings.length) * 1000) / 10 : 0,
+      }))
       .sort((a, b) => b.count - a.count)
+    const maxHospital = Math.max(1, ...topHospitals.map(h => h.count))
 
     return {
       total,
@@ -161,10 +177,13 @@ export function ExecutiveAnalyticsDashboard({
       peakHours,
       maxHour,
       topPeakHour,
+      peakWindows,
+      maxPeakWindow,
       villages,
       maxVillage,
       mobilityBreakdown,
       topHospitals,
+      maxHospital,
     }
   }, [activeVehicles, overlay, summaryStatuses, totalVehicles])
 
@@ -237,9 +256,21 @@ export function ExecutiveAnalyticsDashboard({
 
           <section className="admin-chart-card" aria-labelledby="chart-peak-title">
             <h3 id="chart-peak-title">
-              ความหนาแน่นตามช่วงเวลานัดหมาย (Peak Hours){analytics.topPeakHour?.count ? ` · พีคสุด ${analytics.topPeakHour.hour} น.` : ''}
+              ช่วงเวลานัดหมายหนาแน่น (Peak Appointment Hours){analytics.topPeakHour?.count ? ` · พีคสุด ${analytics.topPeakHour.hour} น.` : ''}
             </h3>
-            <ul className="admin-bar-list">
+            <ul className="admin-bar-list compact" aria-label="สรุปตามช่วงเวลาหลัก">
+              {analytics.peakWindows.map(win => (
+                <li key={win.key} className="admin-bar-row">
+                  <span className="admin-bar-label">{win.label}</span>
+                  <span className="admin-bar-track" aria-hidden="true">
+                    <span className={`admin-bar-fill ${win.count === analytics.maxPeakWindow && win.count > 0 ? 'peak' : 'primary'}`} style={{ width: `${win.count > 0 ? Math.max(4, Math.round((win.count / analytics.maxPeakWindow) * 100)) : 0}%` }} />
+                  </span>
+                  <span className="admin-bar-val">{win.count} ({win.pct}%)</span>
+                </li>
+              ))}
+            </ul>
+            <h4 className="admin-subchart-heading">รายละเอียดรายชั่วโมง</h4>
+            <ul className="admin-bar-list compact">
               {analytics.peakHours.map(item => (
                 <li key={item.hour} className="admin-bar-row">
                   <span className="admin-bar-label">{item.hour} น.</span>
@@ -271,7 +302,7 @@ export function ExecutiveAnalyticsDashboard({
           </section>
 
           <section className="admin-chart-card" aria-labelledby="chart-equipment-title">
-            <h3 id="chart-equipment-title">สัดส่วนความต้องการอุปกรณ์เฉพาะทาง และโรงพยาบาลปลายทาง</h3>
+            <h3 id="chart-equipment-title">สัดส่วนประเภทผู้ป่วย และโรงพยาบาลปลายทางยอดนิยม</h3>
             <ul className="admin-bar-list">
               {analytics.mobilityBreakdown.map(m => (
                 <li key={m.code} className="admin-bar-row">
@@ -283,12 +314,15 @@ export function ExecutiveAnalyticsDashboard({
                 </li>
               ))}
             </ul>
-            <h4 className="admin-subchart-heading">ความถี่โรงพยาบาลปลายทาง</h4>
-            <ul className="admin-hospital-summary">
+            <h4 className="admin-subchart-heading">โรงพยาบาลปลายทางยอดนิยม</h4>
+            <ul className="admin-bar-list compact">
               {analytics.topHospitals.map(h => (
-                <li key={h.name}>
-                  <span>{h.name}</span>
-                  <strong>{h.count} เที่ยว</strong>
+                <li key={h.name} className="admin-bar-row">
+                  <span className="admin-bar-label" title={h.name}>{h.name}</span>
+                  <span className="admin-bar-track" aria-hidden="true">
+                    <span className="admin-bar-fill secondary" style={{ width: `${h.count > 0 ? Math.max(4, Math.round((h.count / analytics.maxHospital) * 100)) : 0}%` }} />
+                  </span>
+                  <span className="admin-bar-val">{h.count} เที่ยว ({h.pct}%)</span>
                 </li>
               ))}
             </ul>

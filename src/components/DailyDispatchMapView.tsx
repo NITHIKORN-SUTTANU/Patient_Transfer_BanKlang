@@ -44,30 +44,43 @@ export function DailyDispatchMapView({
       .map(([date, count]) => ({ date, count }))
   }, [bookings])
 
-  const [manualDate, setManualDate] = useState('')
+  const [dateSelection, setDateSelection] = useState<'ALL' | string>('ALL')
   const [statusFilter, setStatusFilter] = useState<'all' | 'non_terminal'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [mapReady, setMapReady] = useState(false)
   const [mapError, setMapError] = useState(false)
 
-  const selectedDate =
-    manualDate ||
-    (activeDates.some(item => item.date === defaultDate)
-      ? defaultDate
-      : activeDates.find(item => item.date >= defaultDate)?.date ||
-        activeDates[activeDates.length - 1]?.date ||
-        defaultDate)
+  const isAllDays = dateSelection === 'ALL'
+  const effectiveDate = isAllDays
+    ? ''
+    : dateSelection ||
+      (activeDates.some(item => item.date === defaultDate)
+        ? defaultDate
+        : activeDates.find(item => item.date >= defaultDate)?.date ||
+          activeDates[activeDates.length - 1]?.date ||
+          defaultDate)
+
+  const dateScopedTotal = useMemo(() => {
+    if (isAllDays) return bookings.length
+    return bookings.filter(b => {
+      const ms = Date.parse(b.schedule?.pickupAt || b.appointmentAt)
+      return Number.isFinite(ms) && bangkokDateFromMs(ms) === effectiveDate
+    }).length
+  }, [bookings, isAllDays, effectiveDate])
 
   const dayBookings = useMemo(() => {
     return bookings
       .filter(b => {
         const ms = Date.parse(b.schedule?.pickupAt || b.appointmentAt)
-        if (!Number.isFinite(ms) || bangkokDateFromMs(ms) !== selectedDate) return false
+        if (!Number.isFinite(ms)) return false
+        if (!isAllDays && bangkokDateFromMs(ms) !== effectiveDate) return false
         if (statusFilter === 'non_terminal' && !isNonTerminalBooking(b)) return false
         return true
       })
-      .sort((a, b) => Date.parse(a.appointmentAt) - Date.parse(b.appointmentAt))
-  }, [bookings, selectedDate, statusFilter])
+      .sort((a, b) => Date.parse(b.appointmentAt) - Date.parse(a.appointmentAt))
+  }, [bookings, isAllDays, effectiveDate, statusFilter])
+
+  const mapMarkersSource = useMemo(() => dayBookings.slice(0, 60), [dayBookings])
 
   const selectedBooking = dayBookings.find(b => b.id === selectedId) ?? dayBookings[0] ?? null
   const selectedWindow = selectedBooking
@@ -153,8 +166,8 @@ export function DailyDispatchMapView({
             .addTo(currentMap),
         )
 
-        // Plot each booking pickup pin
-        for (const b of dayBookings) {
+        // Plot each booking pickup pin (capped at 60 pins in All-Days overview for crisp performance)
+        for (const b of mapMarkersSource) {
           const lat = b.details?.pickup?.latitude
           const lng = b.details?.pickup?.longitude
           if (typeof lat !== 'number' || typeof lng !== 'number') continue
@@ -179,7 +192,7 @@ export function DailyDispatchMapView({
 
     void syncMarkers()
     return () => { active = false }
-  }, [dayBookings, mapReady, selectedBooking?.id])
+  }, [mapMarkersSource, mapReady, selectedBooking?.id])
 
   useEffect(() => {
     const map = mapRef.current
@@ -197,31 +210,34 @@ export function DailyDispatchMapView({
   return (
     <section className="dispatch-panel dispatch-map-view" aria-labelledby="daily-map-view-title">
       <div className="dispatch-map-toolbar">
-        <div>
+        <div className="dispatch-map-heading">
           <h2 id="daily-map-view-title">แผนที่จัดรถรับ–ส่งรายวัน (Daily Dispatch Map · OSM)</h2>
           <p className="dispatch-muted">
-            แสดงพิกัดจุดรับผู้ป่วยทั้งตำบลบ้านกลาง พร้อมสีสถานะ ประเภทอุปกรณ์ และช่วงเวลาปิดรถ ({dispatchDate(selectedDate)} · {dayBookings.length} งาน)
+            แสดงพิกัดจุดรับผู้ป่วยทั้งตำบลบ้านกลาง พร้อมสีสถานะ ประเภทอุปกรณ์ และช่วงเวลาปิดรถ ({isAllDays ? 'ภาพรวมทุกวัน' : dispatchDate(effectiveDate)} · {dayBookings.length} งาน)
           </p>
         </div>
 
-        <div className="dispatch-timeline-controls">
-          <label className="dispatch-date-filter">
-            <span>วันที่บนแผนที่</span>
+        <div className="dispatch-map-controls-locked">
+          <label className="dispatch-date-filter dispatch-map-date-control">
+            <span>{isAllDays ? 'ทุกวัน · เลือกวัน' : 'วันที่บนแผนที่'}</span>
             <input
               type="date"
               aria-label="วันที่แสดงแผนที่รายวัน"
-              value={selectedDate}
-              onChange={e => { setManualDate(e.target.value); setSelectedId(null) }}
+              value={effectiveDate}
+              onChange={e => {
+                setDateSelection(e.target.value ? e.target.value : 'ALL')
+                setSelectedId(null)
+              }}
             />
           </label>
-          <div className="dispatch-timeline-date-chips" role="group" aria-label="กรองสถานะบนแผนที่">
+          <div className="dispatch-timeline-date-chips dispatch-map-status-chips" role="group" aria-label="กรองสถานะบนแผนที่">
             <button
               type="button"
               className={`dispatch-date-chip ${statusFilter === 'all' ? 'active' : ''}`}
               aria-pressed={statusFilter === 'all'}
               onClick={() => setStatusFilter('all')}
             >
-              ทุกสถานะ ({bookings.filter(b => bangkokDateFromMs(Date.parse(b.schedule?.pickupAt || b.appointmentAt)) === selectedDate).length})
+              ทุกสถานะ ({dateScopedTotal})
             </button>
             <button
               type="button"
@@ -235,22 +251,35 @@ export function DailyDispatchMapView({
         </div>
       </div>
 
-      {activeDates.length > 0 && (
-        <div className="dispatch-map-date-strip" role="group" aria-label="เลือกวันที่มีงานรับส่ง">
-          <span className="dispatch-small">วันที่มีงาน:</span>
-          {activeDates.slice(-6).reverse().map(item => (
+      <div className="dispatch-map-date-strip" role="group" aria-label="เลือกวันที่มีงานรับส่ง">
+        <span className="dispatch-small">วันที่มีงาน:</span>
+        <button
+          type="button"
+          className={`dispatch-date-chip dispatch-date-chip-all ${isAllDays ? 'active' : ''}`}
+          aria-pressed={isAllDays}
+          onClick={() => { setDateSelection('ALL'); setSelectedId(null) }}
+        >
+          ทุกวัน ({bookings.length})
+        </button>
+        {activeDates.slice(-6).reverse().map(item => {
+          const active = !isAllDays && effectiveDate === item.date
+          return (
             <button
               key={item.date}
               type="button"
-              className={`dispatch-date-chip ${selectedDate === item.date ? 'active' : ''}`}
-              aria-pressed={selectedDate === item.date}
-              onClick={() => { setManualDate(item.date); setSelectedId(null) }}
+              className={`dispatch-date-chip ${active ? 'active' : ''}`}
+              aria-pressed={active}
+              title={active ? 'แตะอีกครั้งเพื่อกลับไปดูทุกวัน' : `ดูงานวันที่ ${dispatchDate(item.date)}`}
+              onClick={() => {
+                setDateSelection(active ? 'ALL' : item.date)
+                setSelectedId(null)
+              }}
             >
               {item.date.slice(8, 10)}/{item.date.slice(5, 7)} ({item.count})
             </button>
-          ))}
-        </div>
-      )}
+          )
+        })}
+      </div>
 
       <div className="dispatch-map-legend" aria-label="คำอธิบายสีหมุด">
         <span className="dispatch-legend-item pending">รอตรวจสอบ</span>
@@ -336,7 +365,7 @@ export function DailyDispatchMapView({
         </div>
 
         <aside className="dispatch-map-pin-list" aria-label="รายการหมุดงานประจำวัน">
-          <h3>งานรับ–ส่งประจำวันที่เลือก ({dayBookings.length})</h3>
+          <h3>{isAllDays ? `งานรับ–ส่งทั้งหมด (${dayBookings.length})` : `งานรับ–ส่งวันที่ ${dispatchDate(effectiveDate)} (${dayBookings.length})`}</h3>
           {dayBookings.length === 0 ? (
             <p className="dispatch-empty">ไม่มีงานรับ–ส่งในวันที่เลือก กรุณาเลือกวันอื่นจากแถบด้านบน</p>
           ) : (

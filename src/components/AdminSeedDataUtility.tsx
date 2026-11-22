@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { BAN_KLANG_VILLAGES, generateRealisticSeedBookings } from '../data/realisticSeed'
 import { ApiError } from '../services/api'
 import { statusLabels } from '../services/dispatcherApi'
+import { isInteractiveDemoActive } from '../services/interactiveDemo'
 import { seedOverlay, useSeedOverlay } from '../services/seedOverlay'
 import { staffRequest } from '../services/staffSession'
 import { generateRealisticSeedCSV, parseSeedBookingsCSV } from '../utils/seedCsvImport'
@@ -134,19 +135,22 @@ export function AdminSeedDataUtility({ onChanged }: { onChanged?: () => void }) 
 
   const pagedRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
+  // Strictly hidden in production builds connected to live APIs (shown in standalone/demo & dev verification).
+  if (import.meta.env.PROD && !isInteractiveDemoActive()) {
+    return null
+  }
+
   return (
-    <section className="admin-panel admin-seed-panel" aria-labelledby="admin-seed-title">
-      <div className="admin-panel-heading">
-        <div>
-          <h2 id="admin-seed-title">จัดการข้อมูลตั้งต้นและนำเข้า CSV (Seed Data &amp; Reset)</h2>
-          <p className="admin-muted">
-            นำเข้าไฟล์ CSV ข้อมูลจำลอง 250–500+ รายการสำหรับทดสอบความจุและสถิติ หรือล้างข้อมูลจำลองก่อนส่งมอบระบบจริง (ไม่แสดงข้อมูลส่วนบุคคลผู้ป่วย)
-          </p>
-        </div>
+    <details className="admin-panel admin-seed-panel" open aria-labelledby="admin-seed-title">
+      <summary className="admin-seed-summary">
+        <span id="admin-seed-title">นำเข้าข้อมูลทดสอบ (.csv) — เฉพาะโหมดสาธิต</span>
         <span className="admin-seed-count-badge">
           {overlay.active ? `ข้อมูลจำลองในระบบ: ${overlay.bookings.length} รายการ` : 'ยังไม่มีชุดข้อมูลจำลอง'}
         </span>
-      </div>
+      </summary>
+      <p className="admin-muted">
+        นำเข้าไฟล์ CSV ข้อมูลจำลอง 250–500+ รายการสำหรับทดสอบความจุและสถิติ หรือล้างข้อมูลจำลองก่อนส่งมอบระบบจริง (ไม่แสดงข้อมูลส่วนบุคคลผู้ป่วย)
+      </p>
 
       <div className="admin-seed-actions">
         <div className="admin-seed-upload-wrap">
@@ -256,6 +260,6 @@ export function AdminSeedDataUtility({ onChanged }: { onChanged?: () => void }) 
           </div>
         </BookingModal>
       )}
-    </section>
+    </details>
   )
 }

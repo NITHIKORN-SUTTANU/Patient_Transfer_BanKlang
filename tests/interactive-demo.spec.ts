@@ -225,23 +225,23 @@ test('UI/UX polish: DemoRoleBar offset/collapse, Admin layout, bounded lists, ci
   await expect(page.locator('.booking-review-section').last()).not.toContainText('82, 13,')
   await expect(page.locator('.booking-review-section').last()).not.toContainText('จุดรับที่ระบุพิกัดเอง')
 
-  // Save/update profile keeps checkbox checked and shows Thai confirmation
+  // Profile checkbox auto-saves on booking submit (no redundant separate save/update button)
   const saveCheckbox = page.getByLabel('บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป')
   await saveCheckbox.check()
-  await page.getByRole('button', { name: 'บันทึกข้อมูลผู้ป่วย' }).click()
   await expect(saveCheckbox).toBeChecked()
-  await expect(page.locator('.booking-success-notice')).toContainText('✓ บันทึกข้อมูลผู้ป่วยเรียบร้อยแล้ว')
-  await page.getByRole('button', { name: 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' }).click()
-  await expect(saveCheckbox).toBeChecked()
-  await expect(page.locator('.booking-success-notice')).toContainText('✓ อัปเดตข้อมูลผู้ป่วยเรียบร้อยแล้ว')
+  await expect(page.locator('.booking-profile-hint')).toContainText('ระบบจะบันทึกหรืออัปเดตข้อมูลนี้ให้อัตโนมัติเมื่อกดยืนยันคำขอ')
+  await expect(page.getByRole('button', { name: 'บันทึกข้อมูลผู้ป่วย' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' })).toHaveCount(0)
 
-  // Submit and verify newest booking appears first in รายการจองของฉัน
+  // Submit and verify newest booking appears first in รายการจองของฉัน, and compact appointment slip on status view
   await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ' }).click()
   await expect(page.getByRole('heading', { name: 'ส่งคำขอแล้ว', exact: true })).toBeVisible()
   const newBookingRef = (await page.locator('.booking-summary-id').textContent())?.trim() ?? ''
   expect(newBookingRef.length).toBeGreaterThan(0)
-  await page.getByRole('link', { name: 'กลับหน้าหลัก' }).click()
-  await page.getByRole('button', { name: 'ดูสถานะการจอง' }).click()
+  await page.getByRole('button', { name: 'ดูสถานะการจอง', exact: true }).click()
+  await expect(page.locator('.booking-appointment-slip')).toBeVisible()
+  await expect(page.locator('.booking-status-header .booking-compact-refresh')).toBeVisible()
+  await page.getByRole('button', { name: 'รายการจองของฉัน', exact: true }).click()
   await expect(page.locator('.booking-summary-id').first()).toHaveText(newBookingRef)
 
   // 4. Driver toolbar compact refresh button & spacing next to account link
@@ -321,4 +321,179 @@ test('UX clarity elevation: disabled reasons, hospital origin helper, edit-propo
   const monthlyDetails = page.locator('details.admin-report-panel')
   await expect(monthlyDetails).toHaveAttribute('open', '')
   await expect(monthlyDetails.getByRole('button', { name: 'ดาวน์โหลดรายงานรายเดือน (.xlsx)' })).toBeEnabled()
+})
+
+test('Field-readiness & layout geometry audit across 1440px, 1280px, and 390px viewports', async ({ page }) => {
+  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line).*/, route => route.abort())
+
+  // --- A. Dispatcher Desktop (1280px): Live Fleet Strip, Request Review Modal feedback + button spacing, Daily Map ทุกวัน toggle + zero CLS ---
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/')
+  await page.locator('[data-actor-id="ACT-02"]').click()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // Live Fleet Status Strip visible with active vehicle status pills
+  const fleetStrip = page.locator('.dispatch-fleet-live-strip')
+  await expect(fleetStrip).toBeVisible()
+  await expect(fleetStrip).toContainText('ว่างพร้อมรับงาน')
+  await expect(fleetStrip).toContainText('กำลังวิ่งงาน')
+
+  // Request Review modal: duplicate check gives unmistakable green confirmation + non-touching footer buttons inside modal
+  await page.getByRole('button', { name: 'ดูรายละเอียด →' }).first().click()
+  const reviewDialog = page.getByRole('dialog')
+  await expect(reviewDialog).toBeVisible()
+  await reviewDialog.getByRole('button', { name: 'ตรวจรายการอาจซ้ำ / โหลดประวัติล่าสุด' }).click()
+  await expect(reviewDialog.locator('.dispatch-dup-clear')).toContainText('✓ ตรวจสอบแล้ว: ไม่พบรายการซ้ำ')
+
+  const dialogBox = (await reviewDialog.boundingBox())!
+  const footerButtons = reviewDialog.locator('.dispatch-dialog-actions button')
+  const footerCount = await footerButtons.count()
+  expect(footerCount).toBeGreaterThanOrEqual(3)
+  const boxes = []
+  for (let i = 0; i < footerCount; i++) {
+    const b = (await footerButtons.nth(i).boundingBox())!
+    expect(b.x).toBeGreaterThanOrEqual(dialogBox.x - 1)
+    expect(b.x + b.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width + 1)
+    boxes.push(b)
+  }
+  for (let i = 0; i < boxes.length - 1; i++) {
+    const sameRow = Math.abs(boxes[i].y - boxes[i + 1].y) < 10
+    if (sameRow) {
+      expect(boxes[i + 1].x - (boxes[i].x + boxes[i].width)).toBeGreaterThanOrEqual(8)
+    } else {
+      expect(boxes[i + 1].y - (boxes[i].y + boxes[i].height)).toBeGreaterThanOrEqual(8)
+    }
+  }
+  await reviewDialog.getByRole('button', { name: 'ปิด' }).click()
+
+  // Daily Map View: ทุกวัน first chip, toggle single-day & back to ทุกวัน, zero CLS shift on toolbar controls
+  await page.getByRole('button', { name: /มุมมองแผนที่รายวัน/ }).click()
+  const mapView = page.locator('.dispatch-map-view')
+  await expect(mapView).toBeVisible()
+  const allDaysChip = mapView.locator('.dispatch-date-chip-all')
+  await expect(allDaysChip).toContainText('ทุกวัน')
+  const statusChips = mapView.locator('.dispatch-map-status-chips')
+  const beforeAllToggle = (await statusChips.boundingBox())!
+
+  // Click a specific day chip -> filter to that day -> verify toolbar doesn't jump horizontally
+  const specificDayChip = mapView.locator('.dispatch-map-date-strip .dispatch-date-chip').nth(1)
+  await specificDayChip.click()
+  await expect(specificDayChip).toHaveAttribute('aria-pressed', 'true')
+  await expect(allDaysChip).toHaveAttribute('aria-pressed', 'false')
+  const afterSingleDay = (await statusChips.boundingBox())!
+  expect(Math.abs(afterSingleDay.x - beforeAllToggle.x)).toBeLessThanOrEqual(2)
+
+  // Clicking the active day chip again toggles cleanly back to ทุกวัน overview
+  await specificDayChip.click()
+  await expect(allDaysChip).toHaveAttribute('aria-pressed', 'true')
+  await expect(mapView).toContainText('ภาพรวมทุกวัน')
+
+  // --- B. Driver Desktop & Mobile (390px): Upfront mobility pill + outdoor quick-reason chips + zero horizontal overflow ---
+  const demoBar = page.locator('.demo-role-bar')
+  await demoBar.getByRole('button', { name: 'พนักงานขับรถ' }).click()
+  await expect(page).toHaveURL(/\/driver$/)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await expect(page.locator('.driver-mobility-pill').first()).toBeVisible()
+
+  await page.getByRole('button', { name: /ดูรายละเอียด/ }).first().click()
+  await expect(page).toHaveURL(/\/driver\/details/)
+  await page.getByRole('button', { name: 'เริ่มงาน', exact: true }).click()
+  await page.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/status/)
+  await expect(page.locator('.driver-mobility-pill').first()).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // Quick-reason chips & caution box on /driver/incident
+  await page.getByRole('button', { name: 'รายงานเหตุขัดข้อง', exact: true }).click()
+  await expect(page).toHaveURL(/\/driver\/incident/)
+  await expect(page.locator('.driver-caution-box')).toBeVisible()
+  const quickChip = page.locator('.driver-reason-chip').first()
+  await expect(quickChip).toBeVisible()
+  const chipLabel = (await quickChip.textContent())?.trim() ?? ''
+  await quickChip.click()
+  await expect(page.getByLabel('เหตุผลที่รายงาน')).toHaveValue(chipLabel)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // --- C. Admin Desktop (1440px & 1280px): Side-by-side non-touching row actions, differentiated driver pills, guards & analytics ---
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await demoBar.getByRole('button', { name: 'ผู้ดูแลระบบ' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  // Collapsible demo-only CSV seed utility + municipal peak windows & ranked hospitals analytics
+  const seedPanel = page.locator('details.admin-seed-panel')
+  await expect(seedPanel.locator('summary')).toContainText('นำเข้าข้อมูลทดสอบ (.csv) — เฉพาะโหมดสาธิต')
+  await page.getByRole('button', { name: 'โหลดข้อมูลตัวอย่าง 320 รายการ' }).first().click()
+  const analytics = page.locator('.admin-analytics-panel')
+  await expect(analytics).toContainText('06:00–09:00 น.')
+  await expect(analytics).toContainText('09:00–12:00 น.')
+  await expect(analytics).toContainText('12:00–16:00 น.')
+  await expect(analytics).toContainText('โรงพยาบาลปลายทางยอดนิยม')
+
+  // /admin/drivers at 1440px & 1280px: distinct account vs work status pills, shift summary, horizontal non-touching action buttons, empty-state shortcut
+  for (const width of [1440, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.locator('#admin-sidebar').getByRole('link', { name: 'คนขับ', exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/drivers$/)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+    const firstRow = page.locator('.admin-drivers-table tbody tr').first()
+    await expect(firstRow).toContainText('บัญชีปกติ')
+    await expect(firstRow).toContainText('พร้อมปฏิบัติงาน')
+    await expect(firstRow.locator('.admin-shift-summary')).toContainText('06:00–16:00 น.')
+
+    const manageBtn = firstRow.getByRole('button', { name: 'จัดการคนขับ', exact: true })
+    const windowBtn = firstRow.getByRole('button', { name: 'ช่วงเวลาคนขับ', exact: true })
+    const b1 = (await manageBtn.boundingBox())!
+    const b2 = (await windowBtn.boundingBox())!
+    expect(Math.abs(b1.y - b2.y)).toBeLessThanOrEqual(4)
+    expect(b2.x - (b1.x + b1.width)).toBeGreaterThanOrEqual(6)
+  }
+
+  // Empty-state shortcut in + เพิ่มคนขับ when all demo driver accounts are already linked -> jumps to /admin/accounts
+  await page.getByRole('button', { name: '+ เพิ่มคนขับ', exact: true }).click()
+  const emptyCallout = page.locator('.admin-empty-driver-callout')
+  await expect(emptyCallout).toBeVisible()
+  await emptyCallout.getByRole('button', { name: 'ไปสร้างบัญชีพนักงานขับรถ →' }).click()
+  await expect(page).toHaveURL(/\/admin\/accounts$/)
+
+  // Last-active-Admin lockout guard on /admin/accounts
+  const adminRow = page.locator('.admin-accounts-table tbody tr', { hasText: 'USR-ADM-1' })
+  await adminRow.getByRole('button', { name: 'จัดการบัญชี', exact: true }).click()
+  const accountDialog = page.getByRole('dialog')
+  await accountDialog.getByRole('combobox', { name: 'สถานะบัญชี', exact: true }).selectOption('false')
+  await expect(accountDialog).toContainText('ไม่สามารถปิดใช้งานหรือลดสิทธิ์ผู้ดูแลระบบคนสุดท้ายได้')
+  await expect(accountDialog.getByRole('button', { name: 'บันทึก', exact: true })).toBeDisabled()
+  await accountDialog.getByRole('button', { name: 'ยกเลิก', exact: true }).click()
+
+  // Active-trip impact warning on /admin/vehicles (demo-vehicle-1 has active assigned trip BK-DEMO-1003) + horizontal row buttons
+  await page.locator('#admin-sidebar').getByRole('link', { name: 'รถรับส่ง', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/vehicles$/)
+  const v1Row = page.locator('.admin-vehicles-table tbody tr', { hasText: 'demo-vehicle-1' })
+  const vBtn1 = (await v1Row.getByRole('button', { name: 'จัดการรถ', exact: true }).boundingBox())!
+  const vBtn2 = (await v1Row.getByRole('button', { name: 'ช่วงเวลารถ', exact: true }).boundingBox())!
+  expect(Math.abs(vBtn1.y - vBtn2.y)).toBeLessThanOrEqual(4)
+  expect(vBtn2.x - (vBtn1.x + vBtn1.width)).toBeGreaterThanOrEqual(6)
+
+  await v1Row.getByRole('button', { name: 'จัดการรถ', exact: true }).click()
+  const vehicleDialog = page.getByRole('dialog')
+  await vehicleDialog.getByRole('combobox', { name: 'สถานะรถ', exact: true }).selectOption('false')
+  await expect(vehicleDialog).toContainText('พบงานมอบหมายที่ยังไม่เสร็จสิ้น')
+  await vehicleDialog.getByRole('button', { name: 'ยกเลิก', exact: true }).click()
+
+  // --- D. Citizen Mobile (390px): Compact appointment slip + zero horizontal overflow ---
+  await page.setViewportSize({ width: 390, height: 844 })
+  await demoBar.getByRole('button', { name: 'ผู้ป่วย / จองรถ' }).click()
+  await expect(page).toHaveURL(/\/booking$/)
+  await page.getByRole('button', { name: 'ดูสถานะการจอง' }).click()
+  await expect(page).toHaveURL(/\/booking\/bookings$/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.locator('a.booking-summary-card').first().click()
+  await expect(page).toHaveURL(/\/booking\/status\//)
+  await expect(page.locator('.booking-appointment-slip')).toBeVisible()
+  const slipBox = (await page.locator('.booking-appointment-slip').boundingBox())!
+  expect(slipBox.height).toBeLessThan(460)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
