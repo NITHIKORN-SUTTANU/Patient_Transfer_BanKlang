@@ -590,7 +590,30 @@ export function ApiDispatchAssignment({ booking, catalog, previousJobs, reload, 
         </div>
       )}
       <label className="booking-field">เวลารอที่จุดรับเพิ่มเติม (นาที)<input type="number" min="0" step="1" value={waiting} onChange={event => setWaiting(event.target.value)} /></label>
-      {(modifying || acceptConfiguration) && <label className="booking-field">เหตุผลการเปลี่ยนแปลง<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label>}
+      {(modifying || acceptConfiguration) && (
+        <div className="dispatch-readiness-reason-block">
+          {modifying && (
+            <div className="dispatch-readiness-quick-chips" role="group" aria-label="เหตุผลด่วนสำหรับการเปลี่ยนแปลงรถหรือคนขับ">
+              {([
+                'จัดรถทดแทนเรียบร้อยแล้ว',
+                'ปรับตารางและมอบหมายคนขับทดแทนแล้ว',
+              ] as const).map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`dispatch-readiness-chip ${reason === preset ? 'active' : ''}`}
+                  aria-pressed={reason === preset}
+                  disabled={busy}
+                  onClick={() => { setReason(preset); setError('') }}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          )}
+          <label className="booking-field">เหตุผลการเปลี่ยนแปลง<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label>
+        </div>
+      )}
       {needsHandoff && <><p className="dispatch-alert">เริ่มงานแล้ว ต้องตรวจสอบตำแหน่งและการรับช่วงก่อนรับผู้ป่วย รถหรือคนขับเดิมที่ปล่อยออกจะยังไม่พร้อมจนกว่าจะยืนยันความพร้อมแยกต่างหาก</p><label className="booking-field">การยืนยันต้นทางและการรับช่วง<textarea required maxLength={1000} value={arrangementNote} onChange={event => { setArrangementNote(event.target.value); setConfirmedAt('') }} /></label><label className="booking-checkbox"><input type="checkbox" checked={!!confirmedAt} onChange={event => setConfirmedAt(event.target.checked ? new Date().toISOString() : '')} /><span>ยืนยันตำแหน่งและแผนรับช่วงจริงแล้ว (ต้องยืนยันภายใน 5 นาที)</span></label></>}
     </fieldset>
     {acceptConfiguration && <><DispatchButton secondary disabled={busy || !vehicleId || !driverId || !originId} aria-busy={busy} onClick={() => void preview()}>{busy ? 'กำลังคำนวณ…' : 'คำนวณข้อเสนอใหม่โดยยังไม่เปลี่ยนตาราง'}</DispatchButton>{currentPreview && <p className="dispatch-small">ข้อเสนอคำนวณจากเส้นทางที่ตรวจสอบแล้ว กรุณาตรวจเวลาข้างต้นก่อนยืนยัน</p>}</>}

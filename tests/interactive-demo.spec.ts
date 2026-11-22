@@ -1651,10 +1651,16 @@ test('final UI polish: hug-tight form focus rings, incident modal spacing, and m
   const firstTrackBtn = page.locator('.dispatch-monitoring tbody tr').first().getByRole('button', { name: /ดูสถานะ|ดูรายละเอียด/ })
   await firstTrackBtn.click()
   const dialog = page.getByRole('dialog')
+
+  // Verify compact side-by-side secondary actions (ดูรายละเอียดงาน → & ปิดรายละเอียด)
+  const detailsActionBox = (await dialog.getByRole('button', { name: 'ดูรายละเอียดงาน →', exact: true }).boundingBox())!
+  const closeActionBox = (await dialog.getByRole('button', { name: 'ปิดรายละเอียด', exact: true }).boundingBox())!
+  expect(Math.abs(detailsActionBox.y - closeActionBox.y)).toBeLessThanOrEqual(4)
+
   const actionSelect = dialog.locator('.dispatch-operations-section > .booking-field > select')
   await actionSelect.selectOption('REPORT_INCIDENT')
 
-  const reasonTextarea = dialog.getByLabel('เหตุผล')
+  const reasonTextarea = dialog.getByLabel('เหตุผล', { exact: true })
   const confirmCheckboxWrap = dialog.locator('.dispatch-operations-form .booking-checkbox')
   const submitOpBtn = dialog.getByRole('button', { name: 'ยืนยันการดำเนินการ', exact: true })
 
@@ -1687,7 +1693,26 @@ test('final UI polish: hug-tight form focus rings, incident modal spacing, and m
   expect(checkboxBox.y - (textareaBox.y + textareaBox.height)).toBeGreaterThanOrEqual(12)
   expect(submitBox.y - (checkboxBox.y + checkboxBox.height)).toBeGreaterThanOrEqual(12)
 
-  await dialog.getByRole('button', { name: 'ปิดรายละเอียด', exact: true }).click()
+  // Verify 1-click quick-fill reason chips for modify (เปลี่ยนรถ คนขับ หรือตารางก่อนรับผู้ป่วย)
+  await actionSelect.selectOption('modify')
+  await dialog.locator('.dispatch-readiness-chip', { hasText: 'จัดรถทดแทนเรียบร้อยแล้ว' }).click()
+  await expect(dialog.getByRole('textbox', { name: 'เหตุผลการเปลี่ยนแปลง', exact: true })).toHaveValue('จัดรถทดแทนเรียบร้อยแล้ว')
+
+  // Report incident -> reopen -> verify 1-click quick-fill reason chips for RESOLVE_INCIDENT -> resolve cleanly
+  await actionSelect.selectOption('REPORT_INCIDENT')
+  await dialog.getByRole('textbox', { name: 'เหตุผล', exact: true }).fill('ทดสอบเปิดเหตุขัดข้อง')
+  await dialog.getByLabel('ตรวจสอบสถานการณ์จริงและยืนยันการดำเนินการนี้แล้ว').check()
+  await dialog.getByRole('button', { name: 'ยืนยันการดำเนินการ', exact: true }).click()
+  await expect(dialog).toBeHidden()
+
+  await page.locator('.dispatch-monitoring tbody tr.dispatch-row-incident').first().getByRole('button', { name: /ดูสถานะ|ดูรายละเอียด/ }).click()
+  const incDialog = page.getByRole('dialog')
+  await incDialog.locator('.dispatch-operations-section > .booking-field > select').selectOption('RESOLVE_INCIDENT')
+  await incDialog.locator('.dispatch-readiness-chip', { hasText: 'ประสานคนขับยืนยันเดินทางต่อได้แล้ว' }).click()
+  await expect(incDialog.getByRole('textbox', { name: 'เหตุผล', exact: true })).toHaveValue('ประสานคนขับยืนยันเดินทางต่อได้แล้ว')
+  await incDialog.getByLabel('ตรวจสอบสถานการณ์จริงและยืนยันการดำเนินการนี้แล้ว').check()
+  await incDialog.getByRole('button', { name: 'ยืนยันการดำเนินการ', exact: true }).click()
+  await expect(incDialog).toBeHidden()
 
   // Desktop audit across remaining roles
   const demoBar = page.locator('.demo-role-bar')

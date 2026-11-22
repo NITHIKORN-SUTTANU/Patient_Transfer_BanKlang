@@ -8,6 +8,12 @@ import { DestinationRevisionForm } from './DestinationRevisionForm'
 import { DestinationRevisionSummary } from './DestinationRevisionSummary'
 import { dispatchDate, dispatchTime } from '../services/dispatch'
 
+const RESOLVE_INCIDENT_QUICK_REASONS = [
+  'แก้ไขเหตุขัดข้องหน้างานเรียบร้อย พร้อมเดินทางต่อ',
+  'ประสานคนขับยืนยันเดินทางต่อได้แล้ว',
+  'เหตุฉุกเฉินคลี่คลายแล้ว สามารถให้บริการต่อได้',
+] as const
+
 export function DispatcherOperations({ booking, catalog, rows, onSaved, onBusyChange }: { booking: ApiBooking; catalog: Catalog; rows: ApiBooking[]; onSaved: () => void; onBusyChange: (busy: boolean) => void }) {
   const [action, setAction] = useState('')
   const [reason, setReason] = useState('')
@@ -46,7 +52,26 @@ export function DispatcherOperations({ booking, catalog, rows, onSaved, onBusyCh
     {!!booking.destinationHistory?.length && <details><summary>ประวัติการเปลี่ยนโรงพยาบาล</summary>{booking.destinationHistory.map(leg=><p key={leg.version}>ครั้งที่ {leg.version} · {leg.hospitalName} · คาดถึง {dispatchDate(leg.arrivalAt)} {dispatchTime(leg.arrivalAt)} น. · {leg.reason}</p>)}</details>}
     <label className="booking-field">การดำเนินการ<select disabled={busy} value={action} onChange={event => { setAction(event.target.value); setConfirmed(false); setError('') }}><option value="">เลือกการดำเนินการ</option>{actions.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
     {action === 'destination' ? <DestinationRevisionForm key={booking.revision} booking={booking} catalog={catalog} onSaved={onSaved} onBusyChange={onBusyChange} /> : action === 'modify' ? <ApiDispatchAssignment key={booking.revision} booking={booking} catalog={catalog} previousJobs={rows} reload={onSaved} onAssigned={onSaved} onBusyChange={onBusyChange} /> : action && <form className="dispatch-operations-form" onSubmit={event => { event.preventDefault(); void submit() }}>
-      <fieldset disabled={busy}><label className="booking-field">เหตุผล<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label>
+      <fieldset disabled={busy}>
+        <div className="dispatch-readiness-reason-block">
+          {action === 'RESOLVE_INCIDENT' && (
+            <div className="dispatch-readiness-quick-chips" role="group" aria-label="เหตุผลด่วนสำหรับคลี่คลายเหตุขัดข้อง">
+              {RESOLVE_INCIDENT_QUICK_REASONS.map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`dispatch-readiness-chip ${reason === preset ? 'active' : ''}`}
+                  aria-pressed={reason === preset}
+                  disabled={busy}
+                  onClick={() => { setReason(preset); setError('') }}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          )}
+          <label className="booking-field">เหตุผล<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label>
+        </div>
       {action === 'ABORT' && <><p className="dispatch-alert">ผลลัพธ์นี้คือ ABORTED ไม่ใช่ส่งถึงโรงพยาบาล และยังไม่ปล่อยความพร้อมรถหรือคนขับ</p><label className="booking-field">เวลาจบการเดินทางจริง (เวลาไทย)<input required type="datetime-local" value={endedAt} onChange={event => setEndedAt(event.target.value)} /></label><label className="booking-field">สถานที่จบการเดินทาง<input required maxLength={1000} value={location} onChange={event => setLocation(event.target.value)} /></label><label className="booking-field">การส่งมอบผู้ป่วยหรือแผนรับช่วงต่อ<textarea required maxLength={1000} value={disposition} onChange={event => setDisposition(event.target.value)} /></label></>}
       {action === 'CORRECT_MILESTONE' && <p>แก้เฉพาะสถานะที่บันทึกผิดหนึ่งขั้น ไม่ย้อนการรับผู้ป่วยจริง และไม่ลบประวัติเดิม</p>}
       <label className="booking-checkbox"><input required type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>ตรวจสอบสถานการณ์จริงและยืนยันการดำเนินการนี้แล้ว</span></label></fieldset>
