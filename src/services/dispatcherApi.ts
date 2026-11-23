@@ -1,3 +1,4 @@
+import { vehicleLabel } from './vehicleLabel'
 import { useEffect, useState } from 'react'
 import { createSeedState, type Booking, type DemoState } from '../data/seed'
 import { ApiError } from './api'
@@ -10,18 +11,19 @@ export interface ApiBooking {
   destinationHistory?: {version: number; hospitalName: string; arrivalAt: string; readyAt: string; reason: string; recordedAt: string; routingSource: string}[];
   id: string; reference: string; status: string; revision: number; executionVersion: number;
   patientName: string; appointmentAt: string; hospitalId: string; contactPhone: string; pickupAddress: string;
-  latitude: number; longitude: number; mobility: string; vehicleId: string | null; driverId: string | null;
+  latitude: number | null; longitude: number | null; mobility: string; vehicleId: string | null; driverId: string | null;
   startedAt: string | null; incidentOpen: boolean; resourceHold: boolean; scheduleReviewRequired: boolean;
   originName?: string; vehicleName?: string;
   hospitalName?: string; hospitalLocationId?: string; depotLocationId?: string;
   configurationChanges?: {id: string; type: string; proposed: {name?: string; date?: string; active?: boolean; latitude?: number; longitude?: number; radiusMetres?: number}}[];
-  assistance?: string[]; landmark?: string; requesterName?: string; bookingFor?: 'self' | 'other' | null;
+  assistance?: string[]; landmark?: string; requesterName?: string; bookingFor?: 'self' | 'other' | null; villageId?: string | null;
   cancellationLocked?: boolean;
   schedule: Schedule | null; proposedSchedule: (Schedule & { vehicleId: string; driverId: string }) | null;
 }
 export interface DestinationRevision { version: number; arrivalAt: string; readyAt: string; latenessSeconds: number; appointmentLatenessSeconds: number; originalHospitalName: string; originalArrivalAt: string; recordedAt: string }
 export interface Catalog {
   hospitals: { id: string; name: string; location_id?: string }[];
+  villages?: { id: string; name: string; number: number }[];
   vehicles: { id: string; name: string; plate: string; active: boolean; held: boolean }[];
   drivers: { id: string; name: string; active: boolean; held: boolean }[];
   locations: { id: string; name: string; kind: string }[]; depotLocationId: string | null;
@@ -43,6 +45,32 @@ export function dispatcherError(error: unknown) {
   }
   return 'เชื่อมต่อระบบไม่ได้ กรุณาลองใหม่และตรวจสอบสถานะล่าสุดก่อนทำรายการซ้ำ'
 }
+const scheduleIssueText = new Map([
+  ['LEAD_TIME', 'คำขอนี้จองล่วงหน้าน้อยกว่า 48 ชั่วโมง'],
+  ['CLOSED', 'วันนัดตรงกับวันปิดบริการ'],
+  ['HOURS', 'กรุณาตรวจสอบวันและเวลานัด'],
+  ['RESOURCE', 'รถหรือคนขับที่เลือกไม่พร้อมใช้งาน กรุณาเลือกใหม่'],
+  ['CAPABILITY', 'รถหรือคนขับที่เลือกไม่รองรับความช่วยเหลือที่ผู้ป่วยต้องการ'],
+  ['SHIFT', 'ช่วงเวลาปฏิบัติงานของคนขับไม่ครอบคลุมงานนี้ กรุณาเลือกคนขับใหม่'],
+  ['HOLD', 'รถหรือคนขับยังไม่ผ่านการยืนยันความพร้อม กรุณาเลือกใหม่'],
+  ['CONFLICT', 'รถหรือคนขับมีงานซ้อนหรือยังไม่พร้อมจากงานก่อนหน้า กรุณาเลือกใหม่'],
+  ['LOCATION', 'รถหรือคนขับไปยังต้นทางที่เลือกไม่ได้ตามแผน กรุณาตรวจสอบต้นทาง'],
+  ['CHAIN', 'ต้นทางที่โรงพยาบาลต้องตรงกับงานก่อนหน้าของทั้งรถและคนขับ'],
+  ['STALE', 'ตารางเดิมต้องคำนวณใหม่ กรุณาโหลดข้อมูลล่าสุด'],
+])
+
+export function dispatcherScheduleError(error: unknown) {
+  if (!(error instanceof ApiError) || error.status !== 409 || !Array.isArray(error.details)) return dispatcherError(error)
+  const messages = new Set<string>()
+  for (const issue of error.details) {
+    const message = issue?.code === 'HOURS' && issue.message === 'Cannot confirm a departure in the past'
+      ? 'เวลาออกรถที่คำนวณได้ผ่านไปแล้ว กรุณาตรวจสอบวันและเวลานัด'
+      : scheduleIssueText.get(issue?.code)
+    if (message) messages.add(message)
+  }
+  return messages.size ? [...messages].join(' · ') : dispatcherError(error)
+}
+
 export function viewBooking(row: ApiBooking, catalog: Catalog): Booking {
   const status: Booking['status'] = row.status === 'REQUESTED' ? 'pending' : row.status === 'REJECTED' ? 'rejected' : row.status === 'COMPLETED' ? 'completed' : ['CANCELLED', 'ABORTED'].includes(row.status) ? 'cancelled' : ['PICKING_UP', 'PICKED_UP', 'IN_TRANSIT'].includes(row.status) ? 'in_transit' : 'approved'
   return {
@@ -55,7 +83,7 @@ export function viewBooking(row: ApiBooking, catalog: Catalog): Booking {
       hospital: row.hospitalName ?? catalog.hospitals.find(h => h.id === row.hospitalId)?.name ?? row.hospitalId, date: '', time: '',
       assistance: ({ standard: 'เดินได้', wheelchair: 'รถเข็น', stretcher: 'เปลนอน' } as Record<string, string>)[row.mobility] ?? row.mobility,
       extras: (row.assistance ?? []).map(code => ({ boarding_support: 'ต้องการผู้ช่วยพยุงขึ้น-ลงรถ', caregiver_accompanies: 'มีผู้ดูแลเดินทางไปด้วย' } as Record<string, string>)[code]).filter(Boolean),
-      pickup: { x: 50, y: 50, label: [row.pickupAddress, row.landmark].filter(Boolean).join(' · '), latitude: row.latitude, longitude: row.longitude }, acknowledged: false },
+      pickup: { x: 50, y: 50, label: [row.pickupAddress, row.landmark].filter(Boolean).join(' · '), latitude: row.latitude ?? undefined, longitude: row.longitude ?? undefined }, acknowledged: false },
     // The existing summary needs only these timestamps. Never recalculate production times in the browser.
     ...(row.schedule ? { schedule: { departureAt: row.schedule.departureAt, pickupAt: row.schedule.pickupAt, arrivalAt: row.schedule.arrivalAt, endsAt: row.schedule.readyAt,
       calculation: 'server-verified-v1' } as const } : {}),
@@ -80,7 +108,7 @@ export function useDispatcherData(bookingId?: string) {
       if (!active) return
       setHasMore(result.hasMore)
       setData({ catalog, rows: result.bookings, state: { ...createSeedState(), bookings: result.bookings.map(row => viewBooking(row, catalog)),
-        vehicles: catalog.vehicles.map(v => ({ id: v.id, label: `${v.name} · ${v.plate}`, active: v.active && !v.held })),
+        vehicles: catalog.vehicles.map(v => ({ id: v.id, label: vehicleLabel(v), active: v.active && !v.held })),
         drivers: catalog.drivers.map(d => ({ id: d.id, name: d.name, active: d.active && !d.held })) } })
     }).catch(error => { if (active) { setData(null); setError(dispatcherError(error)) } }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }

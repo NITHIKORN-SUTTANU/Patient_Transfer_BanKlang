@@ -6,6 +6,17 @@
 .dispatch-sidebar nav { display: flex; flex-direction: column; gap: 14px; margin-top: 62px; }
 .dispatch-sidebar nav a { display: flex; align-items: center; min-height: 52px; padding: 12px; border-radius: 9px; font-size: 16px; }
 .dispatch-sidebar nav a.active { background: #247870; font-weight: 700; }
+.dispatch-sidebar-account { grid-column: 1 / -1; min-width: 0; margin-top: 12px; }
+.dispatch-sidebar-profile { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px; font-size: 16px; font-weight: 600; }
+.dispatch-sidebar-logout { min-height: 48px; padding: 4px; color: inherit; font-size: 14px; line-height: 1.4; text-decoration: underline; }
+.dispatch-sidebar-account .dispatch-alert { overflow-wrap: anywhere; }
+.dispatch-sidebar-avatar { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; background: #eaf7f3; color: #176448; }
+.dispatch-sidebar-name { min-width: 0; overflow-wrap: anywhere; }
+@media (min-width: 768px) {
+  :is(.dispatch-sidebar-collapsed, .driver-sidebar-collapsed, .admin-sidebar-collapsed) .dispatch-sidebar-profile { justify-content: center; }
+  :is(.dispatch-sidebar-collapsed, .driver-sidebar-collapsed, .admin-sidebar-collapsed) .dispatch-sidebar-name { display: none; }
+  :is(.dispatch-sidebar-collapsed, .driver-sidebar-collapsed, .admin-sidebar-collapsed) .dispatch-sidebar-logout { width: 100%; padding-inline: 0; }
+}
 .dispatch-demo-links { display: flex; flex-direction: column; gap: 14px; margin-top: auto; padding: 48px 10px 0; font-size: 16px; }
 .dispatch-demo-links a { text-decoration: underline; }
 .dispatch-demo-links span { color: #d7f3ec; font-size: 16px; }
@@ -101,6 +112,7 @@
 .dispatch-waiting-list article b { font-size: 16px; }
 .dispatch-waiting-list article .dispatch-status { font-size: 16px; font-weight: 700; }
 .dispatch-details-link { font-size: 16px; text-decoration: underline; color: var(--color-primary); padding: 0 17px 12px; }
+.dispatch-report-link { display: block; width: fit-content; min-height: 44px; color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px; }
 .dispatch-assignment-form { padding: 21px 23px; min-height: 630px; }
 .dispatch-schedule-summary { border: 1px solid #d9e8e3; background: #eaf7f3; border-radius: 12px; padding: 12px 17px; margin-top: 14px; min-height: 128px; }
 .dispatch-schedule-summary > p:first-child { color: #49635f; font-size: 16px; }
@@ -175,9 +187,32 @@
 .dispatch-modal h2 { font-size: 21px; font-weight: 700; line-height: 1.5; }
 .dispatch-modal h3 { font-size: 17px; font-weight: 700; }
 .dispatch-modal .booking-modal-inner > header button { display: none; }
+.dispatch-modal.dispatch-report-modal .booking-modal-inner > header button { display: block; }
 .dispatch-details-modal { width: min(640px, calc(100% - 32px)); }
 .dispatch-details-modal .booking-modal-inner { padding: 25px 32px 40px; gap: 20px; }
 .dispatch-details-modal .booking-modal-inner > header button { display: block; min-height: 32px; }
+.dispatch-booking-review .booking-modal-inner:has(> .booking-modal-footer) {
+  max-height: calc(100dvh - 32px);
+  padding-bottom: 0;
+  gap: 14px;
+}
+.dispatch-booking-review .booking-modal-inner > header,
+.dispatch-booking-review .booking-modal-footer { flex: none; }
+.dispatch-booking-review .booking-modal-content {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 3px 5px 12px;
+}
+.dispatch-booking-review .booking-modal-content > * { flex-shrink: 0; }
+.dispatch-booking-review .booking-modal-footer {
+  border-top: 1px solid var(--color-border);
+  padding: 12px 0 18px;
+}
+.dispatch-booking-review .booking-modal-footer .dispatch-dialog-actions { flex-direction: row; gap: 10px; }
+.dispatch-notice .dispatch-details-link { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; }
 .dispatch-details-modal h2 { font-size: 23px; }
 .dispatch-details-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #49635f; min-height: 32px; margin-top: -4px; }
 .dispatch-details-heading > span { padding: 5px 20px; min-width: 156px; border-radius: 16px; color: var(--color-primary); background: #eaf7f3; font-weight: 700; font-size: 16px; text-align: center; }
@@ -224,4 +259,4 @@
 .dispatch-tracking-secondary { display: block; margin-top: 5px; font-weight: 400; font-size: 14px; color: #52685f; }
 .dispatch-assignment-form > fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
 .dispatch-detail-section fieldset, .dispatch-panel > form > fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
-.dispatch-detail-section .booking-field textarea, .dispatch-panel .booking-field textarea { width: 100%; min-width: 0; min-height: 110px; padding: 16px; border: 1px solid var(--color-border); border-radius: 14px; background: white; color: var(--color-ink); font: inherit; font-weight: 400; resize: vertical; }
+.dispatch-detail-section .booking-field textarea, .dispatch-panel .booking-field textarea, .dispatch-reject-modal .booking-field textarea { width: 100%; min-width: 0; min-height: 110px; padding: 16px; border: 1px solid var(--color-border); border-radius: 14px; background: white; color: var(--color-ink); font: inherit; font-weight: 400; resize: vertical; }

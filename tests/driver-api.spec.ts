@@ -13,6 +13,7 @@ async function setup(page: Page, row: ReturnType<typeof fixture>, write: (route:
   await mockDispatcherLogin(page, 'driver')
   await page.route('**/api/catalog', route => route.fulfill({ json: { ...emptyCatalog, hospitals: [{ id: 'hospital', name: 'โรงพยาบาลปลายทาง' }] } }))
   await page.route('**/api/driver/history', route => route.fulfill({ json: { bookings: ['COMPLETED', 'CANCELLED', 'ABORTED'].includes(row.status) ? [{ id: row.id, reference: row.reference, status: row.status, appointmentAt: row.appointmentAt }] : [] } }))
+  await page.route('**/api/driver/future', route => route.fulfill({ json: { bookings: [] } }))
   await page.route('**/api/bookings**', route => {
     expect(route.request().headers().authorization).toBe('Bearer synthetic-token')
     return route.request().method() === 'GET' ? route.fulfill({ json: { bookings: ['COMPLETED', 'CANCELLED', 'ABORTED'].includes(row.status) ? [] : [row, ...extraJobs] } }) : write(route)
@@ -54,6 +55,23 @@ test('driver completes ordered milestones with separate start and departure and 
   expect(commands).toEqual(['START_TRIP', 'DEPART_ORIGIN', 'CONFIRM_PICKUP', 'DEPART_FOR_HOSPITAL', 'CONFIRM_HANDOVER'])
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()).violations).toEqual([])
+})
+
+test('งานวันอื่น uses the trip card and disables starting future work', async ({ page }) => {
+  const row = fixture()
+  await setup(page, row, async route => { await route.abort() })
+  await page.route('**/api/driver/future', route => route.fulfill({ json: { bookings: [{
+    id: 'future-id', reference: 'BK-future', status: 'ASSIGNED', appointmentAt: '2026-11-12T10:00:00+07:00',
+    departureAt: '2026-11-12T08:30:00+07:00', pickupAt: '2026-11-12T09:00:00+07:00', patientName: 'รายละเอียดล่วงหน้า',
+  }] } }))
+  await page.getByRole('link', { name: 'งานวันนี้', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'งานวันอื่น', exact: true })).toBeVisible()
+  const card = page.locator('article.driver-trip').filter({ hasText: 'BK-future' })
+  await expect(card.getByText('09:00 น.', { exact: true })).toBeVisible()
+  await expect(card.getByText(/08:30 น\./)).toBeVisible()
+  await expect(card.getByRole('button', { name: 'เริ่มงาน', exact: true })).toBeDisabled()
+  await expect(card.getByText('รายละเอียดล่วงหน้า', { exact: true })).toHaveCount(0)
+  await expect(card.getByRole('link')).toHaveCount(0)
 })
 
 test('stale execution fails without advancing or losing the confirmation; incident blocks progress', async ({ page }) => {

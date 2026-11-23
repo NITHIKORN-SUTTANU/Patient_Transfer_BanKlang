@@ -7,7 +7,7 @@ test.use({actionTimeout:10000})
 test.beforeEach(()=>test.skip(!process.env.DATABASE_TEST_ADMIN_URL,'Local PostgreSQL required'))
 const alternative={vehicleId:ids.vehicle,driverId:ids.driver,originLocationId:ids.depot}
 
-test('original rejection dialog stores considered alternatives, rechecks and links capacity rejection atomically',async({page})=>{
+test('capacity review stores alternatives before the reason-only dialog and links rejection atomically',async({page})=>{
  test.setTimeout(60000)
  const f=await startOperationalTestApi()
  try{
@@ -15,18 +15,20 @@ test('original rejection dialog stores considered alternatives, rechecks and lin
   await f.assigned();const booking=await f.requested()
   await page.route('**/api/**',async route=>{const u=new URL(route.request().url());await route.fulfill({response:await route.fetch({url:`${f.base}${u.pathname}${u.search}`})})})
   await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis).*/,route=>route.abort())
-  await page.goto(`/staff/login?next=${encodeURIComponent(`/dispatcher?booking=${booking.id}&dialog=reject`)}`)
+  await page.goto(`/staff/login?next=${encodeURIComponent(`/dispatcher?booking=${booking.id}&dialog=details`)}`)
   await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill('synthetic-dispatcher');await page.getByLabel('รหัสผ่าน',{exact:true}).fill(syntheticPassword)
-  await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click();await page.getByRole('link',{name:'เปิดหน้าจัดรถ',exact:true}).click()
-  await page.getByRole('combobox',{name:'ประเภทเหตุผลการปฏิเสธ',exact:true}).selectOption('capacity')
-  await page.getByLabel('เหตุผลการปฏิเสธ',{exact:true}).fill('ไม่มีรถและคนขับพร้อมหลังตรวจสอบทางเลือกแล้ว')
-  await page.getByRole('button',{name:'ยืนยันปฏิเสธคำขอ',exact:true}).click();await expect(page.getByRole('alert')).toContainText('หลักฐาน')
+  await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click();await page.locator('#dispatcher-main').waitFor()
+  await page.getByRole('button',{name:'ตรวจสอบกำลังรถ',exact:true}).click()
+  await expect(page.getByRole('button',{name:'ปฏิเสธคำขอ',exact:true})).toBeDisabled()
   await page.getByRole('combobox',{name:'รถที่พิจารณา',exact:true}).selectOption(ids.vehicle)
   await page.getByRole('combobox',{name:'คนขับที่พิจารณา',exact:true}).selectOption(ids.driver)
   await page.getByRole('button',{name:'เพิ่มทางเลือกที่พิจารณา',exact:true}).click()
   await page.getByLabel('เหตุผลที่ทางเลือกทั้งหมดไม่สามารถให้บริการได้',{exact:true}).fill('รถและคนขับติดงานที่ยืนยันแล้ว ไม่มีการจัดต้นทางอื่นที่ยืนยันได้')
   await page.getByRole('button',{name:'ตรวจเส้นทางและกำลังรถล่าสุด',exact:true}).click()
   await expect(page.getByRole('status').filter({hasText:'บันทึกหลักฐานแล้ว'})).toBeVisible()
+  await page.getByRole('button',{name:'ปฏิเสธคำขอ',exact:true}).click()
+  await expect(page.getByRole('dialog').getByRole('combobox')).toHaveCount(0)
+  await page.getByLabel('เหตุผลการปฏิเสธ',{exact:true}).fill('ไม่มีรถและคนขับพร้อมหลังตรวจสอบทางเลือกแล้ว')
   const before=await f.get(booking.id);expect(before.status).toBe('REQUESTED')
   expect((await f.pool.query('SELECT count(*)::int AS n FROM patient_transfer.capacity_checks WHERE booking_id=$1',[booking.id])).rows[0].n).toBe(1)
   f.control.unavailable=true
@@ -43,14 +45,14 @@ test('original rejection dialog stores considered alternatives, rechecks and lin
  }finally{await f.close()}
 })
 
-test('approved unstarted work considers a real previous-hospital alternative; one viable alternative blocks capacity rejection',async()=>{
+test('one viable dispatch-station alternative blocks capacity rejection',async()=>{
+ test.setTimeout(60000)
  const f=await startOperationalTestApi()
  try{
-  const previous=await f.assigned()
   let booking=await f.requested('12:00');booking=await f.command(booking,'APPROVE')
-  const input={expectedRevision:booking.revision,explanation:'Checked depot and preceding hospital arrangements',alternatives:[alternative,{...alternative,originKind:'previous_hospital',originLocationId:previous.hospitalLocationId,previousBookingId:previous.id}]}
+  const input={expectedRevision:booking.revision,explanation:'Checked the dispatch station pairing',alternatives:[alternative]}
   const evidence=await f.request(`/bookings/${booking.id}/capacity-checks`,'dispatcher',input)
-  expect(evidence.alternatives.map((a:{result:string})=>a.result)).toEqual(['unavailable','available'])
+  expect(evidence.alternatives.map((a:{result:string})=>a.result)).toEqual(['available'])
   expect(evidence.rejectable).toBe(false)
   await f.command(booking,'REJECT',{reason:'Capacity claim must fail',rejectionKind:'capacity',capacityCheckId:evidence.id},'dispatcher',409)
   expect((await f.get(booking.id)).status).toBe('APPROVED')

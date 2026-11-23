@@ -117,9 +117,12 @@ test('authenticated API persists complete synthetic journeys',async t=>{
       await request('/profiles','citizen',body,422)
       body.consentId=(await request('/consents','citizen',{accepted:true,noticeVersion:'development-v1'},201)).id
       await pool.query('UPDATE patient_transfer.service_villages SET active=false WHERE id=$1',[ids.village])
-      assert.equal((await request('/profiles','citizen')).profiles.some(row=>row.id===profile.id),false)
-      await request('/profiles','citizen',body,422)
-      await pool.query('UPDATE patient_transfer.service_villages SET active=true WHERE id=$1',[ids.village])
+      try {
+        assert.equal((await request('/profiles','citizen')).profiles.some(row=>row.id===profile.id),true)
+        await request('/profiles','citizen',body,422)
+      } finally {
+        await pool.query('UPDATE patient_transfer.service_villages SET active=true WHERE id=$1',[ids.village])
+      }
       const booking=await intake('15',{patientProfileId:profile.id,patientName:profile.patientName,mobility:profile.mobility,assistance:profile.assistance,landmark:profile.landmark})
       await intake('15',{patientProfileId:randomUUID()},422)
       body.consentId=(await request('/consents','citizen',{accepted:true,noticeVersion:'development-v1'},201)).id
@@ -282,7 +285,7 @@ test('authenticated API persists complete synthetic journeys',async t=>{
       await intake('15',{diagnosis:'must not enter'},400)
       await intake('15',{latitude:0,longitude:0},422)
       await intake('13',{},422)
-      await intake('15',{appointmentAt:stamp('15','16:00')},422)
+      await intake('15',{appointmentAt:'2030-01-15T16:00:00.001+07:00'},422)
       const booking=await intake('15')
       await request(`/bookings/${booking.id}`,'other',undefined,403)
       await request(`/bookings/${booking.id}`,'admin',undefined,403)
@@ -322,9 +325,9 @@ test('authenticated API persists complete synthetic journeys',async t=>{
       const metadata={name:master.name,plate:master.plate,vehicleType:'Synthetic type',active:false,capabilities:master.capabilities,reason:'Synthetic unfinished-work check',expectedRevision:master.revision}
       await request(`/admin/resources/vehicles/${ids.vehicle}`,'admin',metadata,409)
       await request(`/admin/resources/vehicles/${ids.vehicle}`,'admin',{...metadata,active:true,capabilities:['standard']},409)
-      const window=(await request('/admin/availability','admin')).windows.find(row=>row.vehicleId===ids.vehicle&&row.startsAt===new Date(stamp('15','06:00')).toISOString())
+      const window=(await request('/admin/availability','admin')).windows.find(row=>row.driverId===ids.roster&&row.startsAt===new Date(stamp('15','06:00')).toISOString())
       const before=await pool.query('SELECT revision FROM patient_transfer.vehicles WHERE id=$1',[ids.vehicle])
-      await request(`/admin/availability/${window.id}/retire`,'admin',{expectedRevision:window.revision,expectedResourceRevision:master.revision,reason:'Must keep assigned interval'},409)
+      await request(`/admin/availability/${window.id}/retire`,'admin',{expectedRevision:window.revision,expectedResourceRevision:((await request('/catalog','admin')).drivers.find(item=>item.id===ids.roster)).revision,reason:'Must keep assigned interval'},409)
       assert.equal((await pool.query('SELECT revision FROM patient_transfer.vehicles WHERE id=$1',[ids.vehicle])).rows[0].revision,before.rows[0].revision)
       const linked=(await request('/admin/accounts','admin')).accounts.find(row=>row.id===ids.driver)
       await request(`/admin/accounts/${ids.driver}`,'admin',{name:linked.name,username:linked.username,role:'driver',active:false,reason:'Synthetic unfinished-work guard',expectedRevision:linked.revision},409)
@@ -367,7 +370,7 @@ test('authenticated API persists complete synthetic journeys',async t=>{
       assert.ok(resolved.resolved_at);assert.equal(resolved.resolved_by,ids.officer);assert.ok(resolved.resolution)
       assert.equal((await pool.query("SELECT count(*)::int AS count FROM patient_transfer.audit_logs WHERE entity_id=$1 AND action='CONFIRM_TERMINAL_READY'",[booking.id])).rows[0].count,1)
     })
-    await t.test('normal completion enforces actual turnaround; retry does not duplicate events',async()=>{
+    await t.test('normal completion releases resources at handover; retry does not duplicate events',async()=>{
       let booking=await assigned('16')
       now=stamp('16','07:50')
       const startId=randomUUID()
@@ -384,10 +387,9 @@ test('authenticated API persists complete synthetic journeys',async t=>{
       const history=await request('/driver/history','driver')
       assert.ok(history.bookings.some(item=>item.id===booking.id))
       assert.ok(history.bookings.every(item=>!Object.hasOwn(item,'patientName')&&!Object.hasOwn(item,'contactPhone')&&!Object.hasOwn(item,'pickupAddress')))
-      now=stamp('16','09:00');await command(booking,'CONFIRM_READY',{reason:'Readiness checked'},'officer',409)
-      now=stamp('16','09:10');booking=await command(booking,'CONFIRM_READY',{reason:'Turnaround and readiness checked'})
-      assert.equal(booking.status,'COMPLETED')
-      await readyAll('16')
+      assert.equal(booking.resourceHold,false)
+      const {rows:[completion]}=await pool.query('SELECT handover_at FROM patient_transfer.schedules WHERE booking_id=$1 AND committed AND released_at IS NULL',[booking.id])
+      assert.equal(completion.handover_at.toISOString(),new Date(now).toISOString())
     })
     await t.test('failed pickup cancels reservation but preserves hold until readiness',async()=>{
       let booking=await assigned('17')

@@ -26,22 +26,27 @@ test('staff identity comes from API; invalid login, revocation and logout never 
   await expect(page.getByLabel('รหัสผ่าน')).toHaveValue('')
   rejected = false
   await login()
-  await expect(page.getByRole('heading', { name: 'เจ้าหน้าที่ทดสอบ' })).toBeVisible()
+  await expect(page).toHaveURL(/\/dispatcher$/)
+  const sidebar = page.locator('#dispatcher-sidebar')
+  const profile = sidebar.getByRole('group', { name: 'เจ้าหน้าที่ทดสอบ' })
+  await expect(profile).toContainText('เจ้าหน้าที่ทดสอบ')
   expect(await page.evaluate(() => Object.values(localStorage).join('') + Object.values(sessionStorage).join(''))).not.toContain('synthetic-token')
-  revoked = true
-  await page.getByRole('button', { name: 'ตรวจสอบเซสชัน' }).click()
-  await expect(page.getByLabel('ชื่อผู้ใช้')).toBeVisible()
-  await expect(page.getByRole('alert')).toBeVisible()
-  revoked = false
-  await login()
-  await page.getByRole('button', { name: 'ออกจากระบบ' }).click()
+  await expect(page.getByRole('button', { name: 'ตรวจสอบเซสชัน' })).toHaveCount(0)
+  await sidebar.getByRole('button', { name: 'ออกจากระบบ', exact: true }).click()
   await expect(page.getByLabel('ชื่อผู้ใช้')).toBeVisible()
   expect(loggedOut).toBe(true)
+  revoked = true
+  await login()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(page.getByLabel('ชื่อผู้ใช้')).toBeVisible()
 })
 
 test('network failure preserves username and does not fabricate a staff session', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 })
   await page.route('**/api/auth/login', route => route.abort())
   await page.goto('/staff/login')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+  await expect(page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true })).toBeInViewport()
   await page.getByLabel('ชื่อผู้ใช้').fill('staff')
   await page.getByLabel('รหัสผ่าน').fill('synthetic-password')
   await page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()

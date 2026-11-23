@@ -4,7 +4,7 @@ import type { KeyboardEvent } from 'react'
 const ROW_HEIGHT = 48
 const pad = (value: number) => String(value).padStart(2, '0')
 
-export function TimeWheel({ label, value, maximum, onChange }: { label: string; value: number; maximum: number; onChange: (value: number) => void }) {
+export function TimeWheel({ label, value, minimum = 0, maximum, onChange }: { label: string; value: number; minimum?: number; maximum: number; onChange: (value: number) => void }) {
   const id = useId()
   const wheel = useRef<HTMLDivElement>(null)
   const initial = useRef(value)
@@ -17,15 +17,15 @@ export function TimeWheel({ label, value, maximum, onChange }: { label: string; 
       event.preventDefault()
       const direction = Math.sign(event.deltaY)
       const current = Math.round(element.scrollTop / rowHeight.current)
-      const next = Math.max(0, Math.min(maximum - 1, current + direction))
-      element.scrollTo({ top: next * rowHeight.current, behavior: 'instant' })
+      const next = Math.max(minimum, Math.min(maximum - 1, minimum + current + direction))
+      element.scrollTo({ top: (next - minimum) * rowHeight.current, behavior: 'instant' })
       onChange(next)
     }
     element.addEventListener('wheel', onWheel, { passive: false })
     return () => element.removeEventListener('wheel', onWheel)
-  }, [maximum, onChange])
+  }, [minimum, maximum, onChange])
   // The containing dialog opens in its layout effect, before this effect runs.
-  useEffect(() => { if (wheel.current) wheel.current.scrollTop = initial.current * ROW_HEIGHT }, [])
+  useEffect(() => { if (wheel.current) wheel.current.scrollTop = (initial.current - minimum) * ROW_HEIGHT }, [minimum])
   useEffect(() => {
     const element = wheel.current!
     const text = element.querySelector<HTMLElement>('[aria-selected=true] span')!
@@ -35,21 +35,21 @@ export function TimeWheel({ label, value, maximum, onChange }: { label: string; 
       if (next === rowHeight.current) return
       rowHeight.current = next
       element.parentElement!.style.setProperty('--time-row-height', `${next}px`)
-      element.scrollTop = value * next
+      element.scrollTop = (value - minimum) * next
     }
     const observer = new ResizeObserver(measure)
     observer.observe(text)
     measure()
     return () => observer.disconnect()
-  }, [value])
+  }, [minimum, value])
   function select(next: number) {
-    const bounded = Math.max(0, Math.min(maximum - 1, next))
+    const bounded = Math.max(minimum, Math.min(maximum - 1, next))
     wheel.current?.focus({ preventScroll: true })
-    wheel.current?.scrollTo({ top: bounded * rowHeight.current, behavior: 'instant' })
+    wheel.current?.scrollTo({ top: (bounded - minimum) * rowHeight.current, behavior: 'instant' })
     onChange(bounded)
   }
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const keys: Record<string, number> = { ArrowUp: value - 1, ArrowDown: value + 1, Home: 0, End: maximum - 1, PageUp: value - 5, PageDown: value + 5 }
+    const keys: Record<string, number> = { ArrowUp: value - 1, ArrowDown: value + 1, Home: minimum, End: maximum - 1, PageUp: value - 5, PageDown: value + 5 }
     const next = keys[event.key]
     if (next !== undefined) { event.preventDefault(); digits.current.text = ''; select(next); return }
     if (/^\d$/.test(event.key)) {
@@ -62,7 +62,10 @@ export function TimeWheel({ label, value, maximum, onChange }: { label: string; 
     }
   }
   return <div className="booking-time-field"><span id={`${id}-label`} className="booking-time-label">{label}</span><div className="booking-time-wheel-frame"><span className="booking-time-selection" aria-hidden="true" /><div ref={wheel} className="booking-time-wheel" role="listbox" tabIndex={0} aria-labelledby={`${id}-label`} aria-orientation="vertical" aria-activedescendant={`${id}-${value}`} onKeyDown={onKeyDown} onScroll={event => {
-    const nearest = Math.max(0, Math.min(maximum - 1, Math.round(event.currentTarget.scrollTop / rowHeight.current)))
+    const nearest = Math.max(minimum, Math.min(maximum - 1, minimum + Math.round(event.currentTarget.scrollTop / rowHeight.current)))
     if (nearest !== value) onChange(nearest)
-  }}>{Array.from({ length: maximum }, (_, option) => <div id={`${id}-${option}`} key={option} role="option" aria-selected={option === value} className="booking-time-option" onClick={() => select(option)}><span>{pad(option)}</span></div>)}</div></div></div>
+  }}>{Array.from({ length: maximum - minimum }, (_, index) => {
+    const option = minimum + index
+    return <div id={`${id}-${option}`} key={option} role="option" aria-selected={option === value} className="booking-time-option" onClick={() => select(option)}><span>{pad(option)}</span></div>
+  })}</div></div></div>
 }

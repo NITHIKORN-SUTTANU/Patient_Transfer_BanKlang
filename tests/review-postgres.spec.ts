@@ -5,7 +5,7 @@ import {syntheticPassword} from './helpers/admin-postgres.mjs'
 
 test.beforeEach(()=>test.skip(!process.env.DATABASE_TEST_ADMIN_URL,'Local PostgreSQL required'))
 test.use({actionTimeout:10000})
-test('dispatcher reviews cross-requester exact warnings and appends verification/correction through existing details',async({page})=>{
+test('dispatcher review API scopes duplicate warnings and appends verification corrections',async()=>{
  test.setTimeout(60000)
  const f=await startOperationalTestApi()
  try{
@@ -24,22 +24,11 @@ test('dispatcher reviews cross-requester exact warnings and appends verification
   }
   const before=await f.get(a.id),counts=async()=> (await f.pool.query('SELECT (SELECT count(*) FROM patient_transfer.trip_events) AS events,(SELECT count(*) FROM patient_transfer.notifications) AS messages')).rows[0]
   const initialCounts=await counts()
-  await page.route('**/api/**',async route=>{const url=new URL(route.request().url());await route.fulfill({response:await route.fetch({url:`${f.base}${url.pathname}${url.search}`})})})
-  await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis).*/,route=>route.abort())
-  await page.goto(`/staff/login?next=${encodeURIComponent(`/dispatcher?booking=${a.id}&dialog=details`)}`)
-  await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill('synthetic-dispatcher');await page.getByLabel('รหัสผ่าน',{exact:true}).fill(syntheticPassword)
-  await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click();await page.getByRole('link',{name:'เปิดหน้าจัดรถ',exact:true}).click()
-  await page.getByRole('button',{name:'ตรวจรายการอาจซ้ำ / โหลดประวัติล่าสุด',exact:true}).click()
-  await expect(page.getByRole('link',{name:b.reference,exact:true})).toBeVisible()
-  await page.getByRole('combobox',{name:'ผลการตรวจสอบ',exact:true}).selectOption('unreachable')
-  const notes=page.getByLabel('หมายเหตุการติดต่อ',{exact:false});await notes.fill('โทรตรวจสอบจุดรับ ยังติดต่อไม่ได้')
-  await page.getByRole('button',{name:'บันทึกผลการตรวจสอบ',exact:true}).click()
-  await expect(page.getByRole('status').filter({hasText:'สถานะคำขอไม่เปลี่ยน'})).toBeVisible()
+  const verificationPath=`/bookings/${a.id}/verification`
+  await f.request(verificationPath,'dispatcher',{eventId:randomUUID(),expectedLatestId:null,outcome:'unreachable',notes:'โทรตรวจสอบจุดรับ ยังติดต่อไม่ได้'})
   review=await f.request(`/bookings/${a.id}/review`);expect(review.history).toHaveLength(1)
   const first=review.history[0]
-  await page.getByLabel('แก้ไขผลรายการล่าสุด',{exact:false}).check();await page.getByRole('combobox',{name:'ผลการตรวจสอบ',exact:true}).selectOption('confirmed');await notes.fill('ติดต่อได้และยืนยันจุดรับแล้ว แก้ไขผลเดิม')
-  await page.getByRole('button',{name:'บันทึกผลการตรวจสอบ',exact:true}).click()
-  await expect(page.getByText('ติดต่อได้และยืนยันจุดรับแล้ว แก้ไขผลเดิม',{exact:true})).toBeVisible()
+  await f.request(verificationPath,'dispatcher',{eventId:randomUUID(),expectedLatestId:first.id,correctsId:first.id,outcome:'confirmed',notes:'ติดต่อได้และยืนยันจุดรับแล้ว แก้ไขผลเดิม'})
   review=await f.request(`/bookings/${a.id}/review`)
   expect(review.history).toHaveLength(2);expect(review.history[0].correctsId).toBe(first.id);expect(review.history[1]).toEqual(first)
   expect(await f.get(a.id)).toEqual(before);expect(await counts()).toEqual(initialCounts)

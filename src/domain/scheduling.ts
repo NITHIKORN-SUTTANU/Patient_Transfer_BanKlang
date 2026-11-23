@@ -24,6 +24,8 @@ export interface ScheduleInput {
   originToPickup: RouteLeg
   pickupToHospital: RouteLeg
   pickupWaitingMinutes?: number
+  /** Duration retained when validating a schedule written under the former policy. */
+  historicalTurnaroundMinutes?: number
 }
 export interface ScheduledReservation extends ResourceReservation {
   tripId: string
@@ -86,10 +88,7 @@ const iso = (value: number) => {
   requireSchedule(Number.isFinite(value) && Math.abs(value) <= 8.64e15, 'INVALID', 'Calculated timestamp out of range')
   return new Date(value).toISOString()
 }
-function local(value: number) {
-  const shifted = new Date(value + 7 * 60 * MINUTE).toISOString()
-  return { day: shifted.slice(0, 10), clock: shifted.slice(11, 23) }
-}
+const localDay = (value: number) => new Date(value + 7 * 60 * MINUTE).toISOString().slice(0, 10)
 function validateCalendar(calendar: ServiceCalendar) {
   requireSchedule(calendar.timezone === 'Asia/Bangkok' && calendar.opensAt === '06:00' && calendar.closesAt === '16:00', 'INVALID', 'Expected confirmed Bangkok service hours 06:00–16:00')
   for (const day of calendar.closureDates) {
@@ -118,19 +117,18 @@ export function calculateSchedule(input: ScheduleInput, calendar: ServiceCalenda
   const arrival = appointment - 20 * MINUTE
   const pickup = arrival - Math.ceil(pickupToHospital.minutes * MINUTE) - waiting * MINUTE
   const departure = pickup - Math.ceil(originToPickup.minutes * MINUTE)
-  const ready = arrival + 30 * MINUTE
+  const ready = arrival + (input.historicalTurnaroundMinutes ?? 0) * MINUTE
   const departureAt = iso(departure)
   const readyAt = iso(ready)
-  const startLocal = local(departure)
-  const endLocal = local(ready)
-  requireSchedule(!calendar.closureDates.includes(startLocal.day) && !calendar.closureDates.includes(endLocal.day), 'CLOSED', 'Trip falls on a configured closure date')
-  requireSchedule(startLocal.day === endLocal.day && startLocal.clock >= '06:00:00.000' && endLocal.clock <= '16:00:00.000', 'HOURS', 'The full trip including turnaround must fit 06:00–16:00')
+  const departureDay = localDay(departure)
+  const appointmentDay = localDay(appointment)
+  requireSchedule(!calendar.closureDates.some(day => day >= departureDay && day <= appointmentDay), 'CLOSED', 'Trip falls on a configured closure date')
   return { tripId: request.tripId, hospitalId: request.hospitalId, vehicleId: input.vehicleId, driverId: input.driverId,
     origin: { ...origin }, departureAt, pickupAt: iso(pickup), arrivalAt: iso(arrival), readyAt, pickupWaitingMinutes: waiting }
 }
 
 function overlap(start: number, end: number, otherStart: number, otherEnd: number) {
-  return start < otherEnd && otherStart < end
+  return Math.max(start, otherStart) < Math.min(end, otherEnd)
 }
 
 function sameSchedule(a: ScheduledReservation, b: ScheduledReservation) {
@@ -154,7 +152,7 @@ export function validateReservations(context: SchedulingContext): SchedulingIssu
       if (!sameSchedule(calculated, record.schedule)) add('STALE', id, 'Stored schedule differs from its request/routes; recalculate before confirmation')
       if (record.continuation) {
         const leg = record.continuation
-        requireSchedule(!!leg.hospitalId && time(leg.arrivalAt) >= time(leg.recordedAt) && time(leg.readyAt) >= time(leg.arrivalAt) + 30 * MINUTE && time(leg.readyAt) >= time(record.schedule.readyAt), 'INVALID', 'Invalid operational continuation')
+        requireSchedule(!!leg.hospitalId && time(leg.arrivalAt) >= time(leg.recordedAt) && time(leg.readyAt) >= time(leg.arrivalAt), 'INVALID', 'Invalid operational continuation')
       }
     } catch (error) {
       if (!(error instanceof SchedulingError)) throw error
@@ -165,7 +163,10 @@ export function validateReservations(context: SchedulingContext): SchedulingIssu
   if (issues.length) return issues
   for (const kind of ['vehicles', 'drivers'] as const) {
     const key = kind === 'vehicles' ? 'vehicleId' : 'driverId'
-    const effective = context.reservations.map(record => record.continuation ? {...record, schedule: {...record.schedule, hospitalId: record.continuation.hospitalId, arrivalAt: record.continuation.arrivalAt, readyAt: record.continuation.readyAt}} : record)
+    const effective = context.reservations.map(record => {
+      const arrivalAt = record.continuation?.arrivalAt ?? record.schedule.arrivalAt
+      return { ...record, schedule: { ...record.schedule, hospitalId: record.continuation?.hospitalId ?? record.schedule.hospitalId, arrivalAt, readyAt: arrivalAt } }
+    })
     const ids = new Set(effective.map(record => record.schedule[key]))
     for (const id of ids) {
       const resources = context[kind].filter(resource => resource.id === id)
@@ -187,15 +188,16 @@ export function validateReservations(context: SchedulingContext): SchedulingIssu
           const { schedule, input } = record
           const start = time(schedule.departureAt)
           const end = time(schedule.readyAt)
-          if (!resource.capabilities.includes(input.request.mobility)) add('CAPABILITY', schedule.tripId, 'Required assistance capability unavailable', id)
+          if (kind === 'vehicles' && !resource.capabilities.includes(input.request.mobility)) add('CAPABILITY', schedule.tripId, 'Required assistance capability unavailable', id)
           // An already onboard continuation may overrun its planned interval;
           // retain the original window proof and independently check all later work.
-          const plannedEnd = record.continuation ? time(context.reservations.find(item => item.schedule.tripId === schedule.tripId)!.schedule.readyAt) : end
-          if (!windows.some(window => window.start <= start && window.end >= plannedEnd)) add('SHIFT', schedule.tripId, 'Full trip must fit an availability window', id)
+          const plannedEnd = record.continuation ? time(context.reservations.find(item => item.schedule.tripId === schedule.tripId)!.schedule.arrivalAt) : end
+          if (kind === 'drivers' && !windows.some(window => window.start <= start && window.end >= plannedEnd)) add('SHIFT', schedule.tripId, 'Full trip must fit the driver’s working window', id)
           if (holds.some((hold, index) => resource.holds[index].tripId !== schedule.tripId && overlap(start, end, hold.start, hold.end))) add('HOLD', schedule.tripId, 'Resource has an operational hold', id)
           for (const other of timeline.slice(0, index)) {
             if (overlap(start, end, time(other.schedule.departureAt), time(other.schedule.readyAt))) add('CONFLICT', schedule.tripId, 'Resource reservations overlap', id, other.schedule.tripId)
           }
+          if (schedule.origin.kind !== 'handoff') continue
           const previous = timeline[index - 1]?.schedule
           const updates = (resource.positionUpdates ?? []).map(update => ({ ...update, timestamp: time(update.at) }))
             .filter(update => update.timestamp <= start && update.timestamp >= (previous ? time(previous.readyAt) : initialReady))
@@ -204,7 +206,6 @@ export function validateReservations(context: SchedulingContext): SchedulingIssu
           const ready = previous ? time(previous.readyAt) : initialReady
           if (start < ready) add('CONFLICT', schedule.tripId, 'Resource not ready at origin departure', id, previous?.tripId)
           if (schedule.origin.locationId !== expectedLocation) add('LOCATION', schedule.tripId, 'Resource cannot reach origin without a validated repositioning leg', id, previous?.tripId)
-          if (schedule.origin.kind === 'previous_hospital' && (!previous || previous.tripId !== schedule.origin.previousTripId)) add('CHAIN', schedule.tripId, 'Origin must reference the immediately preceding trip for both resources', id, previous?.tripId)
         }
       } catch (error) {
         if (!(error instanceof SchedulingError)) throw error
@@ -217,6 +218,7 @@ export function validateReservations(context: SchedulingContext): SchedulingIssu
 
 /** Returns a proposal without changing the committed context. */
 export function proposeReservation(context: SchedulingContext, input: ScheduleInput): ReservedTrip {
+  requireSchedule(input.origin.kind !== 'previous_hospital', 'LOCATION', 'New schedules must depart from the dispatch station')
   return { input: structuredClone(input), schedule: calculateSchedule(input, context.calendar) }
 }
 

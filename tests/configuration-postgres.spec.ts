@@ -98,29 +98,24 @@ test('dispatcher previews and direct commands reject inactive hospitals, changed
   } finally {if(!page.isClosed()){await page.unrouteAll({behavior:'wait'});await page.close()}await f.close()}
 })
 
-test('changing a predecessor destination cannot silently move the downstream chained origin',async()=>{
+test('changing the first hospital preserves the next dispatch-station trip',async()=>{
+  test.setTimeout(60000)
   const f=await fixture()
   try {
     const first=await f.assigned()
-    const second=await f.assigned('11:00',{originLocationId:first.hospitalLocationId,originKind:'previous_hospital',previousBookingId:first.id})
+    const second=await f.assigned('11:00')
     await f.changeHospital()
     const booking=await f.get(first.id)
-    const beforeFirst=await f.snapshot(first.id),beforeSecond=await f.snapshot(second.id)
-    const result=await f.request(`/bookings/${first.id}/configuration-preview`,'dispatcher',f.selection(booking),409)
-    expect(result.details.some((issue:{code:string;tripId:string})=>issue.code==='LOCATION'&&issue.tripId===second.id)).toBe(true)
-    const data=await f.request('/admin/service-data','admin')
-    await f.request(`/bookings/${first.id}/modification`,'dispatcher',f.selection(booking,{acceptConfiguration:true,expectedConfigurationRevision:data.settings.revision,reason:'Cannot invalidate following origin'}),409)
-    expect(await f.snapshot(first.id)).toEqual(beforeFirst)
-    expect(await f.snapshot(second.id)).toEqual(beforeSecond)
-    // Explicitly remove the incompatible downstream commitment before accepting
-    // a predecessor replacement, then create its successor at the new location.
-    await f.command(await f.get(second.id),'CANCEL',{reason:'Remove incompatible future chain before reviewed replacement'})
-    const fresh=await f.get(first.id)
-    const preview=await f.request(`/bookings/${first.id}/configuration-preview`,'dispatcher',f.selection(fresh))
-    const accepted=await f.request(`/bookings/${first.id}/modification`,'dispatcher',f.selection(fresh,{acceptConfiguration:true,expectedConfigurationRevision:preview.configurationRevision,reason:'Following commitment explicitly removed'}))
+    const beforeSecond=await f.snapshot(second.id)
+    const preview=await f.request(`/bookings/${first.id}/configuration-preview`,'dispatcher',f.selection(booking))
+    const accepted=await f.request(`/bookings/${first.id}/modification`,'dispatcher',f.selection(booking,{
+      acceptConfiguration:true,expectedConfigurationRevision:preview.configurationRevision,reason:'Revised destination reviewed',
+    }))
     expect(accepted.hospitalLocationId).not.toBe(first.hospitalLocationId)
-    const replacement=await f.assigned('11:00',{originLocationId:accepted.hospitalLocationId,originKind:'previous_hospital',previousBookingId:first.id})
-    expect(replacement.schedule?.originLocationId).toBe(accepted.hospitalLocationId)
+    const afterSecond=await f.snapshot(second.id)
+    expect(afterSecond.schedules).toEqual(beforeSecond.schedules)
+    expect(afterSecond.booking.schedule).toEqual(beforeSecond.booking.schedule)
+    expect(afterSecond.booking.schedule?.originLocationId).toBe(ids.depot)
   } finally {await f.close()}
 })
 

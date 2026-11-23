@@ -30,3 +30,22 @@ test('bulk hydration still rejects a foreign owner and rolls back the page', asy
   await assert.rejects(bookingList(client, { id: 'owner', role: 'citizen' }, null, row => row), { status: 403 })
   assert.equal(statements.at(-1), 'ROLLBACK')
 })
+
+test('future driver pages scope the query and project only planned times and reference', async () => {
+  const row = { id: '00000000-0000-4000-8000-000000000001', reference: 'BK-future', status: 'ASSIGNED',
+    appointmentAt: '2030-01-16T02:00:00Z', departureAt: '2030-01-16T00:50:00Z', pickupAt: '2030-01-16T01:05:00Z',
+    patientName: 'Synthetic private field', cursor_at: '2030-01-16T02:00:00.000000Z' }
+  const driver = { id: 'driver-user', role: 'driver', driver_id: 'assigned-driver', service_day: '2030-01-15', in_shift: false }
+  const queries = []
+  const client = { async query(sql, values) {
+    queries.push({ sql, values })
+    return { rows: sql.includes(' AS cursor_at') ? [row] : [] }
+  } }
+  const result = await bookingList(client, driver, null, () => assert.fail('Future jobs must not be hydrated'), 'future')
+  assert.deepEqual(queries[1].values, ['assigned-driver', '2030-01-15'])
+  assert.match(queries[1].sql, /s\.driver_id=\$1 AND b\.status='ASSIGNED' AND b\.started_at IS NULL/)
+  assert.match(queries[1].sql, /::date>\$2::date/)
+  const { patientName, cursor_at, ...summary } = row
+  assert.deepEqual(result, { bookings: [summary], nextCursor: null })
+  await assert.rejects(bookingList(client, { ...driver, role: 'dispatcher' }, null, row => row, 'future'), { status: 403 })
+})

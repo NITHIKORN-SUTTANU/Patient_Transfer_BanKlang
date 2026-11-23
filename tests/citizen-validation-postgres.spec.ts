@@ -5,7 +5,7 @@ import { recoveryFingerprint } from '../scripts/database/recovery.mjs'
 test.use({ actionTimeout: 10000 })
 test.beforeEach(() => test.skip(!process.env.DATABASE_TEST_ADMIN_URL, 'Local test database required'))
 
-for (const operation of ['intake', 'profile-create', 'profile-update'] as const) for (const rejectedField of ['patientName', 'mobility', 'assistance'] as const) test(`original citizen ${operation} corrects real ${rejectedField} rejection without losing a Unicode boundary draft`, async ({ page }) => {
+for (const operation of ['intake', 'profile-replace', 'profile-update'] as const) for (const rejectedField of ['patientName', 'mobility', 'assistance'] as const) test(`original citizen ${operation} corrects real ${rejectedField} rejection without losing a Unicode boundary draft`, async ({ page }) => {
   test.setTimeout(60000)
   const f = await startOperationalTestApi({ liffId: 'synthetic-validation', verifyLine: async token => {
     expect(token).toBe('synthetic-validation-token')
@@ -29,8 +29,7 @@ for (const operation of ['intake', 'profile-create', 'profile-update'] as const)
     }
     const original = await snapshots()
     const oldLocation = (await f.pool.query('SELECT * FROM patient_transfer.locations WHERE id=$1', [original[4][0].pickup_location_id])).rows
-    const targetPath = operation === 'intake' ? '/api/bookings' : operation === 'profile-create' ? '/api/profiles' : `/api/profiles/${profile.id}`
-    const profileButton = operation === 'profile-update' ? 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' : 'บันทึกข้อมูลผู้ป่วย'
+    const targetPath = operation === 'intake' ? '/api/bookings' : `/api/profiles/${profile.id}`
     let corruptNext = false
     let bookingPosts = 0
     const submitted: Record<string, unknown>[] = []
@@ -58,7 +57,7 @@ for (const operation of ['intake', 'profile-create', 'profile-update'] as const)
     await page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ }).check()
     await page.getByRole('button', { name: 'รับทราบและถัดไป', exact: true }).click()
     await page.getByRole('button', { name: 'จองให้ผู้อื่น', exact: true }).click()
-    if (operation === 'profile-update') await page.getByLabel('ข้อมูลผู้ป่วยที่บันทึกไว้').selectOption(profile.id)
+    if (operation === 'profile-update') await page.getByRole('button', { name: 'ใช้ข้อมูลบันทึกไว้', exact: true }).click()
     const patient = ` ก${'😀'.repeat(119)} `, requester = ` ผ${'😀'.repeat(119)} `
     await page.getByLabel('ชื่อผู้ป่วย *', { exact: true }).fill(` ${'😀'.repeat(121)} `)
     await page.getByLabel('ชื่อผู้ดูแล / ผู้ติดต่อ *', { exact: true }).fill(requester)
@@ -84,13 +83,11 @@ for (const operation of ['intake', 'profile-create', 'profile-update'] as const)
     await page.getByRole('button', { name: 'รถเข็น', exact: true }).click()
     await page.getByRole('checkbox', { name: 'ต้องการผู้ช่วยพยุงขึ้น-ลงรถ', exact: true }).check()
     await page.getByRole('checkbox', { name: 'มีผู้ดูแลเดินทางไปด้วย', exact: true }).check()
+    await page.getByRole('radio', { name: 'กรอกที่อยู่แทนแผนที่', exact: true }).check()
     await page.getByLabel('หมู่บ้านในเขตบริการ *').selectOption(ids.village)
     const address = ` ${'😀'.repeat(1000)} `, landmark = ` ${'ก'.repeat(1000)} `
     await page.getByLabel('ที่อยู่จุดรับ *').fill(`${'😀'.repeat(1001)}`)
     await page.getByLabel('จุดสังเกต', { exact: true }).fill(landmark)
-    await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง', { exact: true }).click()
-    await page.getByLabel('ละติจูด', { exact: true }).fill('18.59')
-    await page.getByLabel('ลองจิจูด', { exact: true }).fill('99.05')
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
     await expect(page.getByLabel('ที่อยู่จุดรับ *')).toHaveAttribute('aria-invalid', 'true')
     expect(await recoveryFingerprint(f.pool)).toEqual(beforeClient)
@@ -101,7 +98,7 @@ for (const operation of ['intake', 'profile-create', 'profile-update'] as const)
     corruptNext = true
     if (operation !== 'intake') await page.getByRole('checkbox', { name: 'บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป', exact: true }).check()
     const denied = page.waitForResponse(r => r.url().endsWith(targetPath) && r.request().method() === 'POST')
-    await page.getByRole('button', { name: operation === 'intake' ? 'ยืนยันและส่งคำขอ' : profileButton, exact: true }).click()
+    await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ', exact: true }).click()
     expect((await denied).status()).toBe(400)
     expect((await (await denied).json()).details.field).toBe(rejectedField)
     expect(await recoveryFingerprint(f.pool)).toEqual(beforeDenied)
@@ -134,35 +131,25 @@ for (const operation of ['intake', 'profile-create', 'profile-update'] as const)
     if (rejectedField !== 'patientName') await expect(page.getByRole('group', { name: rejectedField === 'mobility' ? 'การช่วยเหลือ' : 'ความช่วยเหลือเพิ่มเติม', exact: true })).toHaveAttribute('aria-invalid', 'false')
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'ตรวจสอบข้อมูล', exact: true })).toBeVisible()
-    let savedProfileId: string | undefined
-    if (operation !== 'intake') {
-      expect(bookingPosts).toBe(0)
-      await expect(page.getByRole('button', { name: 'ลองส่งคำขออีกครั้ง', exact: true })).toHaveCount(0)
-      await expect(page.getByRole('alert')).toContainText('บันทึกข้อมูลผู้ป่วยไม่สำเร็จ')
-      const profileSaved = page.waitForResponse(r => r.url().endsWith(targetPath) && r.request().method() === 'POST')
-      await page.getByRole('button', { name: profileButton, exact: true }).click()
-      expect((await profileSaved).status()).toBe(operation === 'profile-create' ? 201 : 200)
-      const updated = await (await profileSaved).json()
-      savedProfileId = updated.id
-      expect(updated).toMatchObject({ patientName: patient.trim(), contactPhone: '0800000001', mobility: 'wheelchair', assistance: ['boarding_support', 'caregiver_accompanies'], pickupAddress: address.trim(), landmark: landmark.trim() })
-      if (operation === 'profile-update') expect(updated.id).toBe(profile.id)
-      else expect(updated.id).not.toBe(profile.id)
-      await expect(page.getByRole('checkbox', { name: 'บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป', exact: true })).not.toBeChecked()
-      await expect(page.getByRole('alert')).toHaveCount(0)
-      expect(bookingPosts).toBe(0)
-      expect((await owner('/profiles')).profiles).toHaveLength(operation === 'profile-create' ? 2 : 1)
-    }
+    const profileSaved = operation === 'intake' ? null : page.waitForResponse(r => r.url().endsWith(targetPath) && r.request().method() === 'POST')
+    if (profileSaved) expect(bookingPosts).toBe(0)
     const saved = page.waitForResponse(r => r.url().endsWith('/api/bookings') && r.request().method() === 'POST')
-    await page.getByRole('button', { name: operation === 'intake' ? 'ลองส่งคำขออีกครั้ง' : 'ยืนยันและส่งคำขอ', exact: true }).click()
+    await page.getByRole('button', { name: 'ลองส่งคำขออีกครั้ง', exact: true }).click()
     expect((await saved).status()).toBe(201)
     const booking = await (await saved).json()
     await expect(page.getByRole('heading', { name: 'ส่งคำขอแล้ว', exact: true })).toBeVisible()
-    expect(booking).toMatchObject({ patientName: patient.trim(), requesterName: requester.trim(), contactPhone: '0800000001', pickupAddress: address.trim(), landmark: landmark.trim(), mobility: 'wheelchair', assistance: ['boarding_support', 'caregiver_accompanies'], bookingFor: 'other', latitude: 18.59, longitude: 99.05 })
+    expect(booking).toMatchObject({ patientName: patient.trim(), requesterName: requester.trim(), contactPhone: '0800000001', pickupAddress: address.trim(), landmark: landmark.trim(), mobility: 'wheelchair', assistance: ['boarding_support', 'caregiver_accompanies'], bookingFor: 'other', latitude: null, longitude: null })
     expect(submitted).toHaveLength(2)
     expect(bookingPosts).toBe(operation === 'intake' ? 2 : 1)
-    if (savedProfileId) expect(booking.patientProfileId).toBe(savedProfileId)
+    if (profileSaved) {
+      const response = await profileSaved
+      expect(response.status()).toBe(200)
+      expect(await response.json()).toMatchObject({ id: profile.id, patientName: patient.trim(), contactPhone: '0800000001', mobility: 'wheelchair', assistance: ['boarding_support', 'caregiver_accompanies'], pickupAddress: address.trim(), landmark: landmark.trim() })
+      expect(booking.patientProfileId).toBe(profile.id)
+      expect((await owner('/profiles')).profiles).toHaveLength(1)
+    }
     expect((await owner('/bookings')).bookings).toHaveLength(2)
-    if (operation === 'profile-update') expect((await snapshots()).slice(0, 4)).toEqual(original.slice(0, 4))
+    if (operation !== 'intake') expect((await snapshots()).slice(0, 4)).toEqual(original.slice(0, 4))
     else expect(await snapshots()).toEqual(original)
     expect((await f.pool.query('SELECT * FROM patient_transfer.locations WHERE id=$1', [original[4][0].pickup_location_id])).rows).toEqual(oldLocation)
     const messages = (await f.pool.query('SELECT status,attempts FROM patient_transfer.notifications')).rows

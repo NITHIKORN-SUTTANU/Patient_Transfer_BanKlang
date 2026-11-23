@@ -1,3 +1,4 @@
+import { vehicleLabel } from './vehicleLabel'
 import { useEffect, useState } from 'react'
 import type { AdminAccount, AuditEvent, DemoState } from '../data/seed'
 import { ApiError } from './api'
@@ -45,7 +46,7 @@ export function useAdminData() {
         before: event.before ? JSON.stringify(event.before, null, 2) : event.entityType === 'staff_account' ? undefined : 'รายละเอียดจำกัดตามสิทธิ์',
         after: event.after ? JSON.stringify(event.after, null, 2) : 'รายละเอียดจำกัดตามสิทธิ์' }))
       setData({ summary, catalog, windows: availability.windows ?? [], state: { version: 1, selectedActor: null, bookings: [], accounts: accounts.accounts.map(accountView),
-        vehicles: catalog.vehicles.map(vehicle => ({ id: vehicle.id, label: `${vehicle.name} · ${vehicle.plate}`, active: vehicle.active, vehicleType: vehicle.vehicleType,
+        vehicles: catalog.vehicles.map(vehicle => ({ id: vehicle.id, label: vehicleLabel(vehicle), active: vehicle.active, vehicleType: vehicle.vehicleType,
           support: vehicle.capabilities.map(code => ({ standard: 'เดินได้', wheelchair: 'รถเข็น', stretcher: 'เปลนอน' } as Record<string, string>)[code] ?? code).join(' / ') })),
         drivers: catalog.drivers.map(driver => ({ id: driver.id, name: driver.name, active: driver.rosterActive ?? driver.active, accountId: driver.accountId, phone: driver.phone })),
         settings: catalog.settings ? { center: catalog.settings.center, parking: { latitude: catalog.settings.latitude, longitude: catalog.settings.longitude },

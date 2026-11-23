@@ -1,3 +1,4 @@
+import { chooseCitizenPickup } from './helpers/citizen-gps'
 import { test, expect } from '@playwright/test'
 import { startOperationalTestApi, ids } from './helpers/operational-postgres'
 import { recoveryFingerprint } from '../scripts/database/recovery.mjs'
@@ -39,11 +40,7 @@ test('original citizen retries a lost committed response with the same identity 
     await page.getByRole('listbox', { name: 'นาที', exact: true }).press('Home')
     await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
-    await page.getByLabel('หมู่บ้านในเขตบริการ *').selectOption(ids.village)
-    await page.getByLabel('ที่อยู่จุดรับ *').fill('บ้านทดสอบคำขอซ้ำ')
-    await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง', { exact: true }).click()
-    await page.getByLabel('ละติจูด', { exact: true }).fill('18.59')
-    await page.getByLabel('ลองจิจูด', { exact: true }).fill('99.05')
+    await chooseCitizenPickup(page, 18.59, 99.05)
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
     const failed = page.waitForEvent('requestfailed', { predicate: r => r.url().endsWith('/api/bookings') && r.method() === 'POST' })
     await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ', exact: true }).click()

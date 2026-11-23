@@ -26,20 +26,20 @@ function timestamp(value,label) {
 export async function saveResource(client,user,kind,body,now,id) {
   check(user.role==='admin',403,'Administrator authority required')
   const key=kindKey(kind)
-  const common=['name','capabilities','active','reason',...(kind==='vehicles'?['plate','vehicleType']:['userId','phone'])]
+  const common=['name','active','reason',...(kind==='vehicles'?['plate','vehicleType','capabilities']:['userId','phone'])]
   const required=[...common,...(id?['expectedRevision']:['locationId','availableAt','initialPositionConfirmed'])]
-  fields(body,[...required,...(kind==='drivers'&&id?['sameDriverConfirmed']:[])],required)
+  fields(body,[...required,...(kind==='drivers'?['capabilities',...(id?['sameDriverConfirmed']:[])]:[])],required)
   const name=text(body.name,'resource name',120),reason=text(body.reason,'reason',1000)
   const plate=kind==='vehicles'?text(body.plate,'plate',120):undefined
   const vehicleType=kind==='vehicles'?text(body.vehicleType,'vehicle type',120):undefined
   check(typeof body.active==='boolean',400,'Resource status required')
-  check(Array.isArray(body.capabilities)&&body.capabilities.length>0&&body.capabilities.length<=3&&body.capabilities.every(value=>['standard','wheelchair','stretcher'].includes(value))&&new Set(body.capabilities).size===body.capabilities.length,400,'Invalid resource capabilities')
-  const capabilities=[...body.capabilities].sort()
+  if(kind==='vehicles') check(Array.isArray(body.capabilities)&&body.capabilities.length>0&&body.capabilities.length<=3&&body.capabilities.every(value=>['standard','wheelchair','stretcher'].includes(value))&&new Set(body.capabilities).size===body.capabilities.length,400,'Invalid resource capabilities')
+  const capabilities=kind==='vehicles'?[...body.capabilities].sort():null
   const previous=id?await resourceRow(client,kind,id,true):null
   if(previous) {
     check(Number.isSafeInteger(body.expectedRevision)&&body.expectedRevision===Number(previous.revision),409,'Resource changed; reload revision')
     const identityChanged=kind==='vehicles'?plate!==previous.plate:body.userId!==previous.user_id
-    const critical=identityChanged||previous.active&&!body.active||JSON.stringify([...previous.capabilities].sort())!==JSON.stringify(capabilities)
+    const critical=identityChanged||previous.active&&!body.active||(kind==='vehicles'&&JSON.stringify([...previous.capabilities].sort())!==JSON.stringify(capabilities))
     if(critical) {
       const {rowCount}=await client.query(`SELECT 1 FROM patient_transfer.schedules s JOIN patient_transfer.bookings b ON b.id=s.booking_id
         WHERE s.${key}=$1 AND s.committed AND s.released_at IS NULL AND b.status NOT IN ('COMPLETED','CANCELLED','REJECTED','ABORTED')`,[id])
@@ -73,9 +73,9 @@ export async function saveResource(client,user,kind,body,now,id) {
     check(typeof body.phone==='string',400,'Driver contact phone required')
     const phone=body.phone.replace(/[\s-]/g,'').replace(/^\+66/,'0')
     check(/^0[0-9]{8,9}$/.test(phone),400,'Invalid driver contact phone')
-    const values=[userId,phone,capabilities,body.active]
-    const result=id?await client.query('UPDATE patient_transfer.drivers SET user_id=$1,phone=$2,capabilities=$3,active=$4 WHERE id=$5 RETURNING id',[...values,id])
-      :await client.query('INSERT INTO patient_transfer.drivers(user_id,phone,capabilities,active,location_id,available_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING id',[...values,body.locationId,body.availableAt])
+    const values=[userId,phone,body.active]
+    const result=id?await client.query('UPDATE patient_transfer.drivers SET user_id=$1,phone=$2,active=$3 WHERE id=$4 RETURNING id',[...values,id])
+      :await client.query('INSERT INTO patient_transfer.drivers(user_id,phone,active,location_id,available_at) VALUES($1,$2,$3,$4,$5) RETURNING id',[...values,body.locationId,body.availableAt])
     await client.query('UPDATE patient_transfer.users SET display_name=$2 WHERE id=$1 AND display_name<>$2',[userId,name])
     saved=await resourceRow(client,kind,result.rows[0].id)
   }

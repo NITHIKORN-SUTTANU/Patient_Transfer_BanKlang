@@ -7,11 +7,8 @@ import { bangkokDate } from '../services/booking'
 import { dispatchDate, dispatchTime } from '../services/dispatch'
 import { ScheduleSummary } from '../components/DispatchAssignment'
 import { ApiDispatchAssignment } from '../components/ApiDispatchAssignment'
-import { NotificationFailures } from '../components/NotificationFailures'
-import {DispatchReview} from '../components/DispatchReview'
 import {CapacityEvidence} from '../components/CapacityEvidence'
 import { MonthlyReportExport } from '../components/MonthlyReportExport'
-import {DispatcherAlerts} from '../components/DispatcherAlerts'
 import {DailyManifestExport} from '../components/DailyManifestExport'
 import { DispatcherOperations, ResourceReadiness } from '../components/DispatcherOperations'
 import { bookingCommand, dispatcherError, statusLabels, useDispatcherData } from '../services/dispatcherApi'
@@ -21,6 +18,7 @@ import { DispatcherPickupMap } from '../components/DispatcherPickupMap'
 import { DispatchButton, DispatchModal } from '../components/DispatcherUI'
 import { ServiceTable } from '../components/ServiceTable'
 import { ServiceSymbol } from '../components/ServiceSymbol'
+import { StaffSidebarProfile } from '../components/StaffSidebarProfile'
 import '../booking.css'
 import '../dispatcher.css'
 
@@ -36,10 +34,11 @@ export function DispatcherPage() {
   const state = remote.data?.state ?? createSeedState()
   const [busy, setBusy] = useState(false)
   const submitting = useRef(false)
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState<{ message: string; assignmentId?: string } | null>(null)
   const [error, setError] = useState('')
   const [reason, setReason] = useState('')
-  const [rejectionKind,setRejectionKind]=useState<'other'|'capacity'>('other')
+  const [verifiedLatitude, setVerifiedLatitude] = useState('')
+  const [verifiedLongitude, setVerifiedLongitude] = useState('')
   const [capacityCheckId,setCapacityCheckId]=useState<string|null>(null)
   const [search, setSearch] = useState('')
   const [date, setDate] = useState('')
@@ -49,8 +48,8 @@ export function DispatcherPage() {
   const [now, setNow] = useState(() => Date.now())
   const main = useRef<HTMLElement>(null)
   useEffect(() => {
-    if (!notice) return
-    const timeout = window.setTimeout(() => setNotice(''), 5000)
+    if (!notice || notice.assignmentId) return
+    const timeout = window.setTimeout(() => setNotice(null), 5000)
     return () => window.clearTimeout(timeout)
   }, [notice])
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer) }, [])
@@ -65,24 +64,38 @@ export function DispatcherPage() {
   const selectedId = params.get('booking')
   const selected = selectedId ? waiting.find(b => b.id === selectedId) : waiting[0]
   const modalBooking = state.bookings.find(b => b.id === selectedId)
+  const modalRow = remote.data?.rows.find(row => row.id === selectedId)
+  const needsPickupVerification = modalRow?.latitude === null
   const dialog = params.get('dialog')
   const previousDialog = useRef(dialog)
   useLayoutEffect(() => {
-    if (dialog === 'approve') document.getElementById('approval-back')?.focus()
+    if (dialog === 'approve') document.getElementById(needsPickupVerification ? 'verified-latitude' : 'approval-back')?.focus()
     else if (dialog === 'details' && previousDialog.current === 'approve') document.getElementById('approval-start')?.focus()
     previousDialog.current = dialog
-  }, [dialog])
+  }, [dialog, needsPickupVerification])
   const closeModal = () => { if (submitting.current) return; setError(''); setParams(screen === 'assignment' && selectedId ? { booking: selectedId } : {}, { replace: true }) }
   function openDetails(b: Booking) { setError(''); setReason(''); setParams({ booking: b.id, dialog: screen === 'tracking' ? 'tracking' : 'details' }) }
-  function openDecision(decision: 'approve' | 'reject') { if(submitting.current)return; setError('');setCapacityCheckId(null);setRejectionKind('other'); setParams({ booking: selectedId!, dialog: decision }, { replace: true }) }
+  function openDecision(decision: 'approve' | 'reject' | 'capacity') { if(submitting.current)return; setError('');setCapacityCheckId(null);setVerifiedLatitude('');setVerifiedLongitude(''); setParams({ booking: selectedId!, dialog: decision }, { replace: true }) }
   async function decide(decision: 'approved' | 'rejected') {
+    const rejectionKind = dialog === 'reject-capacity' ? 'capacity' : 'other'
     if (!modalBooking || submitting.current || remote.loading) return
     if (decision === 'rejected' && !reason.trim()) { setError('กรุณาระบุเหตุผลการปฏิเสธ'); return }
     if(decision==='rejected'&&rejectionKind==='capacity'&&!capacityCheckId){setError('กรุณาบันทึกหลักฐานกำลังรถที่เป็นปัจจุบันก่อนปฏิเสธ');return}
+    const pickup = decision === 'approved' && needsPickupVerification
+      ? { latitude: verifiedLatitude.trim() ? Number(verifiedLatitude) : NaN, longitude: verifiedLongitude.trim() ? Number(verifiedLongitude) : NaN }
+      : undefined
+    if (pickup && (!Number.isFinite(pickup.latitude) || Math.abs(pickup.latitude) > 90 ||
+      !Number.isFinite(pickup.longitude) || Math.abs(pickup.longitude) > 180)) {
+      setError('กรุณาระบุพิกัดจุดรับที่ตรวจสอบแล้ว')
+      return
+    }
     submitting.current = true; setBusy(true); setError('')
     try {
-      await bookingCommand(modalBooking, decision === 'approved' ? { type: 'APPROVE' } : { type: 'REJECT', reason: reason.trim(),rejectionKind,...(rejectionKind==='capacity'?{capacityCheckId}:{}) })
-      submitting.current = false; closeModal(); remote.reload(); setNotice(decision === 'approved' ? `อนุมัติคำขอ ${modalBooking.id} แล้ว กรุณาจัดรถและคนขับ` : `ปฏิเสธคำขอ ${modalBooking.id} แล้ว`)
+      await bookingCommand(modalBooking, decision === 'approved' ? { type: 'APPROVE', ...(pickup ? { pickup } : {}) } : { type: 'REJECT', reason: reason.trim(),rejectionKind,...(rejectionKind==='capacity'?{capacityCheckId}:{}) })
+      submitting.current = false; closeModal(); remote.reload()
+      setNotice(decision === 'approved'
+        ? { message: `อนุมัติคำขอ ${modalBooking.reference ?? modalBooking.id} แล้ว`, assignmentId: modalBooking.id }
+        : { message: `ปฏิเสธคำขอ ${modalBooking.reference ?? modalBooking.id} แล้ว` })
     }
     catch (e) { setError(dispatcherError(e)); if (decision === 'rejected') requestAnimationFrame(() => document.getElementById('rejection-reason')?.focus()) }
     finally { submitting.current = false; setBusy(false) }
@@ -106,9 +119,11 @@ export function DispatcherPage() {
   if (!Object.hasOwn(headers, screen)) return <Navigate to="/dispatcher" replace />
   const [title, subtitle] = headers[screen as keyof typeof headers]
   return <div className={`dispatch-shell ${sidebarCollapsed ? 'dispatch-sidebar-collapsed' : ''}`}><a className="skip-link" href="#dispatcher-main">ข้ามไปยังเนื้อหา</a>
-    <aside id="dispatcher-sidebar" className="dispatch-sidebar"><div className="dispatch-sidebar-tools"><MunicipalLogo /></div><div className="workspace-nav-heading">ระบบรับส่งผู้ป่วย</div><p className="workspace-role-label">เจ้าหน้าที่จัดรถ</p><ResponsiveNavigation id="dispatcher-navigation" label="เมนูเจ้าหน้าที่จัดรถ">{nav.map(item => <NavLink end to={item.path} key={item.path} aria-label={item.label} title={item.label}><ServiceSymbol kind={item.path.endsWith('assignment') ? 'calendar' : item.path.endsWith('tracking') ? 'route' : 'home'} /><span>{item.label}</span></NavLink>)}</ResponsiveNavigation><button type="button" className="dispatch-sidebar-toggle" aria-label={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} title={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} aria-expanded={!sidebarCollapsed} aria-controls="dispatcher-sidebar" onClick={() => setSidebarCollapsed(hidden => !hidden)}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={sidebarCollapsed ? "m5 6 6 6-6 6m8-12 6 6-6 6" : "m11 6-6 6 6 6m8-12-6 6 6 6"} /></svg></button></aside>
+    <aside id="dispatcher-sidebar" className="dispatch-sidebar"><div className="dispatch-sidebar-tools"><MunicipalLogo /></div><div className="workspace-nav-heading">ระบบรับส่งผู้ป่วย</div><p className="workspace-role-label">เจ้าหน้าที่จัดรถ</p><ResponsiveNavigation id="dispatcher-navigation" label="เมนูเจ้าหน้าที่จัดรถ">{nav.map(item => <NavLink end to={item.path} key={item.path} aria-label={item.label} title={item.label}><ServiceSymbol kind={item.path.endsWith('assignment') ? 'calendar' : item.path.endsWith('tracking') ? 'route' : 'home'} /><span>{item.label}</span></NavLink>)}</ResponsiveNavigation><button type="button" className="dispatch-sidebar-toggle" aria-label={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} title={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} aria-expanded={!sidebarCollapsed} aria-controls="dispatcher-sidebar" onClick={() => setSidebarCollapsed(hidden => !hidden)}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={sidebarCollapsed ? "m5 6 6 6-6 6m8-12 6 6-6 6" : "m11 6-6 6 6 6m8-12-6 6 6 6"} /></svg></button>
+      <StaffSidebarProfile />
+    </aside>
     <main tabIndex={-1} ref={main} id="dispatcher-main" className={`dispatch-main dispatch-${screen}`}><header className="dispatch-page-header"><h1 tabIndex={-1}>{title}</h1><p>{subtitle}</p></header>
-      <DispatcherAlerts /><NotificationFailures />{screen === 'tracking' && <><DailyManifestExport /><MonthlyReportExport /></>}<div className="dispatch-dialog-actions"><DispatchButton secondary disabled={remote.loading || busy} onClick={remote.reload}>โหลดข้อมูลล่าสุด</DispatchButton><Link to="/staff/login">บัญชีเจ้าหน้าที่ / ออกจากระบบ</Link></div>{remote.loading && <p role="status">กำลังโหลดข้อมูล…</p>}{remote.error && <p className="dispatch-alert" role="alert">{remote.error}</p>}{remote.data?.rows.some(row => row.scheduleReviewRequired) && <p className="dispatch-alert">มีตารางที่ต้องตรวจสอบหลังเปลี่ยนการตั้งค่า ตารางเดิมยังมีผล</p>}{notice && <div role="status" className="dispatch-notice"><p>{notice}</p><button aria-label="ปิดข้อความ" type="button" onClick={() => setNotice('')}>×</button></div>}
+      {screen === 'tracking' && <><DailyManifestExport /><MonthlyReportExport /></>}<div className="dispatch-dialog-actions"><DispatchButton secondary disabled={remote.loading || busy} onClick={remote.reload}>โหลดข้อมูลล่าสุด</DispatchButton></div>{remote.loading && <p role="status">กำลังโหลดข้อมูล…</p>}{remote.error && <p className="dispatch-alert" role="alert">{remote.error}</p>}{remote.data?.rows.some(row => row.scheduleReviewRequired) && <p className="dispatch-alert">มีตารางที่ต้องตรวจสอบหลังเปลี่ยนการตั้งค่า ตารางเดิมยังมีผล</p>}{notice && <div className="dispatch-notice"><div><p role="status">{notice.message}</p>{notice.assignmentId && <Link className="dispatch-details-link" to={`/dispatcher/assignment?booking=${encodeURIComponent(notice.assignmentId)}`} onClick={() => setNotice(null)}>จัดตารางสำหรับคำขอนี้ →</Link>}</div><button aria-label="ปิดข้อความ" type="button" onClick={() => setNotice(null)}>×</button></div>}
 
       {remote.data && remote.hasMore && <div className="dispatch-dialog-actions"><p>จำนวนและตัวกรองครอบคลุมเฉพาะรายการที่โหลดแล้ว</p><DispatchButton secondary disabled={remote.loading || busy} onClick={remote.loadMore}>โหลดรายการเพิ่มเติม</DispatchButton></div>}
 
@@ -131,8 +146,8 @@ export function DispatcherPage() {
           </section>)}
         </div>
       </>}
-      {screen === 'assignment' && <div className="dispatch-assignment-grid"><section className="dispatch-panel dispatch-waiting"><h2>1. เลือกงานที่รอจัดตาราง</h2><p>เลือกงาน แล้วจัดรถและคนขับ</p><div className="dispatch-waiting-list">{waiting.map(b => <article key={b.id} className={selected?.id === b.id ? 'selected' : ''}><button type="button" aria-pressed={selected?.id === b.id} onClick={() => { setError(''); setParams({ booking: b.id }) }}><div className="dispatch-job-card-heading"><strong>{b.id}</strong><span>{selected?.id === b.id ? '✓ เลือกแล้ว' : 'เลือกงานนี้ →'}</span></div><span className="dispatch-job-patient">{b.patientName}</span><b>{dispatchDate(b.appointmentAt)} · นัด {dispatchTime(b.appointmentAt)} น.</b><span>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</span><span className="dispatch-status approved">รอจัดตาราง</span></button><button type="button" className="dispatch-details-link" onClick={() => openDetails(b)}>ดูรายละเอียด</button></article>)}</div>{!waiting.length && <p className="dispatch-empty">ไม่มีงานรอจัดตาราง กรุณาอนุมัติคำขอจากแดชบอร์ดก่อน</p>}<p className="dispatch-small">แสดงเฉพาะงานที่ยังไม่ได้จัดรถ</p></section>{selected ? <ApiDispatchAssignment key={`${selected.id}:${selected.revision}`} booking={remote.data!.rows.find(row => row.id === selected.id)!} catalog={remote.data!.catalog} previousJobs={remote.data!.rows} reload={remote.reload} onAssigned={() => { remote.reload(); setNotice(`มอบหมายงาน ${selected.id} แล้ว`); navigate('/dispatcher/tracking') }} /> : <section className="dispatch-panel dispatch-empty"><h2>{selectedId ? 'ไม่พบงานที่รอจัดตารางนี้' : 'เลือกงานที่รอจัดตาราง'}</h2><p>งานอาจถูกมอบหมายแล้ว หรือยังไม่ได้รับอนุมัติ</p><Link to="/dispatcher">กลับแดชบอร์ด</Link></section>}</div>}
-      {screen === 'tracking' && <>{remote.data && <ResourceReadiness key={remote.data.rows.map(row => row.revision).join(':') + remote.data.catalog.vehicles.filter(v => v.held).length + ':' + remote.data.catalog.drivers.filter(d => d.held).length} catalog={remote.data.catalog} onSaved={() => { remote.reload(); setNotice('ยืนยันความพร้อมทรัพยากรแล้ว') }} />}
+      {screen === 'assignment' && <div className="dispatch-assignment-grid"><section className="dispatch-panel dispatch-waiting"><h2>1. เลือกงานที่รอจัดตาราง</h2><p>เลือกงาน แล้วจัดรถและคนขับ</p><div className="dispatch-waiting-list">{waiting.map(b => <article key={b.id} className={selected?.id === b.id ? 'selected' : ''}><button type="button" aria-pressed={selected?.id === b.id} onClick={() => { setError(''); setParams({ booking: b.id }) }}><div className="dispatch-job-card-heading"><strong>{b.id}</strong><span>{selected?.id === b.id ? '✓ เลือกแล้ว' : 'เลือกงานนี้ →'}</span></div><span className="dispatch-job-patient">{b.patientName}</span><b>{dispatchDate(b.appointmentAt)} · นัด {dispatchTime(b.appointmentAt)} น.</b><span>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</span><span className="dispatch-status approved">รอจัดตาราง</span></button><button type="button" className="dispatch-details-link" onClick={() => openDetails(b)}>ดูรายละเอียด</button></article>)}</div>{!waiting.length && <p className="dispatch-empty">ไม่มีงานรอจัดตาราง กรุณาอนุมัติคำขอจากแดชบอร์ดก่อน</p>}<p className="dispatch-small">แสดงเฉพาะงานที่ยังไม่ได้จัดรถ</p></section>{selected ? <ApiDispatchAssignment key={`${selected.id}:${selected.revision}`} booking={remote.data!.rows.find(row => row.id === selected.id)!} catalog={remote.data!.catalog} reload={remote.reload} refreshing={remote.loading} onAssigned={() => { remote.reload(); setNotice({ message: `มอบหมายงาน ${selected.id} แล้ว` }); navigate('/dispatcher/tracking') }} /> : <section className="dispatch-panel dispatch-empty"><h2>{selectedId ? 'ไม่พบงานที่รอจัดตารางนี้' : 'เลือกงานที่รอจัดตาราง'}</h2><p>งานอาจถูกมอบหมายแล้ว หรือยังไม่ได้รับอนุมัติ</p><Link to="/dispatcher">กลับแดชบอร์ด</Link></section>}</div>}
+      {screen === 'tracking' && <>{remote.data && <ResourceReadiness key={remote.data.rows.map(row => row.revision).join(':') + remote.data.catalog.vehicles.filter(v => v.held).length + ':' + remote.data.catalog.drivers.filter(d => d.held).length} catalog={remote.data.catalog} onSaved={() => { remote.reload(); setNotice({ message: 'ยืนยันความพร้อมทรัพยากรแล้ว' }) }} />}
         <section className="dispatch-metrics dispatch-tracking-metrics" aria-label="ภาพรวมการรับส่งวันนี้">{[['งานทั้งหมดวันนี้', todaysJobs.length], ['อยู่ระหว่างรับส่ง', todaysJobs.filter(b => b.status === 'in_transit').length], ['ดำเนินการเสร็จแล้ว', todaysJobs.filter(b => b.status === 'completed').length]].map(([label, value]) => <article key={label}><p>{label}</p><strong>{value}</strong>{label === 'งานทั้งหมดวันนี้' && <span className="dispatch-tracking-secondary">{dispatchDate(new Date(now).toISOString())}</span>}</article>)}</section>
         <div className="dispatch-tracking-scopes" role="group" aria-label="ช่วงเวลาของงานรับส่ง">{([['all', 'ทั้งหมด'], ['today', 'วันนี้']] as const).map(([scope, label]) => <button type="button" key={scope} aria-pressed={!date && trackingScope === scope} onClick={() => { setTrackingScope(scope); setDate('') }}>{label}</button>)}</div>
         <div className="dispatch-filters"><label className="dispatch-search"><span className="sr-only">ค้นหารหัสงาน ชื่อผู้ป่วย หรือคนขับ</span><input type="search" value={search} placeholder="⌕ ค้นหารหัสงาน ชื่อผู้ป่วย หรือคนขับ" onChange={e => setSearch(e.target.value)} /></label><label className="dispatch-date-filter"><span>วันรับผู้ป่วย</span><input type="date" aria-label="วันรับผู้ป่วย" value={date} onChange={e => setDate(e.target.value)} /></label><label><span className="sr-only">กรองสถานะ</span><select aria-label="กรองสถานะ" value={filter} onChange={e => setFilter(e.target.value)}><option value="">สถานะทั้งหมด</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
@@ -140,18 +155,75 @@ export function DispatcherPage() {
       </>}
     </main>
     {dialog && !modalBooking && <DispatchModal title="ไม่พบคำขอนี้" onClose={closeModal}><p>รายการนี้ไม่มีอยู่แล้ว กรุณาตรวจสอบรายการล่าสุด</p><DispatchButton secondary onClick={closeModal}>กลับไปตรวจสอบ</DispatchButton></DispatchModal>}
-    {(dialog === 'details' || dialog === 'approve') && modalBooking && <DispatchModal title="รายละเอียดงาน" kind="dispatch-details-modal" onClose={closeModal}>{screen === 'tracking' && <button type="button" className="dispatch-details-link" onClick={() => setParams({ booking: modalBooking.id, dialog: 'tracking' })}>← กลับไปติดตามสถานะ</button>}<div className="dispatch-details-heading"><p>{modalBooking.id}</p><span>{dispatchStatus(modalBooking)}</span></div><DispatchReview key={modalBooking.id} bookingId={modalBooking.id} onBusyChange={value => { submitting.current = value; setBusy(value) }} /><section className="dispatch-appointment"><p>นัดหมาย</p><div><strong>{dispatchDate(modalBooking.appointmentAt)}</strong><b>{dispatchTime(modalBooking.appointmentAt)} น.</b></div><h3>{modalBooking.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</h3></section><section className="dispatch-detail-section"><h3>ผู้รับบริการและผู้ติดต่อ</h3><dl><div><dt>ชื่อผู้รับบริการ</dt><dd>{modalBooking.patientName}</dd>{modalBooking.details?.bookingFor === 'other' && <dd>{modalBooking.details.contactName} · {modalBooking.details.relationship}</dd>}</div><div><dt>เบอร์ติดต่อ</dt><dd>{modalBooking.details?.phone || 'ไม่มีข้อมูล'}</dd></div></dl></section><section className="dispatch-detail-section"><h3>การรับผู้ป่วย</h3><dl><div><dt>จุดรับ</dt><dd>{modalBooking.details?.pickup?.label || 'ไม่มีจุดรับ'}</dd></div><div><dt>ความช่วยเหลือ</dt><dd>{modalBooking.details?.assistance || 'ไม่มีข้อมูล'}</dd><dd>{modalBooking.details?.extras.join(' · ')}</dd></div></dl><DispatcherPickupMap key={modalBooking.id} pickup={modalBooking.details?.pickup} /></section>{modalBooking.schedule && <section className="dispatch-detail-section"><h3>รถและคนขับที่ได้รับมอบหมาย</h3><p>{state.vehicles.find(v => v.id === modalBooking.vehicleId)?.label || modalBooking.vehicleId} · {state.drivers.find(d => d.id === modalBooking.driverId)?.name || modalBooking.driverId}</p><ScheduleSummary booking={modalBooking} schedule={modalBooking.schedule} /></section>}{modalBooking.status === 'pending' && <><p className="dispatch-small">จองล่วงหน้าอย่างน้อย 48 ชั่วโมง · {modalBooking.createdAt ? `${dispatchDate(modalBooking.createdAt)} ${dispatchTime(modalBooking.createdAt)}` : 'ไม่พบเวลาส่งคำขอ'}</p>{dialog !== 'approve' && <div className="dispatch-dialog-actions"><DispatchButton id="approval-start" disabled={busy} onClick={() => openDecision('approve')}>อนุมัติคำขอ</DispatchButton><DispatchButton secondary danger disabled={busy} onClick={() => openDecision('reject')}>ปฏิเสธคำขอ</DispatchButton></div>}</>}{dialog === 'approve' && <><p className="dispatch-muted" aria-live="polite">ตรวจสอบข้อมูลแล้ว ยืนยันอนุมัติคำขอนี้หรือไม่?</p>{error && <p className="dispatch-alert" role="alert">{error}</p>}<div className="dispatch-dialog-actions"><DispatchButton disabled={busy || remote.loading || modalBooking.status !== 'pending'} onClick={() => decide('approved')}>ยืนยันอนุมัติ</DispatchButton><DispatchButton id="approval-back" secondary disabled={busy} onClick={() => { setError(''); setParams({ booking: modalBooking.id, dialog: 'details' }, { replace: true }) }}>กลับไปตรวจสอบ</DispatchButton></div></>}{dialog !== 'approve' && modalBooking.status === 'approved' && !modalBooking.schedule && <DispatchButton onClick={() => { setError(''); navigate(`/dispatcher/assignment?booking=${encodeURIComponent(modalBooking.id)}`) }}>ไปจัดรถและคนขับ →</DispatchButton>}</DispatchModal>}
-    {dialog === 'reject' && modalBooking && <DispatchModal title="ปฏิเสธคำขอ" kind="dispatch-reject-modal" onClose={closeModal}>
-      <p id="rejection-consequence" className="dispatch-danger-notice">คำขอ {modalBooking.id} จะไม่ถูกจัดรถ ผู้จองจะเห็นเหตุผลที่คุณระบุ</p>
-      <label className="booking-field">ประเภทเหตุผลการปฏิเสธ<select value={rejectionKind} disabled={busy} onChange={e=>{setRejectionKind(e.target.value as 'other'|'capacity');setCapacityCheckId(null)}}><option value="other">เหตุอื่นที่ไม่ใช่กำลังรถ</option><option value="capacity">ทรัพยากรไม่เพียงพอ</option></select></label>
-      {rejectionKind==='capacity'&&remote.data&&<CapacityEvidence key={modalBooking.id} bookingId={modalBooking.id} revision={modalBooking.revision??0} catalog={remote.data.catalog} onEvidence={setCapacityCheckId} onBusyChange={value=>{submitting.current=value;setBusy(value)}} />}
+    {(dialog === 'details' || dialog === 'approve') && modalBooking && <DispatchModal
+      title="รายละเอียดงาน" kind="dispatch-details-modal dispatch-booking-review" onClose={closeModal}
+      footer={modalBooking.status === 'pending' && <div className="dispatch-dialog-actions">
+        {dialog === 'approve' ? <>
+          <DispatchButton id="approval-back" secondary disabled={busy} onClick={() => { setError(''); setParams({ booking: modalBooking.id, dialog: 'details' }, { replace: true }) }}>กลับไปตรวจสอบ</DispatchButton>
+          <DispatchButton disabled={busy || remote.loading} onClick={() => decide('approved')}>{busy ? 'กำลังอนุมัติ…' : 'ยืนยันอนุมัติ'}</DispatchButton>
+        </> : <>
+          <DispatchButton id="approval-start" disabled={busy} onClick={() => openDecision('approve')}>อนุมัติคำขอ</DispatchButton>
+          <DispatchButton secondary danger disabled={busy} onClick={() => openDecision('reject')}>ปฏิเสธคำขอ</DispatchButton>
+        </>}
+      </div>}
+    >
+      {screen === 'tracking' && <button type="button" className="dispatch-details-link" onClick={() => setParams({ booking: modalBooking.id, dialog: 'tracking' })}>← กลับไปติดตามสถานะ</button>}
+      <div className="dispatch-details-heading"><p>{modalBooking.reference ?? modalBooking.id}</p><span>{dispatchStatus(modalBooking)}</span></div>
+      <section className="dispatch-appointment">
+        <p>นัดหมาย</p><div><strong>{dispatchDate(modalBooking.appointmentAt)}</strong><b>{dispatchTime(modalBooking.appointmentAt)} น.</b></div>
+        <h3>{modalBooking.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</h3>
+      </section>
+      {dialog === 'approve' && <>
+        <p className="dispatch-muted">อนุมัติแล้วจึงจะจัดตารางและมอบหมายรถได้</p>
+        {needsPickupVerification && <fieldset className="dispatch-detail-section">
+          <legend>พิกัดจุดรับที่ตรวจสอบแล้ว</legend>
+          <label className="booking-field">ละติจูด<input id="verified-latitude" type="number" step="any" required disabled={busy} value={verifiedLatitude} onChange={event => setVerifiedLatitude(event.target.value)} /></label>
+          <label className="booking-field">ลองจิจูด<input type="number" step="any" required disabled={busy} value={verifiedLongitude} onChange={event => setVerifiedLongitude(event.target.value)} /></label>
+        </fieldset>}
+        {modalBooking.status !== 'pending' && <p role="alert" className="dispatch-alert">คำขอนี้ได้รับการพิจารณาแล้ว</p>}
+        {error && <p className="dispatch-alert" role="alert">{error}</p>}
+      </>}
+      <section className="dispatch-detail-section">
+        <h3>จุดรับและความช่วยเหลือ</h3>
+        <dl>
+          <div><dt>จุดรับ</dt><dd>{modalBooking.details?.pickup?.label || 'ไม่มีจุดรับ'}</dd></div>
+          <div><dt>ความช่วยเหลือ</dt><dd>{modalBooking.details?.assistance || 'ไม่มีข้อมูล'}</dd><dd>{modalBooking.details?.extras.join(' · ')}</dd></div>
+        </dl>
+        {needsPickupVerification
+          ? <p>หมู่บ้านที่แจ้ง: {remote.data?.catalog.villages?.find(village => village.id === modalRow?.villageId)?.name || '—'} · รอตรวจสอบพิกัด</p>
+          : <DispatcherPickupMap key={modalBooking.id} pickup={modalBooking.details?.pickup} />}
+      </section>
+      <section className="dispatch-detail-section">
+        <h3>ผู้รับบริการและผู้ติดต่อ</h3>
+        <dl>
+          <div><dt>ชื่อผู้รับบริการ</dt><dd>{modalBooking.patientName}</dd>{modalBooking.details?.bookingFor === 'other' && <dd>{modalBooking.details.contactName} · {modalBooking.details.relationship}</dd>}</div>
+          <div><dt>เบอร์ติดต่อ</dt><dd>{modalBooking.details?.phone ? <a href={`tel:${modalBooking.details.phone}`}>{modalBooking.details.phone}</a> : 'ไม่มีข้อมูล'}</dd></div>
+        </dl>
+      </section>
+      {modalBooking.schedule && <section className="dispatch-detail-section">
+        <h3>รถและคนขับที่ได้รับมอบหมาย</h3>
+        <p>{state.vehicles.find(v => v.id === modalBooking.vehicleId)?.label || modalBooking.vehicleId} · {state.drivers.find(d => d.id === modalBooking.driverId)?.name || modalBooking.driverId}</p>
+        <ScheduleSummary booking={modalBooking} schedule={modalBooking.schedule} />
+      </section>}
+      {modalBooking.createdAt && <p className="dispatch-small">ส่งคำขอ {dispatchDate(modalBooking.createdAt)} {dispatchTime(modalBooking.createdAt)} น.</p>}
+      {dialog === 'details' && modalBooking.status === 'pending' && <DispatchButton secondary disabled={busy} onClick={() => openDecision('capacity')}>ตรวจสอบกำลังรถ</DispatchButton>}
+      {dialog !== 'approve' && modalBooking.status === 'approved' && !modalBooking.schedule && <DispatchButton onClick={() => { setError(''); navigate(`/dispatcher/assignment?booking=${encodeURIComponent(modalBooking.id)}`) }}>ไปจัดรถและคนขับ →</DispatchButton>}
+    </DispatchModal>}
+    {dialog === 'capacity' && modalBooking && remote.data && <DispatchModal title="ตรวจสอบกำลังรถ" onClose={closeModal}>
+      <CapacityEvidence key={modalBooking.id} bookingId={modalBooking.id} revision={modalBooking.revision??0} catalog={remote.data.catalog} onEvidence={setCapacityCheckId} onBusyChange={value=>{submitting.current=value;setBusy(value)}} />
+      <div className="dispatch-dialog-actions">
+        <DispatchButton secondary disabled={busy} onClick={() => setParams({ booking: modalBooking.id, dialog: 'details' }, { replace: true })}>กลับไปตรวจสอบ</DispatchButton>
+        <DispatchButton danger disabled={busy || !capacityCheckId || modalBooking.status !== 'pending'} onClick={() => setParams({ booking: modalBooking.id, dialog: 'reject-capacity' }, { replace: true })}>ปฏิเสธคำขอ</DispatchButton>
+      </div>
+    </DispatchModal>}
+    {(dialog === 'reject' || dialog === 'reject-capacity') && modalBooking && <DispatchModal title="ปฏิเสธคำขอ" kind="dispatch-reject-modal" onClose={closeModal}>
       <form id="dispatcher-reject-form" noValidate onSubmit={e => { e.preventDefault(); decide('rejected') }}>
         <label className="dispatch-rejection-label" htmlFor="rejection-reason">เหตุผลการปฏิเสธ</label>
-        <input id="rejection-reason" required disabled={busy} value={reason} maxLength={500} placeholder="ระบุเหตุผลให้ผู้จองทราบ" aria-invalid={!!error} aria-describedby={error ? 'rejection-consequence rejection-error' : 'rejection-consequence'} onChange={e => { setReason(e.target.value); setError('') }} />
+        <div className="booking-field"><textarea id="rejection-reason" data-initial-focus required rows={4} disabled={busy} value={reason} maxLength={500} placeholder="ระบุเหตุผลให้ผู้จองทราบ" aria-invalid={!!error} aria-describedby={error ? 'rejection-error' : undefined} onChange={e => { setReason(e.target.value); setError('') }} /></div>
         {error && <p id="rejection-error" role="alert" className="dispatch-alert">{error}</p>}
       </form>
-      <div className="dispatch-dialog-actions"><DispatchButton secondary disabled={busy} data-initial-focus onClick={() => { setError(''); setParams({ booking: modalBooking.id, dialog: 'details' }, { replace: true }) }}>กลับไปตรวจสอบ</DispatchButton><DispatchButton danger disabled={busy || remote.loading || modalBooking.status !== 'pending'} type="submit" form="dispatcher-reject-form">ยืนยันปฏิเสธคำขอ</DispatchButton></div>
+      <div className="dispatch-dialog-actions"><DispatchButton secondary disabled={busy} onClick={() => { setError(''); if (dialog === 'reject-capacity') openDecision('capacity'); else setParams({ booking: modalBooking.id, dialog: 'details' }, { replace: true }) }}>กลับไปตรวจสอบ</DispatchButton><DispatchButton danger disabled={busy || remote.loading || modalBooking.status !== 'pending'} type="submit" form="dispatcher-reject-form">ยืนยันปฏิเสธคำขอ</DispatchButton></div>
     </DispatchModal>}
-    {dialog === 'tracking' && modalBooking && <DispatchModal title="ติดตามสถานะงานรับส่ง" kind="dispatch-tracking-modal" onClose={closeModal}><p className="dispatch-muted">{modalBooking.id} · {dispatchDate(modalBooking.appointmentAt)}</p><section className="dispatch-result-card"><h3>{dispatchStatus(modalBooking)}</h3><p>เวลารับตามแผน {modalBooking.schedule ? dispatchTime(modalBooking.schedule.pickupAt) : 'ยังไม่ได้มอบหมาย'} น. · {state.vehicles.find(v => v.id === modalBooking.vehicleId)?.label || 'ยังไม่มีรถ'}</p><p>{state.drivers.find(d => d.id === modalBooking.driverId)?.name || 'ยังไม่มีคนขับ'} · {modalBooking.details?.hospital}</p></section><h3>ความคืบหน้าของงาน</h3>{modalBooking.cancellation && <p className="dispatch-alert">ยกเลิกแล้ว · {modalBooking.cancellation.reason}</p>}<ol className="dispatch-tracking-steps"><li>{dispatchStatus(modalBooking)}</li>{modalBooking.incidentOpen && <li>มีเหตุขัดข้องที่ยังไม่คลี่คลาย</li>}{modalBooking.resourceHold && <li>รถหรือคนขับยังถูกระงับความพร้อม</li>}</ol><p className="dispatch-small">สถานะล่าสุดที่คนขับรายงาน</p><DispatchButton secondary onClick={() => setParams({ booking: modalBooking.id, dialog: 'details' })}>ดูรายละเอียดงาน →</DispatchButton><DispatchButton secondary onClick={closeModal}>ปิดรายละเอียด</DispatchButton>{remote.data && <DispatcherOperations key={`${modalBooking.id}:${modalBooking.revision}`} booking={remote.data.rows.find(row => row.id === modalBooking.id)!} catalog={remote.data.catalog} rows={remote.data.rows} onBusyChange={value => { submitting.current = value; setBusy(value) }} onSaved={() => { submitting.current = false; setBusy(false); closeModal(); remote.reload(); setNotice("บันทึกการดำเนินการแล้ว") }} />}</DispatchModal>}
+    {dialog === 'tracking' && modalBooking && <DispatchModal title="ติดตามสถานะงานรับส่ง" kind="dispatch-tracking-modal" onClose={closeModal}><p className="dispatch-muted">{modalBooking.id} · {dispatchDate(modalBooking.appointmentAt)}</p><section className="dispatch-result-card"><h3>{dispatchStatus(modalBooking)}</h3><p>เวลารับตามแผน {modalBooking.schedule ? dispatchTime(modalBooking.schedule.pickupAt) : 'ยังไม่ได้มอบหมาย'} น. · {state.vehicles.find(v => v.id === modalBooking.vehicleId)?.label || 'ยังไม่มีรถ'}</p><p>{state.drivers.find(d => d.id === modalBooking.driverId)?.name || 'ยังไม่มีคนขับ'} · {modalBooking.details?.hospital}</p></section><h3>ความคืบหน้าของงาน</h3>{modalBooking.cancellation && <p className="dispatch-alert">ยกเลิกแล้ว · {modalBooking.cancellation.reason}</p>}<ol className="dispatch-tracking-steps"><li>{dispatchStatus(modalBooking)}</li>{modalBooking.incidentOpen && <li>มีเหตุขัดข้องที่ยังไม่คลี่คลาย</li>}{modalBooking.resourceHold && <li>รถหรือคนขับยังถูกระงับความพร้อม</li>}</ol><p className="dispatch-small">สถานะล่าสุดที่คนขับรายงาน</p><DispatchButton secondary onClick={() => setParams({ booking: modalBooking.id, dialog: 'details' })}>ดูรายละเอียดงาน →</DispatchButton><DispatchButton secondary onClick={closeModal}>ปิดรายละเอียด</DispatchButton>{remote.data && <DispatcherOperations key={`${modalBooking.id}:${modalBooking.revision}`} booking={remote.data.rows.find(row => row.id === modalBooking.id)!} catalog={remote.data.catalog} onBusyChange={value => { submitting.current = value; setBusy(value) }} onSaved={() => { submitting.current = false; setBusy(false); closeModal(); remote.reload(); setNotice({ message: 'บันทึกการดำเนินการแล้ว' }) }} />}</DispatchModal>}
   </div>
 }

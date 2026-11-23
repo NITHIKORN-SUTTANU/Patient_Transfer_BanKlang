@@ -1,3 +1,4 @@
+import { chooseCitizenPickup } from './helpers/citizen-gps'
 import { test, expect } from '@playwright/test'
 import { startOperationalTestApi, ids } from './helpers/operational-postgres'
 import { recoveryFingerprint } from '../scripts/database/recovery.mjs'
@@ -43,15 +44,15 @@ test('original dispatcher schedules and assigns after the cutoff using the origi
     await page.getByLabel('ชื่อผู้ใช้', { exact: true }).fill('synthetic-dispatcher')
     await page.getByLabel('รหัสผ่าน', { exact: true }).fill(syntheticPassword)
     await page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
-    await page.getByRole('link', { name: 'เปิดหน้าจัดรถ', exact: true }).click()
+    await page.locator('#dispatcher-main').waitFor()
     await page.getByRole('button', { name: /^รถรับส่ง:/ }).click()
-    await page.getByRole('option', { name: /SYNTHETIC-01/ }).click()
+    await page.getByRole('option', { name: /Synthetic vehicle 1/ }).click()
     await page.getByRole('button', { name: /^คนขับ:/ }).click()
     await page.getByRole('option', { name: /Synthetic driver/ }).click()
     for (const stage of ['schedule', 'assignment'] as const) {
-      await page.getByRole('button', { name: stage === 'schedule' ? 'ตรวจสอบและยืนยันตาราง' : 'ตรวจสอบซ้ำและยืนยันการมอบหมาย', exact: true }).click()
+      if (stage === 'assignment') await page.getByRole('button', { name: 'ยืนยัน', exact: true }).click()
       const response = page.waitForResponse(r => r.url().endsWith(`/${stage}`) && r.request().method() === 'POST')
-      await page.getByRole('button', { name: stage === 'schedule' ? 'ยืนยันตาราง' : 'ยืนยันการมอบหมาย', exact: true }).click()
+      await page.getByRole('button', { name: stage === 'schedule' ? 'ตรวจสอบ' : 'ยืนยันการมอบหมาย', exact: true }).click()
       expect((await response).status()).toBe(200)
       const current = await f.get(requested.id)
       expect(current.status).toBe(stage === 'schedule' ? 'SCHEDULED' : 'ASSIGNED')
@@ -142,11 +143,7 @@ test('original citizen draft survives a server cutoff rejection and submits an e
     await page.getByRole('listbox', { name: 'นาที', exact: true }).press('Home')
     await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
-    await page.getByLabel('หมู่บ้านในเขตบริการ *').selectOption(ids.village)
-    await page.getByLabel('ที่อยู่จุดรับ *').fill('บ้านทดสอบขอบเขตเวลา')
-    await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง', { exact: true }).click()
-    await page.getByLabel('ละติจูด', { exact: true }).fill('18.59')
-    await page.getByLabel('ลองจิจูด', { exact: true }).fill('99.05')
+    await chooseCitizenPickup(page, 18.59, 99.05)
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
     const before = await recoveryFingerprint(f.pool)
     const rejected = page.waitForResponse(r => r.url().endsWith('/api/bookings') && r.request().method() === 'POST')
@@ -154,7 +151,7 @@ test('original citizen draft survives a server cutoff rejection and submits an e
     const failure = await rejected
     expect(failure.status()).toBe(422)
     expect(Date.parse(failure.request().postDataJSON().appointmentAt) - Date.parse(f.control.now)).toBe(48 * 3600000 - 1)
-    await expect(page.getByRole('alert')).toContainText('ข้อมูลไม่ผ่านเงื่อนไข')
+    await expect(page.getByRole('alert')).toContainText('ล่วงหน้าอย่างน้อย 48 ชั่วโมง')
     expect(await recoveryFingerprint(f.pool)).toEqual(before)
     await page.getByRole('button', { name: 'แก้ไข วันนัดหมาย', exact: true }).click()
     await expect(page.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('ผู้ป่วยทดสอบขอบเขตเวลา')
@@ -163,9 +160,7 @@ test('original citizen draft survives a server cutoff rejection and submits an e
     await page.getByRole('listbox', { name: 'นาที', exact: true }).press('ArrowDown')
     await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
-    await expect(page.getByLabel('ที่อยู่จุดรับ *')).toHaveValue('บ้านทดสอบขอบเขตเวลา')
-    await expect(page.getByLabel('ละติจูด', { exact: true })).toHaveValue('18.59')
-    await expect(page.getByLabel('ลองจิจูด', { exact: true })).toHaveValue('99.05')
+    await expect(page.locator('.booking-pickup-value strong')).toContainText(Number('18.59').toFixed(6))
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
     f.control.now = '2030-01-13T02:01:00.000Z'
     const accepted = page.waitForResponse(r => r.url().endsWith('/api/bookings') && r.request().method() === 'POST')
@@ -180,7 +175,7 @@ test('original citizen draft survives a server cutoff rejection and submits an e
     expect(row.appointment_at.getTime() - row.submitted_at.getTime()).toBe(48 * 3600000)
     expect(row.appointment_at.toISOString()).toBe('2030-01-15T02:01:00.000Z')
     expect(row.patient_name).toBe('ผู้ป่วยทดสอบขอบเขตเวลา')
-    expect(row.pickup_address).toBe('บ้านทดสอบขอบเขตเวลา')
+    expect(row.pickup_address).toBe('จุดรับบนแผนที่')
     expect(row.line_subject).toBe(subject)
     expect(row.requester_id).toBe(row.consent_owner); expect(row.accepted).toBe(true)
     await expect(page.getByText(row.reference, { exact: true })).toBeVisible()

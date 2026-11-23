@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { startOperationalTestApi } from './helpers/operational-postgres'
+import { ids, startOperationalTestApi } from './helpers/operational-postgres'
 import { syntheticPassword } from './helpers/admin-postgres.mjs'
 import { newToken, tokenHash } from '../server/auth.mjs'
 
@@ -17,7 +17,7 @@ async function openStaff(page: Page, base: string, path = '/dispatcher', role = 
   await page.getByLabel('ชื่อผู้ใช้', { exact: true }).fill(`synthetic-${role}`)
   await page.getByLabel('รหัสผ่าน', { exact: true }).fill(syntheticPassword)
   await page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
-  await page.getByRole('link', { name: role === 'driver' ? 'เปิดหน้าคนขับ' : 'เปิดหน้าจัดรถ', exact: true }).click()
+  if (role === 'driver') await page.getByRole('link', { name: 'เปิดหน้าคนขับ', exact: true }).click(); else await page.locator('#dispatcher-main').waitFor()
   await expect(page.getByText('กำลังโหลดข้อมูล…', { exact: true })).toHaveCount(0)
 }
 
@@ -169,7 +169,7 @@ test('paginated operational reads retain driver shift scope and active overrun a
   const f = await startOperationalTestApi()
   try {
     let booking = await f.assigned()
-    await f.assigned('11:00', { originKind: 'previous_hospital', originLocationId: booking.hospitalLocationId, previousBookingId: booking.id })
+    await f.assigned('11:00')
     expect((await f.request('/bookings', 'driver')).bookings).toEqual([])
     f.control.now = booking.schedule!.departureAt
     await f.login('driver')
@@ -182,4 +182,41 @@ test('paginated operational reads retain driver shift scope and active overrun a
     expect(overrun.nextCursor).toBeNull()
     expect((await f.request(`/bookings/${booking.id}`, 'driver')).startedAt).toBeTruthy()
   } finally { await f.close() }
+})
+
+test('driver dashboard lists only the signed-in driver’s future assignments without patient details', async ({ page }) => {
+  test.setTimeout(60000)
+  const f = await startOperationalTestApi()
+  try {
+    const today = await f.assigned()
+    const consent = await f.request('/consents', 'citizen', { accepted: true, noticeVersion: 'development-v1' }, 201)
+    const request = await f.request('/bookings', 'citizen', {
+      consentId: consent.id, bookingFor: 'self', patientName: 'ผู้ป่วยวันอื่น', requesterName: 'ผู้จองทดสอบ',
+      contactPhone: '0800000000', pickupAddress: 'จุดรับทดสอบวันอื่น', latitude: 18.59, longitude: 99.05,
+      villageId: ids.village, hospitalId: ids.hospital, mobility: 'standard', appointmentAt: '2030-01-16T09:00:00+07:00',
+    }, 201)
+    const approved = await f.command(request, 'APPROVE')
+    const proposed = await f.request(`/bookings/${request.id}/schedule`, 'dispatcher', f.selection(approved))
+    const future = await f.request(`/bookings/${request.id}/assignment`, 'dispatcher', f.selection(proposed))
+    f.control.now = today.schedule!.departureAt
+    await f.login('driver')
+    await f.login('dispatcher')
+    await f.request('/driver/future', 'dispatcher', undefined, 403)
+    await f.request(`/bookings/${future.id}`, 'driver', undefined, 403)
+    const response = await f.request('/driver/future', 'driver')
+    expect(response.bookings).toEqual([{
+      id: future.id, reference: future.reference, status: 'ASSIGNED', appointmentAt: future.appointmentAt,
+      departureAt: future.schedule.departureAt, pickupAt: future.schedule.pickupAt,
+    }])
+    await page.clock.setFixedTime(new Date(f.control.now))
+    await openStaff(page, f.base, '/driver', 'driver')
+    await expect(page.getByRole('heading', { name: 'งานวันอื่น', exact: true })).toBeVisible()
+    await expect(page.getByText(future.reference, { exact: false })).toBeVisible()
+    await expect(page.getByText('ผู้ป่วยวันอื่น', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('จุดรับทดสอบวันอื่น', { exact: false })).toHaveCount(0)
+    await expect(page.locator(`a[href*="${future.id}"]`)).toHaveCount(0)
+  } finally {
+    if (!page.isClosed()) { await page.unrouteAll({ behavior: 'ignoreErrors' }); await page.close() }
+    await f.close()
+  }
 })

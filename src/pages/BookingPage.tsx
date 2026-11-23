@@ -1,6 +1,6 @@
 import { PickupMap } from '../components/LocationMap'
 import { BookingSummaryCard } from '../components/BookingSummaryCard'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { BookingTripTimeline } from '../components/BookingTripTimeline'
@@ -16,7 +16,12 @@ import { applyProfile, canCitizenCancel, citizenBooking, intakeFields, profileFi
 import '../booking.css'
 
 const initialBookingForm = (): BookingDetails => ({ ...emptyBooking(), pickupAddress: '', villageId: '', landmark: '' })
-export function BookingPage() {
+export function BookingPage({ singleSavedProfile = false, allowManualPickupCoordinates = true, showSeparateProfileSave = true, showManualRefresh = true }: {
+  singleSavedProfile?: boolean
+  allowManualPickupCoordinates?: boolean
+  showSeparateProfileSave?: boolean
+  showManualRefresh?: boolean
+}) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const path = pathname.replace(/^\/booking\/?/, '').split('/')
@@ -46,11 +51,15 @@ export function BookingPage() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [picker, setPicker] = useState<'date' | 'time' | null>(null)
   const [cancelError, setCancelError] = useState('')
+  const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null)
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [consentDeclined, setConsentDeclined] = useState(false)
   const [locationError, setLocationError] = useState('')
   const [locatingPath, setLocatingPath] = useState<string | null>(null)
   const locating = locatingPath === pathname
+  const addressPickup = draft.pickupMethod === 'address'
+  const savedProfile = singleSavedProfile ? profiles[0] : undefined
+  const profileIdToSave = draft.patientProfileId ?? savedProfile?.id
   const locationRequest = useRef(0)
   const gpsActive = draft.pickup?.accuracy !== undefined
   const [sending, setSending] = useState(false)
@@ -60,6 +69,7 @@ export function BookingPage() {
   const submittedId = useRef<string | null>(null)
   const pendingIntake = useRef<(ReturnType<typeof intakeFields> & { requestId: string }) | null>(null)
   const root = useRef<HTMLElement>(null)
+  const scrollRestore = useRef<{ pathname: string; top: number } | null>(null)
   const errorFocusPending = useRef(false)
   const saved = state.bookings.find(b => b.id === path[1])
   const savedRow = rows.find(row => row.id === path[1])
@@ -87,12 +97,38 @@ export function BookingPage() {
     return () => { active = false }
   // Revalidate each detail/status/cancellation entry, without reloading on draft edits.
   }, [session.user, detailId, requestKey, pages])
-  const go = (next = '') => { setErrors({}); navigate(`/booking${next ? `/${next}` : ''}`) }
+  const go = (next = '', scrollTop?: number) => {
+    const destination = `/booking${next ? `/${next}` : ''}`
+    scrollRestore.current = scrollTop === undefined ? null : { pathname: destination, top: scrollTop }
+    setErrors({})
+    navigate(destination)
+  }
+  const rememberScroll = () => {
+    if (scrollRestore.current?.pathname !== pathname) scrollRestore.current = { pathname, top: window.scrollY }
+  }
+  const refresh = () => { rememberScroll(); setVersion(value => value + 1) }
   const update = <K extends keyof BookingDetails>(key: K, value: BookingDetails[K]) => {
     setDraft(d => ({ ...d, [key]: value }))
     setErrors(e => { const next = { ...e }; delete next[key]; return next })
   }
-  useEffect(() => { window.scrollTo(0, 0); root.current?.querySelector<HTMLHeadingElement>('h1')?.focus() }, [pathname])
+  useLayoutEffect(() => {
+    if (scrollRestore.current?.pathname !== pathname) {
+      scrollRestore.current = null
+      window.scrollTo(0, 0)
+    }
+    root.current?.querySelector<HTMLHeadingElement>('h1')?.focus({ preventScroll: true })
+  }, [pathname])
+  useEffect(() => {
+    const position = scrollRestore.current
+    if (!loading && !loadError && position?.pathname === pathname) {
+      const frame = requestAnimationFrame(() => {
+        if (scrollRestore.current !== position) return
+        scrollRestore.current = null
+        window.scrollTo({ top: position.top, behavior: 'instant' })
+      })
+      return () => cancelAnimationFrame(frame)
+    }
+  }, [loading, loadError, pathname])
   useEffect(() => {
     if (!sending && errorFocusPending.current) {
       const invalid = root.current?.querySelector<HTMLElement>('[aria-invalid="true"]')
@@ -146,7 +182,8 @@ export function BookingPage() {
   }
   async function submit() {
     if (sendingRef.current) return
-    if (submittedId.current) { go(`submitted/${submittedId.current}`); return }
+    const scrollTop = window.scrollY
+    if (submittedId.current) { go(`submitted/${submittedId.current}`, scrollTop); return }
     if (!pendingIntake.current) {
       const next = validatePatient(draft)
       if (Object.keys(next).length) { go('patient'); showErrors(next); return }
@@ -168,7 +205,7 @@ export function BookingPage() {
         if (config.noticeVersion !== currentConsent.version) { setConsent(null); update('acknowledged', false); go('privacy'); return }
         let submission = draft
         if (saveProfile) {
-          const profile = await citizenRequest<PatientProfile>(draft.patientProfileId ? `/profiles/${draft.patientProfileId}` : '/profiles', { ...profileFields(draft), consentId: currentConsent.id })
+          const profile = await citizenRequest<PatientProfile>(profileIdToSave ? `/profiles/${profileIdToSave}` : '/profiles', { ...profileFields(draft), consentId: currentConsent.id })
           setProfiles(current => [...current.filter(row => row.id !== profile.id), profile])
           update('patientProfileId', profile.id); setSaveProfile(false)
           submission = { ...draft, patientProfileId: profile.id }
@@ -179,7 +216,7 @@ export function BookingPage() {
       pendingIntake.current = null; setIntakeUncertain(false)
       setRows(current => [...current.filter(row => row.id !== booking.id), booking])
       submittedId.current = booking.id
-      go(`submitted/${booking.id}`)
+      go(`submitted/${booking.id}`, scrollTop)
     } catch (error) {
       if (error instanceof ApiError && [400,403,404,409,415,422].includes(error.status)) pendingIntake.current = null
       setIntakeUncertain(!!pendingIntake.current)
@@ -231,7 +268,7 @@ export function BookingPage() {
     if (profileBusy || !currentConsent) return
     setProfileBusy(true); setProfileError('')
     try {
-      const profile = await citizenRequest<PatientProfile>(draft.patientProfileId ? `/profiles/${draft.patientProfileId}` : '/profiles', { ...profileFields(draft), consentId: currentConsent.id })
+      const profile = await citizenRequest<PatientProfile>(profileIdToSave ? `/profiles/${profileIdToSave}` : '/profiles', { ...profileFields(draft), consentId: currentConsent.id })
       setProfiles(current => [...current.filter(row => row.id !== profile.id), profile]); update('patientProfileId', profile.id)
       setSaveProfile(false)
     } catch (error) {
@@ -244,19 +281,26 @@ export function BookingPage() {
     finally { setProfileBusy(false) }
   }
   async function cancelOwn() {
-    if (!savedRow || cancelling || !canCitizenCancel(savedRow)) return
+    if (!savedRow || loading || cancelling || !canCitizenCancel(savedRow)) return
     setCancelling(true); setCancelError('')
     try {
       const result = await citizenRequest<CitizenBooking>(`/bookings/${savedRow.id}/commands`, { eventId: crypto.randomUUID(), expectedRevision: savedRow.revision, expectedExecutionVersion: savedRow.executionVersion, command: { type: 'CANCEL', reason: 'ผู้จองยกเลิกก่อนคนขับเริ่มงาน' } })
-      setRows(current => current.map(row => row.id === result.id ? result : row)); go(`status/${result.id}`)
-    } catch (error) { setCancelError(citizenError(error)) }
+      setRows(current => current.map(row => row.id === result.id ? result : row))
+      setCancelConfirmId(null)
+      if (screen === 'cancel') go(`status/${result.id}`, window.scrollY)
+    } catch (error) {
+      setCancelError(citizenError(error))
+      if (screen === 'status' && error instanceof ApiError && error.status === 409) refresh()
+    }
     finally { setCancelling(false) }
   }
   let content: ReactNode
-  if (!session.user || session.busy) return <div className="booking-shell"><main className="booking-screen"><BookingHeader title="จองรถไปโรงพยาบาล" /><p role="status">{session.busy ? 'กำลังยืนยันตัวตนผ่าน LINE…' : session.error}</p><p className="booking-notice">บริการรับส่งตามนัดหมาย ไม่ใช่บริการฉุกเฉิน</p><EmergencyLink />{!session.busy && <BookingButton onClick={() => void initializeCitizen(true)}>ลองเชื่อมต่อ LINE อีกครั้ง</BookingButton>}{session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>}</main></div>
+  const municipalContact = session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>
+  const contactFooter = <footer className="booking-contact-footer"><EmergencyLink />{municipalContact}</footer>
+  if (!session.user || session.busy) return <div className="booking-shell"><main className="booking-screen"><BookingHeader title="จองรถไปโรงพยาบาล" /><p role="status">{session.busy ? 'กำลังยืนยันตัวตนผ่าน LINE…' : session.error}</p>{!session.busy && <BookingButton onClick={() => void initializeCitizen(true)}>ลองเชื่อมต่อ LINE อีกครั้ง</BookingButton>}{contactFooter}</main></div>
   if (['patient', 'assistance', 'pickup', 'review'].includes(screen) && !currentConsent) return <Navigate to="/booking/privacy" replace />
   if (['submitted', 'status', 'cancel'].includes(screen) && !saved && !loading && !loadError) return <Navigate to="/booking/bookings" replace />
-  if (loading || loadError) content = <><BookingHeader title="รายการจองรถ" /><p role={loadError ? 'alert' : 'status'}>{loadError || 'กำลังโหลดข้อมูล…'}</p><BookingButton disabled={loading} onClick={() => setVersion(value => value + 1)}>โหลดข้อมูลล่าสุด</BookingButton></>
+  if (loading || loadError) content = <><BookingHeader title="รายการจองรถ" /><p role={loadError ? 'alert' : 'status'}>{loadError || 'กำลังโหลดข้อมูล…'}</p>{(showManualRefresh || loadError) && <BookingButton disabled={loading} onClick={refresh}>{showManualRefresh ? 'โหลดข้อมูลล่าสุด' : 'ลองอีกครั้ง'}</BookingButton>}</>
   else if (screen === '') content = <>
     <BookingHeader title="จองรถไปโรงพยาบาล" />
     <section className="booking-hero"><div className="booking-hero-icons"><BookingIcon name="medical" /><BookingIcon name="ambulance" /><BookingIcon name="pin" /></div><h2>จองรถรับส่งผู้ป่วย</h2><p>จองง่ายใน 3 ขั้นตอน</p></section>
@@ -264,21 +308,24 @@ export function BookingPage() {
     <ol className="booking-entry-steps">{['กรอกข้อมูล', 'เลือกจุดรับ', 'รอการยืนยัน'].map((label, i) => <li key={label}><strong>{i + 1}</strong><span>{label}</span></li>)}</ol><p className="booking-notice">จองล่วงหน้า 2 วัน (48 ชั่วโมง)</p>
   </>
   else if (screen === 'privacy') content = <>
-    <BookingHeader title="ข้อมูลส่วนบุคคล" subtitle="ขอใช้ข้อมูลเพื่อจัดรถให้คุณ" />
+    <BookingHeader title="ข้อมูลส่วนบุคคล" />
+    <Link className="booking-home-link booking-list-back" to="/booking" onClick={() => setErrors({})}>← กลับหน้าหลัก</Link>
     <section className="booking-hero"><BookingIcon name="shield" /><h2>ดูแลข้อมูลส่วนบุคคล</h2></section><h2 className="booking-section-title">ข้อมูลที่จำเป็น</h2>
     <BookingCard icon="user" title="ข้อมูลผู้ป่วย"><p>ชื่อและเบอร์ติดต่อ</p></BookingCard><BookingCard icon="smallPin" title="จุดรับผู้ป่วย"><p>สำหรับวางแผนการรับส่ง</p></BookingCard><BookingCard icon="smallMedical" title="ข้อมูลการเดินทาง"><p>วันนัดและความช่วยเหลือ</p></BookingCard>
-    <p className="booking-small">ไม่ต้องกรอกโรคหรือประวัติการรักษา</p><button type="button" className="booking-text-link" onClick={() => setPrivacyOpen(true)}>อ่านประกาศความเป็นส่วนตัว</button><label className="booking-checkbox"><input type="checkbox" checked={draft.acknowledged} onChange={e => update('acknowledged', e.target.checked)} /><span>รับทราบการใช้ข้อมูล<span className="booking-consent-detail">ยินยอมให้ใช้เพื่อจัดรถรับส่ง</span></span></label>
-    <p className="booking-info" style={{ whiteSpace: 'pre-wrap' }}>{session.config?.noticeText || 'ประกาศความเป็นส่วนตัวยังไม่พร้อม กรุณาติดต่อเทศบาล'}</p>
-    <p className="booking-small">ฉบับ {session.config?.noticeVersion}</p>
+    <button type="button" className="booking-text-link" onClick={() => setPrivacyOpen(true)}>อ่านประกาศความเป็นส่วนตัว</button><label className="booking-checkbox"><input type="checkbox" checked={draft.acknowledged} onChange={e => update('acknowledged', e.target.checked)} /><span>รับทราบการใช้ข้อมูล<span className="booking-consent-detail">ยินยอมให้ใช้เพื่อจัดรถรับส่ง</span></span></label>
+    {!session.config?.noticeText.trim() && <p role="alert" className="booking-error-box">ประกาศความเป็นส่วนตัวยังไม่พร้อม กรุณาติดต่อเทศบาล</p>}
     {consentError && <p role="alert" className="booking-error-box">{consentError}</p>}
     <BookingButton disabled={!draft.acknowledged || consentBusy || !session.config?.noticeText.trim()} onClick={() => void decideConsent(true)}>รับทราบและถัดไป</BookingButton>
-    <BookingButton secondary disabled={consentBusy} onClick={() => void decideConsent(false)}>ไม่ยินยอมใช้ข้อมูล</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
+    <BookingButton secondary disabled={consentBusy} onClick={() => void decideConsent(false)}>ไม่ยินยอมใช้ข้อมูล</BookingButton>
   </>
   else if (screen === 'patient') content = <>
-    <BookingHeader title="ข้อมูลผู้ป่วย" subtitle="ใครต้องการใช้รถรับส่ง?" /><BookingProgress step={1} />
+    <BookingHeader title="ข้อมูลผู้ป่วย" /><BookingProgress step={1} />
     <div className="booking-tabs" role="group" aria-label="ประเภทการจอง">{(['self', 'other'] as const).map(value => <button type="button" aria-pressed={draft.bookingFor === value} key={value} onClick={() => { update('bookingFor', value); setErrors({}) }}>{value === 'self' ? 'จองให้ตนเอง' : 'จองให้ผู้อื่น'}</button>)}</div>
-    <p className="booking-small">ช่องที่มี * จำเป็นต้องกรอก</p><form className="booking-form" noValidate onSubmit={e => { e.preventDefault(); patientNext() }}>
-      {profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select><span className="booking-small">โปรดตรวจสอบข้อมูลก่อนส่งคำขอ</span></label>}
+    <form className="booking-form" noValidate onSubmit={e => { e.preventDefault(); patientNext() }}>
+      {singleSavedProfile ? savedProfile && <button type="button" className="booking-text-link" onClick={() => {
+        locationRequest.current += 1
+        setDraft(current => applyProfile(current, savedProfile))
+      }}>ใช้ข้อมูลบันทึกไว้</button> : profiles.length > 0 && <label className="booking-field">ข้อมูลผู้ป่วยที่บันทึกไว้<select value={draft.patientProfileId ?? ''} onChange={event => { const profile = profiles.find(row => row.id === event.target.value); locationRequest.current += 1; setDraft(current => profile ? applyProfile(current, profile) : { ...current, patientProfileId: undefined }) }}><option value="">กรอกข้อมูลเอง</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.patientName}</option>)}</select></label>}
       {field('patientName', 'ชื่อผู้ป่วย', 'ชื่อและนามสกุล')}
       {draft.bookingFor === 'other' && field('contactName', 'ชื่อผู้ดูแล / ผู้ติดต่อ', 'ชื่อผู้จองหรือผู้ดูแล')}
       {field('phone', draft.bookingFor === 'self' ? 'เบอร์โทรศัพท์ของคุณ' : 'เบอร์โทรศัพท์ผู้ติดต่อ', '08X-XXX-XXXX')}
@@ -289,25 +336,36 @@ export function BookingPage() {
     </form><BookingButton secondary onClick={() => go('privacy')}>ย้อนกลับ</BookingButton>
   </>
   else if (screen === 'assistance') content = <>
-    <BookingHeader title="การช่วยเหลือและจุดรับ" subtitle="ผู้ป่วยเดินทางแบบไหน?" /><BookingProgress step={2} /><h2 className="booking-section-title">การช่วยเหลือ</h2>
+    <BookingHeader title="การช่วยเหลือและจุดรับ" /><BookingProgress step={2} /><h2 className="booking-section-title">การช่วยเหลือ</h2>
     <div className="booking-assistance" role="group" aria-label="การช่วยเหลือ" tabIndex={errors.assistance ? -1 : undefined} aria-invalid={!!errors.assistance} aria-describedby={errors.assistance ? 'assistance-error' : undefined}>{(['เดินได้', 'รถเข็น', 'เปลนอน'] as const).map((label, i) => <button type="button" key={label} aria-pressed={draft.assistance === label} onClick={() => update('assistance', label)}><BookingIcon name={(['walk', 'wheel', 'bed'] as const)[i]} />{label}</button>)}</div>{error('assistance')}
     <h2 className="booking-section-title">ต้องการให้ช่วยอะไรอีก?</h2>
     <div className="booking-extras" role="group" aria-label="ความช่วยเหลือเพิ่มเติม" tabIndex={errors.extras ? -1 : undefined} aria-invalid={!!errors.extras} aria-describedby={errors.extras ? 'extras-error' : undefined}><label className="booking-checkbox"><input type="checkbox" checked={draft.extras.length === 0} onChange={() => update('extras', [])} />ไม่ต้องการความช่วยเหลือเพิ่มเติม</label>{['ต้องการผู้ช่วยพยุงขึ้น-ลงรถ', 'มีผู้ดูแลเดินทางไปด้วย'].map(label => <label className="booking-checkbox" key={label}><input type="checkbox" checked={draft.extras.includes(label)} onChange={e => update('extras', e.target.checked ? [...draft.extras, label] : draft.extras.filter(x => x !== label))} />{label}</label>)}</div>{error('extras')}
     <h2 className="booking-section-title">จุดรับผู้ป่วย</h2>
-    <div className="booking-location-controls"><PickupMap value={draft.pickup} onChange={selectPoint} />
-    <BookingButton secondary className="booking-location-button" aria-pressed={gpsActive} disabled={locating} onClick={useCurrentLocation}>{locating ? 'กำลังค้นหาตำแหน่ง…' : gpsActive ? '✓ ใช้ตำแหน่งปัจจุบันแล้ว' : 'ใช้ตำแหน่งปัจจุบัน'}</BookingButton>
-    </div>
-    <label className="booking-field">หมู่บ้านในเขตบริการ *<select value={draft.villageId ?? ''} aria-invalid={!!errors.villageId} onChange={event => update('villageId', event.target.value)}><option value="">เลือกหมู่บ้าน</option>{catalog.villages.map(village => <option key={village.id} value={village.id}>หมู่ {village.number} · {village.name}</option>)}</select>{error('villageId')}</label>
+    <fieldset className="booking-extras" aria-label="วิธีระบุจุดรับ">
+      {(['map', 'address'] as const).map(method => <label className="booking-checkbox" key={method}>
+        <input type="radio" name="pickup-method" checked={(draft.pickupMethod ?? 'map') === method} onChange={() => {
+          locationRequest.current += 1
+          setLocatingPath(null)
+          update('pickupMethod', method)
+        }} />{method === 'map' ? 'เลือกจุดบนแผนที่' : 'กรอกที่อยู่แทนแผนที่'}
+      </label>)}
+    </fieldset>
+    {!addressPickup && <div className="booking-location-controls">
+      <PickupMap value={draft.pickup} onChange={selectPoint} locationControl={
+        <BookingButton secondary className="booking-location-button" aria-pressed={gpsActive} disabled={locating} onClick={useCurrentLocation}>{locating ? 'กำลังค้นหาตำแหน่ง…' : gpsActive ? '✓ ใช้ตำแหน่งปัจจุบันแล้ว' : 'ใช้ตำแหน่งปัจจุบัน'}</BookingButton>
+      } />
+    </div>}
+    {addressPickup && <><label className="booking-field">หมู่บ้านในเขตบริการ *<select value={draft.villageId ?? ''} aria-invalid={!!errors.villageId} onChange={event => update('villageId', event.target.value)}><option value="">เลือกหมู่บ้าน</option>{catalog.villages.map(village => <option key={village.id} value={village.id}>หมู่ {village.number} · {village.name}</option>)}</select>{error('villageId')}</label>
     <label className="booking-field">ที่อยู่จุดรับ *<input value={draft.pickupAddress ?? ''} autoComplete="street-address" placeholder="บ้านเลขที่ หมู่บ้าน ตำบล" aria-invalid={!!errors.pickupAddress} onChange={event => update('pickupAddress', event.target.value)} />{error('pickupAddress')}</label>
-    <label className="booking-field">จุดสังเกต<input value={draft.landmark ?? ''} aria-invalid={!!errors.landmark} onChange={event => update('landmark', event.target.value)} />{error('landmark')}</label>
-    <details className="booking-address-fallback"><summary>เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง</summary><p className="booking-small">ที่อยู่ต้องมีพิกัดและอยู่ในหมู่บ้านที่ให้บริการ หากไม่ทราบพิกัด กรุณาติดต่อเทศบาล</p>{(['latitude', 'longitude'] as const).map(key => <label key={key} className="booking-field">{key === 'latitude' ? 'ละติจูด' : 'ลองจิจูด'}<input type="number" step="any" value={draft.pickup?.[key] ?? ''} onChange={event => { locationRequest.current += 1; setLocatingPath(null); const value = event.target.value === '' ? undefined : Number(event.target.value); update('pickup', { x: 50, y: 50, label: 'จุดรับที่ระบุพิกัดเอง', ...draft.pickup, [key]: value, accuracy: undefined }) }} /></label>)}</details>
-    <section className="booking-pickup-value" tabIndex={errors.pickup ? -1 : undefined} aria-invalid={!!errors.pickup} aria-describedby={errors.pickup ? 'pickup-error' : undefined}><p>จุดรับที่เลือก</p>{(draft.pickup || !errors.pickup) && <strong>{draft.pickup?.label || 'กรุณาเลือกจุดรับก่อนดำเนินการ'}</strong>}{error('pickup')}</section>
-    <p className="booking-info">ตรวจสอบจุดรับบนแผนที่ หรือที่อยู่ที่ระบุ ก่อนดำเนินการต่อ</p>
+    <label className="booking-field">จุดสังเกต<input value={draft.landmark ?? ''} aria-invalid={!!errors.landmark} onChange={event => update('landmark', event.target.value)} />{error('landmark')}</label></>}
+    {!addressPickup && <>{allowManualPickupCoordinates && <details className="booking-address-fallback"><summary>เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง</summary>{(['latitude', 'longitude'] as const).map(key => <label key={key} className="booking-field">{key === 'latitude' ? 'ละติจูด' : 'ลองจิจูด'}<input type="number" step="any" value={draft.pickup?.[key] ?? ''} onChange={event => { locationRequest.current += 1; setLocatingPath(null); const value = event.target.value === '' ? undefined : Number(event.target.value); update('pickup', { x: 50, y: 50, label: 'จุดรับที่ระบุพิกัดเอง', ...draft.pickup, [key]: value, accuracy: undefined }) }} /></label>)}</details>}
+    <section className="booking-pickup-value" tabIndex={errors.pickup ? -1 : undefined} aria-invalid={!!errors.pickup} aria-describedby={errors.pickup ? 'pickup-error' : undefined}><p>จุดรับที่เลือก</p>{(draft.pickup || !errors.pickup) && <strong>{draft.pickup?.label || 'กรุณาเลือกจุดรับก่อนดำเนินการ'}</strong>}{error('pickup')}</section></>}
+
     <div className="booking-pickup-actions"><BookingButton onClick={assistanceNext}>ถัดไป →</BookingButton><BookingButton secondary onClick={() => go('patient')}>ย้อนกลับ</BookingButton></div>
   </>
   else if (screen === 'pickup') return <Navigate to="/booking/assistance" replace />
-  else if (screen === 'review') content = sending ? <><BookingHeader title="กำลังส่งคำขอ" subtitle="กรุณารอสักครู่" /><section className="booking-hero" role="status"><h2>กำลังส่งคำขอจองรถ</h2><p>โปรดอย่ากดส่งซ้ำ</p></section><BookingButton disabled>กำลังส่งคำขอ…</BookingButton></> : <>
-    <BookingHeader title="ตรวจสอบข้อมูล" subtitle="ถูกต้องแล้ว กดส่งคำขอได้เลย" /><BookingProgress step={3} />
+  else if (screen === 'review') content = <>
+    <BookingHeader title="ตรวจสอบข้อมูล" /><BookingProgress step={3} />
     <section className="booking-review-section"><header><h2>ข้อมูลผู้ป่วย</h2>{edit('patient', 'ข้อมูลผู้ป่วย')}</header><dl>
       <div><dt>ชื่อผู้ป่วย</dt><dd>{draft.patientName}</dd></div>
       <div><dt>{draft.bookingFor === 'self' ? 'เบอร์โทรศัพท์' : 'เบอร์โทรศัพท์ผู้ติดต่อ'}</dt><dd>{draft.phone}</dd></div>
@@ -322,52 +380,67 @@ export function BookingPage() {
       <div><dt>การเดินทางของผู้ป่วย</dt><dd>{draft.assistance}</dd></div>
       <div><dt>ความช่วยเหลือเพิ่มเติม</dt><dd>{draft.extras.length ? <ul>{draft.extras.map(extra => <li key={extra}>{extra}</li>)}</ul> : 'ไม่ต้องการความช่วยเหลือเพิ่มเติม'}</dd></div>
     </dl></section>
-    <section className="booking-review-section"><header><h2>จุดรับผู้ป่วย</h2>{edit('assistance', 'จุดรับผู้ป่วย')}</header><dl><div><dt>สถานที่รับ</dt><dd>{draft.pickupAddress} · {draft.pickup?.label}</dd></div><div><dt>หมู่บ้าน</dt><dd>{catalog.villages.find(row => row.id === draft.villageId)?.name}</dd></div>{draft.landmark && <div><dt>จุดสังเกต</dt><dd>{draft.landmark}</dd></div>}</dl></section>
-    <label className="booking-checkbox"><input type="checkbox" checked={saveProfile} onChange={event => setSaveProfile(event.target.checked)} />บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป</label>
-    {saveProfile && <BookingButton secondary disabled={profileBusy} onClick={() => void persistProfile()}>{profileBusy ? 'กำลังบันทึก…' : draft.patientProfileId ? 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' : 'บันทึกข้อมูลผู้ป่วย'}</BookingButton>}
+    <section className="booking-review-section"><header><h2>จุดรับผู้ป่วย</h2>{edit('assistance', 'จุดรับผู้ป่วย')}</header><dl><div><dt>สถานที่รับ</dt><dd>{addressPickup ? draft.pickupAddress : draft.pickup?.label}</dd></div>{addressPickup && <><div><dt>หมู่บ้าน</dt><dd>{catalog.villages.find(row => row.id === draft.villageId)?.name}</dd></div>{draft.landmark && <div><dt>จุดสังเกต</dt><dd>{draft.landmark}</dd></div>}</>}</dl></section>
+    <label className="booking-checkbox"><input type="checkbox" checked={saveProfile} disabled={sending} onChange={event => setSaveProfile(event.target.checked)} />บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป</label>
+    {showSeparateProfileSave && saveProfile && <BookingButton secondary disabled={profileBusy || sending} onClick={() => void persistProfile()}>{profileBusy ? 'กำลังบันทึก…' : profileIdToSave ? 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' : 'บันทึกข้อมูลผู้ป่วย'}</BookingButton>}
     {profileError && <p role="alert" className="booking-error-box">{profileError}</p>}
-    {saveError && <><p role="alert" className="booking-error-box">{saveError}</p><BookingButton secondary onClick={() => go('bookings')}>ตรวจสอบรายการจองล่าสุดก่อนส่งซ้ำ</BookingButton></>}
-    {intakeUncertain && <p role="status" className="booking-small">กำลังตรวจสอบคำขอก่อนหน้า การลองอีกครั้งจะใช้คำขอเดิมเพื่อป้องกันรายการซ้ำ</p>}
-    <BookingButton disabled={profileBusy} onClick={() => void submit()}>{saveError ? 'ลองส่งคำขออีกครั้ง' : 'ยืนยันและส่งคำขอ'}</BookingButton><BookingButton secondary disabled={profileBusy || intakeUncertain} onClick={() => go('assistance')}>ย้อนกลับ</BookingButton>
+    {saveError && <p role="alert" className="booking-error-box">{saveError}</p>}
+    {intakeUncertain && <p role="status">กำลังตรวจสอบคำขอก่อนหน้า การลองอีกครั้งจะใช้คำขอเดิมเพื่อป้องกันรายการซ้ำ</p>}
+    <BookingButton disabled={profileBusy || sending} onClick={() => void submit()}>{sending ? 'กำลังส่งคำขอ…' : saveError ? 'ลองส่งคำขออีกครั้ง' : 'ยืนยันและส่งคำขอ'}</BookingButton><BookingButton secondary disabled={profileBusy || sending || intakeUncertain} onClick={() => go('assistance')}>ย้อนกลับ</BookingButton>
   </>
   else if (screen === 'submitted' && saved) content = <>
-    <BookingHeader title="ส่งคำขอแล้ว" subtitle="เก็บหมายเลขคำขอไว้เพื่อติดตามสถานะ" />
+    <BookingHeader title="ส่งคำขอแล้ว" />
+    <Link className="booking-home-link booking-list-back" to="/booking" onClick={() => setErrors({})}>← กลับหน้าหลัก</Link>
     <BookingSummaryCard booking={saved} statusLabel={statusLabels[saved.apiStatus!]} />
-    <p className="booking-small">แจ้งผลการพิจารณาและเวลารับผ่าน LINE</p>
-    <BookingButton onClick={() => go(`status/${saved.id}`)}>ดูสถานะการจอง</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
+
+    <BookingButton onClick={() => go(`status/${saved.id}`)}>ดูสถานะการจอง</BookingButton>
   </>
   else if (screen === 'bookings') content = <>
-    <BookingHeader title="รายการจองของฉัน" subtitle={state.bookings.length ? 'ดูสถานะและรายละเอียดการจอง' : 'ไม่มีคำขอจองรถในขณะนี้'} />
+    <BookingHeader title="รายการจองของฉัน" />
     <Link className="booking-home-link booking-list-back" to="/booking" onClick={() => setErrors({})}>← กลับหน้าหลัก</Link>
-    <BookingButton secondary onClick={() => setVersion(value => value + 1)}>โหลดข้อมูลล่าสุด</BookingButton>
-    {state.bookings.length ? <><div className="booking-list-title"><h2>รายการจองล่าสุด</h2><span>{state.bookings.length} {hasMore ? 'รายการที่โหลดแล้ว' : 'รายการ'}</span></div>{[...state.bookings].reverse().map(b => <BookingSummaryCard key={b.id} booking={b} statusLabel={statusLabels[b.apiStatus!]} to={`/booking/status/${b.id}`} />)}{hasMore && <><p className="booking-small">ยังมีรายการจองอื่น กดโหลดรายการเพิ่มเติมเพื่อดูครบ</p><BookingButton secondary disabled={loading} onClick={() => setListRange({ owner: session.user!.id, pages: pages + 1 })}>โหลดรายการเพิ่มเติม</BookingButton></>}</> : <><section className="booking-empty"><span aria-hidden="true">▱</span><h2>ยังไม่มีรายการจอง</h2><p>เริ่มส่งคำขอจองรถได้เลย</p></section><BookingButton onClick={start}>เริ่มจองรถ</BookingButton></>}
+    {showManualRefresh && <BookingButton secondary onClick={refresh}>โหลดข้อมูลล่าสุด</BookingButton>}
+    {state.bookings.length ? <><div className="booking-list-title"><h2>รายการจองล่าสุด</h2><span>{state.bookings.length} {hasMore ? 'รายการที่โหลดแล้ว' : 'รายการ'}</span></div>{[...state.bookings].reverse().map(b => <BookingSummaryCard key={b.id} booking={b} statusLabel={statusLabels[b.apiStatus!]} to={`/booking/status/${b.id}`} />)}{hasMore && <BookingButton secondary disabled={loading} onClick={() => { rememberScroll(); setListRange({ owner: session.user!.id, pages: pages + 1 }) }}>โหลดรายการเพิ่มเติม</BookingButton>}</> : <><section className="booking-empty"><span aria-hidden="true">▱</span><h2>ยังไม่มีรายการจอง</h2><p>เริ่มส่งคำขอจองรถได้เลย</p></section><BookingButton onClick={start}>เริ่มจองรถ</BookingButton></>}
   </>
   else if (screen === 'cancel' && saved) content = <>
-    <BookingHeader title="ยกเลิกการจอง" subtitle="ตรวจสอบข้อมูลก่อนยืนยันการยกเลิก" />
+    <BookingHeader title="ยกเลิกการจอง" />
     <BookingCard title="หมายเลขการจอง"><p>{saved.reference} · {saved.details?.hospital || 'นัดหมายโรงพยาบาล'}</p></BookingCard>
     <BookingCard title="สถานะที่ยกเลิกได้"><p>ก่อนคนขับเริ่มงานเท่านั้น</p></BookingCard>
     <BookingCard title="หลังยืนยัน"><p>รายการจะถูกยกเลิกและคืนการจองรถและคนขับ</p></BookingCard>
     {!citizenCanCancel() && <p className="booking-error-box" role="alert">ไม่สามารถยกเลิกได้ กรุณาติดต่อเทศบาล</p>}
     {cancelError && <p className="booking-error-box" role="alert">{cancelError}</p>}
-    <BookingButton secondary disabled={cancelling} onClick={() => setVersion(value => value + 1)}>โหลดข้อมูลล่าสุด</BookingButton>
+    {showManualRefresh && <BookingButton secondary disabled={cancelling} onClick={refresh}>โหลดข้อมูลล่าสุด</BookingButton>}
     <BookingButton danger disabled={!citizenCanCancel() || cancelling} onClick={() => void cancelOwn()}>{cancelling ? 'กำลังยกเลิก…' : 'ยืนยันยกเลิกการจอง'}</BookingButton>
     <BookingButton secondary disabled={cancelling} onClick={() => go(`status/${saved.id}`)}>กลับไปดูรายละเอียด</BookingButton>
   </>
   else if (screen === 'status' && saved) content = <>
-    <BookingHeader title="สถานะการจอง" /><BookingSummaryCard booking={saved} statusLabel={statusLabels[saved.apiStatus!]} />
-    <BookingButton secondary onClick={() => setVersion(value => value + 1)}>โหลดข้อมูลล่าสุด</BookingButton>
+    <BookingHeader title="สถานะการจอง" />
+    <Link className="booking-home-link booking-list-back" to="/booking" onClick={() => setErrors({})}>← กลับหน้าหลัก</Link>
+    <BookingSummaryCard booking={saved} statusLabel={statusLabels[saved.apiStatus!]} />
+    {showManualRefresh && <BookingButton secondary onClick={refresh}>โหลดข้อมูลล่าสุด</BookingButton>}
     {saved.apiStatus === 'ABORTED' ? <BookingCard title="ยุติการเดินทาง"><p>ไม่ได้ส่งถึงโรงพยาบาล กรุณาติดต่อเทศบาลเพื่อทราบการจัดการต่อ</p></BookingCard> : saved.status === 'cancelled' ? <BookingCard title="ยกเลิกการจองแล้ว"><p>{saved.cancellation?.reason}</p><p>การยกเลิกได้รับการบันทึกแล้ว</p></BookingCard> : saved.status === 'rejected' ? <BookingCard title="ผลการพิจารณา"><p>ไม่อนุมัติคำขอนี้</p><p>เหตุผล: {saved.rejectionReason || 'ยังไม่มีเหตุผลที่บันทึกไว้'}</p><p>หากต้องการความช่วยเหลือ กรุณาติดต่อเทศบาล</p></BookingCard> : saved.status === 'completed' ? <BookingCard title="ผลการเดินทาง"><p>ผู้ป่วยเดินทางถึงโรงพยาบาลแล้ว</p><p>หมายเลขการจอง {saved.reference}</p></BookingCard> : <><h2 className="booking-section-title">ความคืบหน้า</h2><BookingTripTimeline booking={saved} /></>}
-    {citizenCanCancel() && <BookingButton secondary danger onClick={() => { setCancelError(''); go(`cancel/${saved.id}`) }}>ยกเลิกการจอง</BookingButton>}<BookingButton secondary onClick={() => go('bookings')}>รายการจองของฉัน</BookingButton><Link className="booking-home-link" to="/booking" onClick={() => setErrors({})}>กลับหน้าหลัก</Link>
+    {citizenCanCancel() && <BookingButton secondary danger onClick={() => {
+      setCancelError('')
+      setCancelConfirmId(saved.id)
+    }}>ยกเลิกการจอง</BookingButton>}<BookingButton secondary onClick={() => go('bookings')}>รายการจองของฉัน</BookingButton>
   </>
   else return <Navigate to="/booking" replace />
   return <div className="booking-shell"><a className="skip-link" href="#booking-main">ข้ามไปยังเนื้อหา</a><div className="booking-workspace"><main tabIndex={-1} ref={root} id="booking-main" className={`booking-screen booking-screen-${screen || 'entry'} ${screen === 'status' ? `booking-state-${saved?.status}` : ''} ${screen === 'patient' && draft.bookingFor === 'other' ? 'booking-caregiver' : ''}`}>
     {content}
-    <p className="booking-notice">บริการรับส่งตามนัดหมาย ไม่ใช่บริการฉุกเฉิน</p><EmergencyLink />
-    {session.config?.contactPhone && <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a>}
+    {contactFooter}
   </main></div>
+    {screen === 'status' && saved && cancelConfirmId === saved.id && <BookingModal title="ต้องการยกเลิกการจองนี้หรือไม่?" onClose={() => {
+      if (!cancelling) setCancelConfirmId(null)
+    }}>
+      {cancelError && <p className="booking-error-box" role="alert">{cancelError}</p>}
+      <BookingButton secondary data-initial-focus disabled={cancelling} onClick={() => setCancelConfirmId(null)}>กลับ</BookingButton>
+      <BookingButton danger disabled={loading || cancelling || !citizenCanCancel()} onClick={() => void cancelOwn()}>{cancelling ? 'กำลังยกเลิก…' : 'ยืนยันยกเลิกการจอง'}</BookingButton>
+    </BookingModal>}
     {picker && <AppointmentPicker kind={picker} date={draft.date} time={draft.time} onClose={() => setPicker(null)} onConfirm={value => { update(picker, value); setPicker(null) }} />}
-    {consentDeclined && <BookingModal title="ติดต่อเทศบาลเพื่อจองทางโทรศัพท์" onClose={() => setConsentDeclined(false)}><p>คุณยังไม่ได้ยินยอมใช้ข้อมูล จึงยังไม่สามารถกรอกแบบฟอร์มจองรถได้</p>{session.config?.contactPhone ? <a className="booking-home-link" href={`tel:${session.config.contactPhone}`}>ติดต่อเทศบาล {session.config.contactPhone}</a> : <p>ยังไม่ได้ตั้งค่าหมายเลขเทศบาล กรุณาติดต่อผ่าน LINE OA</p>}<Link className="booking-home-link" to="/booking" onClick={() => { setConsentDeclined(false); setErrors({}) }}>กลับหน้าหลัก</Link></BookingModal>}
+    {consentDeclined && <BookingModal title="ติดต่อเทศบาลเพื่อจองทางโทรศัพท์" onClose={() => setConsentDeclined(false)} footer={municipalContact || <p>ยังไม่ได้ตั้งค่าหมายเลขเทศบาล กรุณาติดต่อผ่าน LINE OA</p>}>
+      <Link className="booking-home-link booking-list-back" to="/booking" onClick={() => { setConsentDeclined(false); setErrors({}) }}>← กลับหน้าหลัก</Link>
+      <p>คุณยังไม่ได้ยินยอมใช้ข้อมูล จึงยังไม่สามารถกรอกแบบฟอร์มจองรถได้</p>
+    </BookingModal>}
     {privacyOpen && <BookingModal title="ข้อมูลส่วนบุคคล" onClose={() => setPrivacyOpen(false)}><p style={{ whiteSpace: 'pre-wrap' }}>{session.config?.noticeText}</p><BookingButton onClick={() => setPrivacyOpen(false)}>ปิด</BookingButton></BookingModal>}
-    {locationError && <BookingModal title="ไม่พบตำแหน่งปัจจุบัน" onClose={() => setLocationError('')}><p>ยังจองรถต่อได้โดยปักหมุดเอง</p><section className="booking-empty"><h3>ไม่สามารถดึงตำแหน่งได้</h3><p>{locationError}</p></section><p className="booking-info">เลือกจุดรับบนแผนที่แทนได้</p><BookingButton onClick={() => { setLocationError(''); openPin() }}>เลือกจุดรับบนแผนที่</BookingButton><BookingButton secondary onClick={() => setLocationError('')}>ย้อนกลับ</BookingButton></BookingModal>}
+    {locationError && <BookingModal title="ไม่พบตำแหน่งปัจจุบัน" onClose={() => setLocationError('')}><p>ยังจองรถต่อได้โดยปักหมุดเอง</p><section className="booking-empty"><h3>ไม่สามารถดึงตำแหน่งได้</h3><p>{locationError}</p></section><BookingButton onClick={() => { setLocationError(''); openPin() }}>เลือกจุดรับบนแผนที่</BookingButton><BookingButton secondary onClick={() => setLocationError('')}>ย้อนกลับ</BookingButton></BookingModal>}
   </div>
 }

@@ -1,3 +1,5 @@
+import { isAppointmentClock } from '../domain/appointmentHours'
+
 export interface BookingDetails {
   bookingFor: 'self' | 'other' | 'unknown'
   patientName: string
@@ -10,6 +12,7 @@ export interface BookingDetails {
   assistance: string
   extras: string[]
   pickup: { x: number; y: number; label: string; latitude?: number; longitude?: number; accuracy?: number } | null
+  pickupMethod?: 'map' | 'address'
   acknowledged: boolean
   villageId?: string
   pickupAddress?: string
@@ -36,15 +39,18 @@ export function validatePatient(d: BookingDetails, now = Date.now()) {
   if (!d.hospital) errors.hospital = 'กรุณาเลือกโรงพยาบาล'
   if (!d.date) errors.date = 'กรุณาเลือกวันนัดหมาย'
   if (!d.time) errors.time = 'กรุณาเลือกเวลานัดหมาย'
-  if (d.date && d.time && !meetsLeadTime(d.date, d.time, now)) errors.time = 'กรุณาจองล่วงหน้าอย่างน้อย 48 ชั่วโมง'
+  else if (!isAppointmentClock(d.time)) errors.time = 'กรุณาเลือกเวลานัดระหว่าง 06:00–16:00 น.'
+  else if (d.date && !meetsLeadTime(d.date, d.time, now)) errors.time = 'กรุณาจองล่วงหน้าอย่างน้อย 48 ชั่วโมง'
   return errors
 }
 export function validatePickup(d: BookingDetails) {
   const errors: Record<string, string> = {}
-  if (!Number.isFinite(d.pickup?.latitude) || Math.abs(d.pickup!.latitude!) > 90 || !Number.isFinite(d.pickup?.longitude) || Math.abs(d.pickup!.longitude!) > 180) errors.pickup = 'กรุณาเลือกพิกัดจุดรับบนแผนที่ หรือระบุพิกัดด้วยตนเอง'
-  if (!d.villageId) errors.villageId = 'กรุณาเลือกหมู่บ้านในเขตบริการ'
-  if (!d.pickupAddress?.trim() || [...d.pickupAddress.trim()].length > 1000) errors.pickupAddress = 'กรุณากรอกที่อยู่จุดรับ ไม่เกิน 1,000 ตัวอักษร'
-  if ([...(d.landmark ?? '').trim()].length > 1000) errors.landmark = 'จุดสังเกตต้องไม่เกิน 1,000 ตัวอักษร'
+  if (d.pickupMethod !== 'address' && (!Number.isFinite(d.pickup?.latitude) || Math.abs(d.pickup!.latitude!) > 90 || !Number.isFinite(d.pickup?.longitude) || Math.abs(d.pickup!.longitude!) > 180)) errors.pickup = 'กรุณาเลือกพิกัดจุดรับ หรือเลือกกรอกที่อยู่แทนแผนที่'
+  if (d.pickupMethod === 'address') {
+    if (!d.villageId) errors.villageId = 'กรุณาเลือกหมู่บ้านในเขตบริการ'
+    if (!d.pickupAddress?.trim() || [...d.pickupAddress.trim()].length > 1000) errors.pickupAddress = 'กรุณากรอกที่อยู่จุดรับ ไม่เกิน 1,000 ตัวอักษร'
+    if ([...(d.landmark ?? '').trim()].length > 1000) errors.landmark = 'จุดสังเกตต้องไม่เกิน 1,000 ตัวอักษร'
+  }
   if (!['เดินได้', 'รถเข็น', 'เปลนอน'].includes(d.assistance)) errors.assistance = 'กรุณาเลือกการช่วยเหลือ'
   return errors
 }

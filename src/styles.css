@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* Values read from Figma palette and spacing variables. */
-@theme {
+@theme static {
   --font-sans: 'Noto Sans Thai', sans-serif;
   --color-canvas: #f6faf9;
   --color-ink: #132d2c;

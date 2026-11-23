@@ -29,14 +29,16 @@ test('monthly cohort includes pending/proposed/ended work; admin and dispatcher 
   await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill('synthetic-admin');await page.getByLabel('รหัสผ่าน',{exact:true}).fill(syntheticPassword)
   await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click()
   await page.getByRole('link',{name:'เปิดหน้าผู้ดูแลระบบ',exact:true}).click()
-  await page.getByText('ส่งออกรายงานสรุปรายเดือน',{exact:true}).click()
-  await page.getByLabel('เดือนนัดหมายสำหรับรายงาน').fill('2030-01')
+  const reportLink=page.getByRole('button',{name:'ส่งออกรายงานสรุปรายเดือน',exact:true})
+  await reportLink.click()
+  const report=page.getByRole('dialog',{name:'ส่งออกรายงานสรุปรายเดือน',exact:true})
+  await report.getByLabel('เดือนนัดหมายสำหรับรายงาน').fill('2030-01')
   // A real failed export must retain the month and permit a later real download.
-  const body=page.getByRole('button',{name:'ดาวน์โหลดรายงานรายเดือน (.xlsx)',exact:true})
+  const body=report.getByRole('button',{name:'ดาวน์โหลดรายงานรายเดือน (.xlsx)',exact:true})
   await f.pool.query(`CREATE FUNCTION patient_transfer.reject_monthly_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='EXPORT_MONTHLY_REPORT' THEN RAISE EXCEPTION 'injected audit failure'; END IF; RETURN NEW; END $$;
    CREATE TRIGGER reject_monthly_test BEFORE INSERT ON patient_transfer.audit_logs FOR EACH ROW EXECUTE FUNCTION patient_transfer.reject_monthly_test()`)
-  await body.click();await expect(page.getByRole('alert')).toBeVisible()
-  await expect(page.getByLabel('เดือนนัดหมายสำหรับรายงาน')).toHaveValue('2030-01')
+  await body.click();await expect(report.getByRole('alert')).toBeVisible()
+  await expect(report.getByLabel('เดือนนัดหมายสำหรับรายงาน')).toHaveValue('2030-01')
   expect((await f.pool.query("SELECT * FROM patient_transfer.audit_logs WHERE action='EXPORT_MONTHLY_REPORT'")).rowCount).toBe(0)
   await f.pool.query('DROP TRIGGER reject_monthly_test ON patient_transfer.audit_logs; DROP FUNCTION patient_transfer.reject_monthly_test()')
   const event=page.waitForEvent('download');await body.click();const download=await event
@@ -47,6 +49,10 @@ test('monthly cohort includes pending/proposed/ended work; admin and dispatcher 
   expect(book.getWorksheet('สรุปตามหมู่บ้าน')!.rowCount).toBe(25)
   const all=JSON.stringify(book.worksheets.map(s=>s.getSheetValues()))
   for(const value of [pending.patientName,pending.reference,pending.contactPhone,pending.pickupAddress])expect(all).not.toContain(value)
+  await expect(report.getByRole('button',{name:'ปิดหน้าต่าง',exact:true})).toHaveCount(0)
+  await report.locator('header').getByRole('button',{name:'ปิด',exact:true}).click()
+  await expect(report).toHaveCount(0)
+  await expect(reportLink).toBeFocused()
   const login=await fetch(`${f.base}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'synthetic-dispatcher',password:syntheticPassword})}),token=(await login.json()).token
   const result=await fetch(`${f.base}/api/reports/monthly`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({month:'2030-01'})})
   expect(result.status).toBe(200);expect(result.headers.get('cache-control')).toBe('no-store')

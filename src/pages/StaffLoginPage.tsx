@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { BookingButton, BookingHeader } from '../components/BookingUI'
 import { staffSession, useStaffSession } from '../services/staffSession'
 import '../booking.css'
 
 export function StaffLoginPage() {
   const session = useStaffSession()
+  const navigate = useNavigate()
   const [params] = useSearchParams()
   const next = params.get('next')
   const destination = session.user?.role === 'driver'
@@ -16,20 +17,27 @@ export function StaffLoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const roles = { admin: 'ผู้ดูแลระบบ', dispatcher: 'เจ้าหน้าที่จัดรถ', driver: 'คนขับรถ' }
-  return <div className="booking-shell"><main className="booking-screen">
-    <BookingHeader title="เข้าสู่ระบบเจ้าหน้าที่" />
-    {session.user ? <section className="booking-card"><div className="booking-card-copy">
+  async function signIn() {
+    try {
+      const user = await staffSession.login(username.trim(), password)
+      if (user?.role === 'dispatcher') navigate(destination, { replace: true })
+    } finally { setPassword('') }
+  }
+  return <div className="booking-shell staff-login-shell"><main className={`booking-screen staff-login-screen${session.user ? ' staff-account-screen' : ''}`}>
+    <BookingHeader title={session.user ? 'บัญชีเจ้าหน้าที่' : 'เข้าสู่ระบบเจ้าหน้าที่'} />
+    {session.user ? <>
       <h2>{session.user.name}</h2><p>{roles[session.user.role]}</p>
       {session.user.role === 'dispatcher' && <Link className="booking-button" to={destination}>เปิดหน้าจัดรถ</Link>}
       {session.user.role === 'driver' && <Link className="booking-button" to={destination}>เปิดหน้าคนขับ</Link>}
       {session.user.role === 'admin' && <Link className="booking-button" to={destination}>เปิดหน้าผู้ดูแลระบบ</Link>}
-      <BookingButton disabled={session.busy} onClick={() => void staffSession.refresh()}>ตรวจสอบเซสชัน</BookingButton>
-      <BookingButton secondary disabled={session.busy} onClick={() => void staffSession.logout()}>ออกจากระบบ</BookingButton>
-    </div></section> : <form onSubmit={event => { event.preventDefault(); void staffSession.login(username.trim(), password).finally(() => setPassword('')) }}>
+    </> : <form className="staff-login-form" onSubmit={event => { event.preventDefault(); void signIn() }}>
       <label className="booking-field">ชื่อผู้ใช้<input name="username" autoComplete="username" required maxLength={120} value={username} disabled={session.busy} onChange={event => setUsername(event.target.value)} /></label>
       <label className="booking-field">รหัสผ่าน<input name="password" type="password" autoComplete="current-password" required maxLength={512} value={password} disabled={session.busy} onChange={event => setPassword(event.target.value)} /></label>
       <BookingButton type="submit" disabled={session.busy}>{session.busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}</BookingButton>
     </form>}
     {session.error && <p role="alert" className="booking-error-box">{session.error}</p>}
+    {session.user && <footer className="staff-account-footer">
+      <button type="button" className="booking-text-link" disabled={session.busy} onClick={() => void staffSession.logout()}>ออกจากระบบ</button>
+    </footer>}
   </main></div>
 }

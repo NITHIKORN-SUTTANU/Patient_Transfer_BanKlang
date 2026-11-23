@@ -5,8 +5,8 @@ import { BookingButton, BookingModal } from './BookingUI'
 export function DispatchButton(props: Parameters<typeof BookingButton>[0]) {
   return <BookingButton {...props} className={`dispatch-button ${props.className || ''}`} />
 }
-export function DispatchModal({ title, children, onClose, kind = '' }: { title: string; children: ReactNode; onClose: () => void; kind?: string }) {
-  return <BookingModal title={title} onClose={onClose} className={`dispatch-modal ${kind}`}>{children}</BookingModal>
+export function DispatchModal({ title, children, onClose, kind = '', footer }: { title: string; children: ReactNode; onClose: () => void; kind?: string; footer?: ReactNode }) {
+  return <BookingModal title={title} onClose={onClose} className={`dispatch-modal ${kind}`} footer={footer}>{children}</BookingModal>
 }
 export function ResourcePicker({ label, placeholder, value, options, onChange }: { label: string; placeholder: string; value: string; options: { id: string; label: string; active: boolean }[]; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false)

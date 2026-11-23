@@ -40,7 +40,7 @@ export async function reviseDestination(client,row,user,body,route,now,preview=f
   const seconds=Math.ceil(verified.minutes*60),source=text(verified.source,'routing source',100)
   const start=Math.max(Date.parse(now),row.status==='PICKED_UP'?pickup.recorded_at.getTime()+row.pickup_waiting_seconds*1000:0)
   const arrivalAt=new Date(start+seconds*1000).toISOString()
-  const readyAt=new Date(Math.max(row.original_ready_at.getTime(),Date.parse(arrivalAt)+30*60000)).toISOString()
+  const readyAt=arrivalAt
   const proposal={version:(current?.version??0)+1,hospitalId:hospital.id,hospitalName:hospital.name,hospitalLocationId:hospital.location_id,
     arrivalAt,readyAt,latenessSeconds:Math.max(0,Math.ceil((Date.parse(arrivalAt)-row.original_arrival_at.getTime())/1000)),
     appointmentLatenessSeconds:Math.max(0,Math.ceil((Date.parse(arrivalAt)-row.appointment_at.getTime())/1000)),recordedAt:now}

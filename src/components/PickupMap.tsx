@@ -1,6 +1,7 @@
 import { PlaceSearch } from './PlaceSearch'
 import { ServiceSymbol } from './ServiceSymbol'
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import type { BookingDetails } from '../services/booking'
@@ -10,7 +11,7 @@ import './pickup-map.css'
 const defaultCenter: [number, number] = [99.008456, 18.578321]
 maplibregl.setWorkerUrl(workerUrl)
 
-export function PickupMap({ value, onChange, locationName = 'จุดรับ' }: { value: BookingDetails['pickup']; onChange?: (latitude: number, longitude: number, label?: string) => void; locationName?: string }) {
+export function PickupMap({ value, onChange, locationName = 'จุดรับ', locationControl }: { value: BookingDetails['pickup']; onChange?: (latitude: number, longitude: number, label?: string) => void; locationName?: string; locationControl?: ReactNode }) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const marker = useRef<maplibregl.Marker | null>(null)
@@ -144,9 +145,10 @@ export function PickupMap({ value, onChange, locationName = 'จุดรับ'
       onChange(Math.max(-85, Math.min(85, latitude + (event.key === 'ArrowUp' ? 0.0002 : event.key === 'ArrowDown' ? -0.0002 : 0))), ((longitude + (event.key === 'ArrowRight' ? 0.0002 : event.key === 'ArrowLeft' ? -0.0002 : 0) + 540) % 360) - 180)
     }}>
       <div ref={container} className="pickup-map-canvas" />
+      {locationControl && <div className="pickup-map-location-control">{locationControl}</div>}
       {loading && !failed && <div className="pickup-map-loading" role="status">กำลังโหลดแผนที่…</div>}
       {onChange && <span className="pickup-map-center" aria-hidden="true">●</span>}
-      {onChange && <span className="pickup-map-hint">เลื่อนแผนที่ให้หมุดตรง{locationName}</span>}
+      {onChange && !locationControl && <span className="pickup-map-hint">เลื่อนแผนที่ให้หมุดตรง{locationName}</span>}
       {failed && <div className="pickup-map-retry"><div className="pickup-map-retry-card"><span className="pickup-map-retry-icon"><ServiceSymbol kind="pin" /></span><p className="pickup-map-retry-title">โหลดแผนที่ไม่สำเร็จ</p><p className="pickup-map-retry-description">กรุณาตรวจสอบอินเทอร์เน็ต แล้วลองอีกครั้ง</p><button type="button" className="booking-button" onClick={() => { automaticRetries.current = 0; setMessage('กำลังโหลดแผนที่…'); setFailed(false); setLoading(true); setAttempt(previous => previous + 1) }}>ลองโหลดแผนที่อีกครั้ง</button></div><p role="status" className="pickup-map-error-caption">{onChange ? 'หรือค้นหาชื่อสถานที่ด้านบน' : message}</p></div>}
     </div>
     {!onChange && value?.latitude !== undefined && value.longitude !== undefined && <p className="pickup-map-coordinates">พิกัด {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}</p>}

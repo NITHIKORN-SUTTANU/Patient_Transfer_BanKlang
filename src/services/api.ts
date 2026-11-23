@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(public readonly status: number, public readonly field?: string, public readonly code?: string) { super(`API request failed (${status})`) }
+  constructor(public readonly status: number, public readonly field?: string, public readonly code?: string, public readonly details?: unknown) { super(`API request failed (${status})`) }
 }
 
 // Same-origin API; prototype records and browser cookies are never submitted.
@@ -13,7 +13,7 @@ async function request(path: string, options: { token?: string; body?: unknown; 
   if (!response.ok) {
     const failure = await response.json().catch(() => null)
     throw new ApiError(response.status, typeof failure?.details?.field === 'string' ? failure.details.field : undefined,
-      typeof failure?.details?.code === 'string' ? failure.details.code : undefined)
+      typeof failure?.details?.code === 'string' ? failure.details.code : undefined, failure?.details)
   }
   return response
 }

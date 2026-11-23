@@ -8,7 +8,7 @@ import { DestinationRevisionForm } from './DestinationRevisionForm'
 import { DestinationRevisionSummary } from './DestinationRevisionSummary'
 import { dispatchDate, dispatchTime } from '../services/dispatch'
 
-export function DispatcherOperations({ booking, catalog, rows, onSaved, onBusyChange }: { booking: ApiBooking; catalog: Catalog; rows: ApiBooking[]; onSaved: () => void; onBusyChange: (busy: boolean) => void }) {
+export function DispatcherOperations({ booking, catalog, onSaved, onBusyChange }: { booking: ApiBooking; catalog: Catalog; onSaved: () => void; onBusyChange: (busy: boolean) => void }) {
   const [action, setAction] = useState('')
   const [reason, setReason] = useState('')
   const [endedAt, setEndedAt] = useState('')
@@ -45,7 +45,7 @@ export function DispatcherOperations({ booking, catalog, rows, onSaved, onBusyCh
   return <section className="dispatch-detail-section"><h3>ดำเนินการโดยเจ้าหน้าที่จัดรถ</h3><DestinationRevisionSummary revision={booking.destinationRevision} />
     {!!booking.destinationHistory?.length && <details><summary>ประวัติการเปลี่ยนโรงพยาบาล</summary>{booking.destinationHistory.map(leg=><p key={leg.version}>ครั้งที่ {leg.version} · {leg.hospitalName} · คาดถึง {dispatchDate(leg.arrivalAt)} {dispatchTime(leg.arrivalAt)} น. · {leg.reason}</p>)}</details>}
     <label className="booking-field">การดำเนินการ<select disabled={busy} value={action} onChange={event => { setAction(event.target.value); setConfirmed(false); setError('') }}><option value="">เลือกการดำเนินการ</option>{actions.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
-    {action === 'destination' ? <DestinationRevisionForm key={booking.revision} booking={booking} catalog={catalog} onSaved={onSaved} onBusyChange={onBusyChange} /> : action === 'modify' ? <ApiDispatchAssignment key={booking.revision} booking={booking} catalog={catalog} previousJobs={rows} reload={onSaved} onAssigned={onSaved} onBusyChange={onBusyChange} /> : action && <form onSubmit={event => { event.preventDefault(); void submit() }}>
+    {action === 'destination' ? <DestinationRevisionForm key={booking.revision} booking={booking} catalog={catalog} onSaved={onSaved} onBusyChange={onBusyChange} /> : action === 'modify' ? <ApiDispatchAssignment key={booking.revision} booking={booking} catalog={catalog} reload={onSaved} onAssigned={onSaved} onBusyChange={onBusyChange} /> : action && <form onSubmit={event => { event.preventDefault(); void submit() }}>
       <fieldset disabled={busy}><label className="booking-field">เหตุผล<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label>
       {action === 'ABORT' && <><p className="dispatch-alert">ผลลัพธ์นี้คือ ABORTED ไม่ใช่ส่งถึงโรงพยาบาล และยังไม่ปล่อยความพร้อมรถหรือคนขับ</p><label className="booking-field">เวลาจบการเดินทางจริง (เวลาไทย)<input required type="datetime-local" value={endedAt} onChange={event => setEndedAt(event.target.value)} /></label><label className="booking-field">สถานที่จบการเดินทาง<input required maxLength={1000} value={location} onChange={event => setLocation(event.target.value)} /></label><label className="booking-field">การส่งมอบผู้ป่วยหรือแผนรับช่วงต่อ<textarea required maxLength={1000} value={disposition} onChange={event => setDisposition(event.target.value)} /></label></>}
       {action === 'CORRECT_MILESTONE' && <p>แก้เฉพาะสถานะที่บันทึกผิดหนึ่งขั้น ไม่ย้อนการรับผู้ป่วยจริง และไม่ลบประวัติเดิม</p>}
@@ -72,7 +72,7 @@ export function ResourceReadiness({ catalog, onSaved }: { catalog: Catalog; onSa
     finally { pending.current = false; setBusy(false) }
   }
   if (!resources.length) return null
-  return <details className="dispatch-panel"><summary>ยืนยันตำแหน่งและความพร้อมรถหรือคนขับ</summary><p>ยืนยันแยกแต่ละทรัพยากร ระบบจะตรวจงานที่ยังดำเนินอยู่และเวลาพักเตรียมพร้อมก่อนปล่อยการระงับ</p><form onSubmit={event => { event.preventDefault(); void submit() }}><fieldset disabled={busy}>
+  return <details className="dispatch-panel"><summary>ยืนยันตำแหน่งและความพร้อมรถหรือคนขับ</summary><p>ยืนยันแยกแต่ละทรัพยากร ระบบจะตรวจงานที่ยังดำเนินอยู่ก่อนปล่อยการระงับ</p><form onSubmit={event => { event.preventDefault(); void submit() }}><fieldset disabled={busy}>
     <label className="booking-field">ทรัพยากรที่ตรวจสอบ<select required value={resource} onChange={event => setResource(event.target.value)}><option value="">เลือกทรัพยากร</option>{resources.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
     <label className="booking-field">ตำแหน่งปัจจุบันที่ยืนยันแล้ว<select required value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">เลือกตำแหน่ง</option>{catalog.locations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <label className="booking-field">เหตุผลและผลตรวจสอบ<textarea required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label><label className="booking-checkbox"><input required type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>ยืนยันตำแหน่งจริงและความพร้อมของทรัพยากรนี้แล้ว</span></label></fieldset>

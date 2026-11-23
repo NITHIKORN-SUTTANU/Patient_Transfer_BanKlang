@@ -32,7 +32,12 @@ async function location(client,name,kind,body) {
   return row.id
 }
 export async function configurationChange(client,user,kind,id,data,now) {
-  const condition=kind==='hospital'?'b.hospital_id=$1::uuid':kind==='village'?'b.village_id=$1::uuid':kind==='closure'?"(b.appointment_at AT TIME ZONE 'Asia/Bangkok')::date=$1::date":'b.depot_location_snapshot=$1::uuid'
+  const condition=kind==='hospital'?'b.hospital_id=$1::uuid':kind==='village'?'b.village_id=$1::uuid':kind==='closure'?`
+    ((b.appointment_at AT TIME ZONE 'Asia/Bangkok')::date=$1::date OR EXISTS(
+      SELECT 1 FROM patient_transfer.schedules s WHERE s.booking_id=b.id AND s.released_at IS NULL
+      AND (s.committed OR b.status='SCHEDULED') AND $1::date BETWEEN (s.departure_at AT TIME ZONE 'Asia/Bangkok')::date
+      AND (s.appointment_at AT TIME ZONE 'Asia/Bangkok')::date
+    ))`:'b.depot_location_snapshot=$1::uuid'
   const {rows}=await client.query(`SELECT b.id FROM patient_transfer.bookings b WHERE ${condition} AND b.started_at IS NULL
     AND b.status NOT IN ('COMPLETED','CANCELLED','REJECTED','ABORTED') ORDER BY b.id FOR UPDATE`,[id])
   for(const booking of rows) {

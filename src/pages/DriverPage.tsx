@@ -3,10 +3,11 @@ import { DriverNavigation } from '../components/DriverNavigation'
 import { PickupMap } from '../components/LocationMap'
 import { MunicipalLogo } from '../components/MunicipalLogo'
 import { ResponsiveNavigation } from '../components/ResponsiveNavigation'
+import { StaffSidebarProfile } from '../components/StaffSidebarProfile'
 import { useStaffSession } from '../services/staffSession'
 import { driverCommand, driverLabels, driverStage, driverStages, nextDriverCommand, useDriverData, type DriverPhase } from '../services/driverApi'
 import { dispatcherError, statusLabels } from '../services/dispatcherApi'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router'
 import type { Booking } from '../data/seed'
 import { BookingButton, BookingModal } from '../components/BookingUI'
@@ -19,9 +20,22 @@ import { ServiceSymbol } from '../components/ServiceSymbol'
 import '../booking.css'
 import '../driver.css'
 
+function DriverTripCard({ state, reference, pickupAt, className = '', children }: {
+  state: string
+  reference: string
+  pickupAt: string
+  className?: string
+  children: ReactNode
+}) {
+  return <article className={`driver-card driver-trip ${className}`}>
+    <div className="driver-card-top"><span className="driver-trip-state">{state}</span><span>{reference}</span></div>
+    <span className="driver-pickup-label">เวลารับผู้ป่วย</span>
+    <time className="driver-time" dateTime={pickupAt}>{dispatchTime(pickupAt)} น.</time>
+    {children}
+  </article>
+}
 
 export function DriverPage() {
-  const remote = useDriverData()
   const session = useStaffSession()
   const [params] = useSearchParams()
   const { pathname, search: locationSearch, state: navigationState } = useLocation()
@@ -29,6 +43,7 @@ export function DriverPage() {
   const detailsReturn = typeof source === 'string' && /^\/driver(?:\/(?:status|history))?(?:\?.*)?$/.test(source) ? source : '/driver'
   const navigate = useNavigate()
   const screen = pathname.replace(/\/$/, '').split('/')[2] || 'dashboard'
+  const remote = useDriverData(screen === 'dashboard')
   const [confirmation, setConfirmation] = useState<{ id: string; driverId: string; stage: DriverPhase; revision: number; executionVersion: number } | null>(null)
   const [failedReason, setFailedReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -47,8 +62,8 @@ export function DriverPage() {
   const jobs = [...(remote.data?.jobs ?? [])].sort((a, b) => Date.parse(a.schedule!.pickupAt) - Date.parse(b.schedule!.pickupAt))
   const open = jobs.filter(b => !['completed', 'cancelled'].includes(b.status))
   const today = bangkokDate(now)
-  const todays = open.filter(b => bangkokDate(Date.parse(b.schedule!.pickupAt)) === today || !!b.startedAt)
-  const future = open.filter(b => !todays.includes(b))
+  const todays = open.filter(b => bangkokDate(Date.parse(b.schedule!.departureAt)) === today || !!b.startedAt)
+  const future = remote.data?.future ?? []
   const history = remote.data?.history ?? []
   const activeJob = open.find(b => !!b.startedAt)
   const selected = params.has('booking') ? jobs.find(b => b.id === params.get('booking')) : screen === 'status' ? activeJob : activeJob || todays[0] || open[0]
@@ -88,26 +103,36 @@ export function DriverPage() {
   }
   function tripCard(b: Booking, primary = false) {
     const active = !!b.startedAt
-    return <article className={`driver-card driver-trip ${b.status === 'cancelled' ? 'is-cancelled' : ''} ${active ? 'is-active' : ''} ${primary ? 'is-primary' : ''}`} key={b.id}>
-      <div className="driver-card-top"><span className="driver-trip-state">{driverLabels[driverStage(b)]}</span><span>{b.id}</span></div><span className="driver-pickup-label">เวลารับผู้ป่วย</span>
-      <strong className="driver-time">{dispatchTime(b.schedule!.pickupAt)} น.</strong>
+    return <DriverTripCard key={b.id} state={driverLabels[driverStage(b)]} reference={b.id} pickupAt={b.schedule!.pickupAt}
+      className={`${b.status === 'cancelled' ? 'is-cancelled' : ''} ${active ? 'is-active' : ''} ${primary ? 'is-primary' : ''}`}>
       {b.status === 'cancelled' && b.cancellation?.reason && <p className="driver-helper">เหตุผล: {b.cancellation.reason}</p>}
       <DestinationRevisionSummary revision={b.destinationRevision} /><p className="driver-patient-name"><ServiceSymbol kind="person" />{b.patientName}</p><dl><div><dt>จุดรับ</dt><dd>{b.details?.pickup?.label || 'ไม่มีข้อมูลจุดรับ'}</dd></div><div><dt>ปลายทาง</dt><dd>{b.details?.hospital || 'ไม่มีข้อมูลโรงพยาบาล'}</dd></div></dl>
       <BookingButton className="driver-button" secondary={!primary} onClick={() => navigate(`/driver/${active && primary ? 'status' : 'details'}?booking=${encodeURIComponent(b.id)}`, { state: { from: pathname + locationSearch } })}>{active && primary ? 'ติดตามสถานะงาน' : primary ? 'ดูรายละเอียดงาน' : 'ดูรายละเอียด'} <span aria-hidden="true">→</span></BookingButton>
-    </article>
+    </DriverTripCard>
   }
   if (!['dashboard', 'details', 'status', 'history', 'failed-pickup', 'incident'].includes(screen)) return <Navigate to="/driver" replace />
   const title = { dashboard: 'งานวันนี้', details: 'รายละเอียดงาน', status: 'สถานะงาน', history: 'ประวัติงาน', 'failed-pickup': 'สถานะงาน', incident: 'รายงานเหตุขัดข้อง' }[screen]
   return <div className={`driver-shell ${sidebarCollapsed ? 'driver-sidebar-collapsed' : ''}`}><a className="skip-link" href="#driver-main">ข้ามไปยังเนื้อหา</a>
 
-    <aside className="dispatch-sidebar driver-sidebar" id="driver-sidebar"><div className="dispatch-sidebar-tools"><MunicipalLogo /></div><div className="workspace-nav-heading">ระบบรับส่งผู้ป่วย</div><p className="workspace-role-label">คนขับรถ</p><ResponsiveNavigation id="driver-navigation" className="driver-nav" label="เมนูคนขับ">{[['/driver', '▦', 'งานวันนี้'], ['/driver/status', '◉', 'สถานะงาน'], ['/driver/history', '▤', 'ประวัติ']].map(([path, icon, label]) => <NavLink end key={path} to={path} aria-label={label} title={path === '/driver/status' && activeJob ? 'สถานะงาน · มีงานกำลังดำเนินการ' : label} className={({ isActive }) => isActive || path === '/driver' && screen === 'details' || path === '/driver/status' && screen === 'failed-pickup' ? 'active' : ''}><ServiceSymbol kind={icon === '▦' ? 'home' : icon === '◉' ? 'route' : 'history'} /><span>{label}</span>{path === '/driver/status' && activeJob && <i className="driver-status-indicator" role="img" aria-label="มีงานกำลังดำเนินการ" />}</NavLink>)}</ResponsiveNavigation><button type="button" className="dispatch-sidebar-toggle" aria-label={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} title={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} aria-expanded={!sidebarCollapsed} aria-controls="driver-sidebar" onClick={() => setSidebarCollapsed(value => !value)}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={sidebarCollapsed ? 'm5 6 6 6-6 6m8-12 6 6-6 6' : 'm11 6-6 6 6 6m8-12-6 6 6 6'} /></svg></button></aside>
+    <aside className="dispatch-sidebar driver-sidebar" id="driver-sidebar"><div className="dispatch-sidebar-tools"><MunicipalLogo /></div><div className="workspace-nav-heading">ระบบรับส่งผู้ป่วย</div><p className="workspace-role-label">คนขับรถ</p><ResponsiveNavigation id="driver-navigation" className="driver-nav" label="เมนูคนขับ">{[['/driver', '▦', 'งานวันนี้'], ['/driver/status', '◉', 'สถานะงาน'], ['/driver/history', '▤', 'ประวัติ']].map(([path, icon, label]) => <NavLink end key={path} to={path} aria-label={label} title={path === '/driver/status' && activeJob ? 'สถานะงาน · มีงานกำลังดำเนินการ' : label} className={({ isActive }) => isActive || path === '/driver' && screen === 'details' || path === '/driver/status' && screen === 'failed-pickup' ? 'active' : ''}><ServiceSymbol kind={icon === '▦' ? 'home' : icon === '◉' ? 'route' : 'history'} /><span>{label}</span>{path === '/driver/status' && activeJob && <i className="driver-status-indicator" role="img" aria-label="มีงานกำลังดำเนินการ" />}</NavLink>)}</ResponsiveNavigation><button type="button" className="dispatch-sidebar-toggle" aria-label={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} title={sidebarCollapsed ? 'ขยายเมนูด้านข้าง' : 'ย่อเมนูด้านข้าง'} aria-expanded={!sidebarCollapsed} aria-controls="driver-sidebar" onClick={() => setSidebarCollapsed(value => !value)}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={sidebarCollapsed ? 'm5 6 6 6-6 6m8-12 6 6-6 6' : 'm11 6-6 6 6 6m8-12-6 6 6 6'} /></svg></button>
+      <StaffSidebarProfile />
+    </aside>
     <main tabIndex={-1} id="driver-main" className={`driver-${screen}-page`} ref={main}><header className="driver-header">{screen === 'details' && <Link className="driver-back-link" to={detailsReturn}><span aria-hidden="true">←</span> กลับหน้าก่อนหน้า</Link>}{screen === 'dashboard' && <p>งานรับส่งผู้ป่วย</p>}<h1 tabIndex={-1}>{title}</h1><p>{screen === 'dashboard' ? `งานที่ได้รับมอบหมาย • ${todays.length} งาน` : screen === 'history' ? `งานรับส่งที่เสร็จสิ้นแล้ว • ${history.length} งาน` : selected ? `${selected.id} • ${selected.status === 'cancelled' ? 'ยกเลิกแล้ว' : screen === 'details' && current === 'assigned' ? `นัดรับ ${dispatchTime(selected.schedule!.pickupAt)} น.` : driverLabels[current]}` : screen === 'status' ? 'ยังไม่มีงานที่เริ่มแล้ว' : 'เลือกงานที่ได้รับมอบหมาย'}</p></header>
       <div className="driver-content">
-<div className="driver-quick-actions"><BookingButton secondary className="driver-button" disabled={busy || remote.loading} onClick={remote.reload}>โหลดข้อมูลล่าสุด</BookingButton><Link to="/staff/login">บัญชีเจ้าหน้าที่ / ออกจากระบบ</Link></div>{remote.loading && <p role="status">กำลังโหลดข้อมูล…</p>}{remote.error && <p role="alert" className="driver-error">{remote.error}</p>}
+<div className="driver-quick-actions"><BookingButton secondary className="driver-button" disabled={busy || remote.loading} onClick={remote.reload}>โหลดข้อมูลล่าสุด</BookingButton></div>{remote.loading && <p role="status">กำลังโหลดข้อมูล…</p>}{remote.error && <p role="alert" className="driver-error">{remote.error}</p>}
         {notice && <p role="status" className="driver-notice">{notice}</p>}
         {!driver ? <section className="driver-card driver-empty"><h2>บัญชีนี้ยังไม่พร้อมใช้งาน</h2><p>กรุณาติดต่อเจ้าหน้าที่จัดรถเพื่อตรวจสอบบัญชี</p></section> : <>
-          {(screen === 'history' ? remote.more.history : remote.more.jobs) && <div className="driver-notice"><p>แสดงเฉพาะรายการที่โหลดแล้ว</p><BookingButton secondary disabled={remote.loading || busy} onClick={() => remote.loadMore(screen === 'history')}>{screen === 'history' ? 'โหลดประวัติเพิ่มเติม' : 'โหลดงานเพิ่มเติม'}</BookingButton></div>}
-          {screen === 'dashboard' && <><div className="driver-grid"><section><div className="driver-section-heading"><h2>งานที่ต้องทำ</h2>{todays.some(b => !!b.startedAt) && <span className="driver-badge active">● กำลังดำเนินการ</span>}</div>{todays.length ? tripCard(todays.find(b => !!b.startedAt) || todays[0], true) : <div className="driver-card driver-empty"><ServiceSymbol kind="check" /><h3>ไม่มีงานรับส่งวันนี้</h3><p>งานใหม่จะแสดงที่นี่เมื่อเจ้าหน้าที่มอบหมาย</p></div>}</section>{todays.length > 1 && <section><h2>งานถัดไป</h2>{todays.filter(b => b.id !== (todays.find(b => !!b.startedAt) || todays[0]).id).map(b => tripCard(b))}</section>}</div>{future.length > 0 && <section><h2>งานที่ได้รับมอบหมายวันอื่น</h2><div className="driver-grid">{future.map(b => <div key={b.id}><h3>{dispatchDate(b.schedule!.pickupAt)}</h3>{tripCard(b)}</div>)}</div></section>}</>}
+          {(screen === 'history' ? remote.more.history : remote.more.jobs) && <div className="driver-notice"><p>แสดงเฉพาะรายการที่โหลดแล้ว</p><BookingButton secondary disabled={remote.loading || busy} onClick={() => remote.loadMore(screen === 'history' ? 'history' : 'jobs')}>{screen === 'history' ? 'โหลดประวัติเพิ่มเติม' : 'โหลดงานเพิ่มเติม'}</BookingButton></div>}
+          {screen === 'dashboard' && <><div className="driver-grid"><section><div className="driver-section-heading"><h2>งานที่ต้องทำ</h2>{todays.some(b => !!b.startedAt) && <span className="driver-badge active">● กำลังดำเนินการ</span>}</div>{todays.length ? tripCard(todays.find(b => !!b.startedAt) || todays[0], true) : <div className="driver-card driver-empty"><ServiceSymbol kind="check" /><h3>ไม่มีงานรับส่งวันนี้</h3><p>งานใหม่จะแสดงที่นี่เมื่อเจ้าหน้าที่มอบหมาย</p></div>}</section>{todays.length > 1 && <section><h2>งานถัดไป</h2>{todays.filter(b => b.id !== (todays.find(b => !!b.startedAt) || todays[0]).id).map(b => tripCard(b))}</section>}</div><section><h2>งานวันอื่น</h2>{future.length ? <div className="driver-grid">{future.map(job => <DriverTripCard key={job.id} state={driverLabels.assigned} reference={job.reference} pickupAt={job.pickupAt}>
+            <dl>
+              <div><dt>ออกจากต้นทาง</dt><dd>{dispatchDate(job.departureAt)} · {dispatchTime(job.departureAt)} น.</dd></div>
+              <div><dt>เวลานัดหมาย</dt><dd>{dispatchDate(job.appointmentAt)} · {dispatchTime(job.appointmentAt)} น.</dd></div>
+            </dl>
+            <p className="driver-helper">เริ่มงานได้ในวันเดินทาง</p>
+            <BookingButton className="driver-button" disabled>เริ่มงาน</BookingButton>
+          </DriverTripCard>)}</div> : <p>ไม่มีงานที่ได้รับมอบหมายในวันถัดไป</p>}
+          {remote.more.future && <BookingButton secondary disabled={remote.loading || busy} onClick={() => remote.loadMore('future')}>โหลดงานวันอื่นเพิ่มเติม</BookingButton>}
+          </section></>}
           {screen === 'history' && (history.length ? <div className="driver-grid">{history.map(b => <section key={b.id}><h2>{dispatchDate(b.appointmentAt)}</h2><article className="driver-card"><h3>{b.reference}</h3><p>{statusLabels[b.status] || b.status}</p><p>วันนัดหมาย {dispatchDate(b.appointmentAt)}</p></article></section>)}</div> : <section className="driver-card driver-empty"><h2>ยังไม่มีประวัติงาน</h2><p>แสดงเฉพาะรหัส สถานะ และวันที่ของงานที่จบแล้ว</p></section>)}
           {['failed-pickup', 'incident'].includes(screen) && <section className="driver-failed"><h2>{screen === 'incident' ? 'รายงานเหตุขัดข้อง' : 'รับผู้ป่วยไม่ได้'}</h2><p className="driver-helper">{screen === 'incident' ? 'รายงานปัญหาการรับส่งโดยไม่กรอกข้อมูลทางคลินิก รอเจ้าหน้าที่จัดรถคลี่คลายเหตุการณ์' : 'รายงานได้เฉพาะก่อนได้รับผู้ป่วยขึ้นรถ การยกเลิกไม่ปล่อยความพร้อมรถหรือคนขับทันที'}</p><div className="driver-card"><h3>หมายเลขงาน</h3><p>{selected?.id || 'ไม่พบงาน'}</p></div><form onSubmit={event => { event.preventDefault(); void submitReport() }}><label className="booking-field">เหตุผลที่รายงาน<textarea disabled={busy} required maxLength={1000} value={failedReason} onChange={event => setFailedReason(event.target.value)} /></label>{error && <p role="alert" className="driver-error">{error}</p>}<BookingButton danger type="submit" className="driver-button" disabled={busy || remote.loading || !selected || !failedReason.trim() || (screen === 'failed-pickup' && current !== 'going_to_pickup')}>{busy ? 'กำลังบันทึก…' : screen === 'incident' ? 'ยืนยันรายงานเหตุขัดข้อง' : 'ยืนยันรายงานรับไม่ได้'}</BookingButton></form><BookingButton secondary className="driver-button" disabled={busy} onClick={() => navigate(`/driver/status?booking=${selected?.id || ''}`)}>กลับไปที่งาน</BookingButton></section>}
           {['details', 'status'].includes(screen) && (!selected ? <section className="driver-card driver-empty"><h2>{screen === 'status' ? 'ยังไม่มีงานที่เริ่มแล้ว' : params.has('booking') ? 'ไม่พบงานที่มอบหมายให้คนขับนี้' : 'ยังไม่มีงานที่ได้รับมอบหมาย'}</h2><Link to="/driver">กลับไปดูงาน</Link></section> : <>

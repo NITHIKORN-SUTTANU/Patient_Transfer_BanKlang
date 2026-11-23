@@ -7,6 +7,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/catalog', route => route.fulfill({ json: emptyCatalog }))
   await page.route('**/api/bookings', route => route.fulfill({ json: { bookings: [] } }))
   await page.route('**/api/driver/history', route => route.fulfill({ json: { bookings: [] } }))
+  await page.route('**/api/driver/future', route => route.fulfill({ json: { bookings: [] } }))
   await page.route('**/api/admin/**', route => route.fulfill({ json: { failures: [], total: 0, pending: 0, nextCursor: null, accounts: [], events: [], statuses: [], hospitals: [], villages: [], closures: [], settings: null, pendingReviewCount: 0 } }))
 })
 
@@ -15,22 +16,44 @@ async function enterAdministrator(page: Parameters<typeof enterAdmin>[0], path =
   await enterAdmin(page, path)
 }
 
+test('driver sidebar shows the signed-in profile and signs out from the collapsed rail', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockDispatcherLogin(page, 'driver')
+  await enterDriver(page)
+  const sidebar = page.locator('#driver-sidebar')
+  const profile = sidebar.getByRole('group', { name: 'เจ้าหน้าที่ทดสอบ' })
+  await expect(profile.getByText('เจ้าหน้าที่ทดสอบ')).toBeVisible()
+  await sidebar.getByRole('button', { name: 'ย่อเมนูด้านข้าง' }).click()
+  await expect(profile).toBeVisible()
+  await expect(profile.getByText('เจ้าหน้าที่ทดสอบ')).toBeHidden()
+  const logout = page.waitForRequest(request => request.url().endsWith('/api/auth/logout') && request.method() === 'POST')
+  await sidebar.getByRole('button', { name: /ออกจาก\s*ระบบ/ }).click()
+  await logout
+  await expect(page).toHaveURL(/\/staff\/login\?next=%2Fdriver$/)
+})
+
 const roles = [
   { route: '/dispatcher', label: 'เมนูเจ้าหน้าที่จัดรถ', link: 'ติดตามงานรับส่ง', destination: '/dispatcher/tracking' },
   { route: '/driver', label: 'เมนูคนขับ', link: 'ประวัติ', destination: '/driver/history' },
   { route: '/admin', label: 'เมนูผู้ดูแลระบบ', link: 'การตั้งค่าระบบ', destination: '/admin/settings' },
 ]
 
-test('admin sidebar keeps logo, navigation and bottom toggle in its collapsed rail', async ({ page }) => {
+test('admin sidebar keeps logo, navigation and profile in its collapsed rail', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await enterAdministrator(page)
   const sidebar = page.locator('#admin-sidebar')
+  const profile = sidebar.getByRole('group', { name: 'เจ้าหน้าที่ทดสอบ' })
+  const logout = sidebar.getByRole('button', { name: /ออกจาก\s*ระบบ/ })
+  await expect(profile.getByText('เจ้าหน้าที่ทดสอบ')).toBeVisible()
   await sidebar.getByRole('button', { name: 'ย่อเมนูด้านข้าง', exact: true }).click()
   expect((await sidebar.boundingBox())!.width).toBe(80)
   expect((await page.locator('main').boundingBox())!.x).toBe(80)
   await expect(sidebar.getByRole('img', { name: 'ตราเทศบาลจำลอง' })).toBeVisible()
   const toggle = sidebar.getByRole('button', { name: 'ขยายเมนูด้านข้าง', exact: true })
-  expect((await toggle.boundingBox())!.y).toBeGreaterThan(800)
+  await expect(profile).toBeVisible()
+  await expect(profile.getByText('เจ้าหน้าที่ทดสอบ')).toBeHidden()
+  await expect(logout).toBeVisible()
+  expect((await toggle.boundingBox())!.y).toBeLessThan((await profile.boundingBox())!.y)
   expect(await toggle.evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('0px')
   await sidebar.getByRole('link', { name: 'ผู้ใช้งานและสิทธิ์', exact: true }).click()
   await expect(page).toHaveURL(/admin\/accounts$/)
@@ -58,6 +81,10 @@ test('admin sidebar keeps logo, navigation and bottom toggle in its collapsed ra
   await page.keyboard.press('Tab')
   await current.focus()
   expect(await current.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('solid')
+  const request = page.waitForRequest(request => request.url().endsWith('/api/auth/logout') && request.method() === 'POST')
+  await logout.click()
+  await request
+  await expect(page).toHaveURL(/\/staff\/login\?next=%2Fadmin%2Fdrivers$/)
 })
 
 test('dispatcher desktop sidebar collapses to an accessible icon rail without affecting mobile navigation', async ({ page }) => {
@@ -115,10 +142,9 @@ for (const role of roles) {
     expect(toggleBounds.x).toBeGreaterThanOrEqual(headerBounds.x + headerBounds.width)
     expect(toggleBounds.y).toBeLessThan(headerBounds.y + headerBounds.height)
     if (role.route === '/admin') {
-      const shortcut = page.getByRole('link', { name: 'บัญชีเจ้าหน้าที่ / ออกจากระบบ', exact: true })
-      const shortcutBounds = (await shortcut.boundingBox())!
-      expect(shortcutBounds.x).toBe(12)
-      expect(shortcutBounds.y + shortcutBounds.height).toBe(628)
+      const sidebar = page.locator('#admin-sidebar')
+      await expect(sidebar.getByRole('group', { name: 'เจ้าหน้าที่ทดสอบ' })).toBeVisible()
+      await expect(sidebar.getByRole('button', { name: /ออกจาก\s*ระบบ/ })).toBeVisible()
     }
     await toggle.click()
     await expect(navigation).toBeVisible()
