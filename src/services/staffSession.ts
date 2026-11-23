@@ -74,6 +74,7 @@ export const staffSession = {
       const user = await staffRequest<StaffIdentity>('/auth/me')
       if (!['admin', 'dispatcher', 'driver'].includes(user.role)) throw new ApiError(403)
       publish({ user, busy: false, error: '' })
+      return user
     } catch (error) { clear(message(error)) }
   },
   async refresh(): Promise<StaffIdentity | null> {

@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { calculateSchedule, confirmReservation, proposeReservation, validateReservations, reviewCalendarChange } from '../src/domain/scheduling.ts'
+import { isAppointmentClock } from '../src/domain/appointmentHours.ts'
 import { checkCitizenSlotCapacity, computeBackwardBlockedWindow } from '../src/domain/capacity.ts'
 import { assignProductionTrip } from '../src/domain/assignment.ts'
 import { createProductionTrip, transitionTrip } from '../src/domain/lifecycle.ts'
@@ -30,24 +31,24 @@ function chained(appointment = '11:00') {
 }
 const codes = result => result.issues.map(issue => issue.code)
 
-test('continuation retains the original schedule proof and validates effective readiness/location against later work',()=>{
+test('continuation retains the original schedule and checks the revised arrival against later work',()=>{
   const ctx=reserve(context(),input())
   const planned=structuredClone(ctx.reservations[0].schedule)
-  ctx.reservations[0].continuation={hospitalId:'new-hospital',recordedAt:stamp('16:00'),arrivalAt:stamp('17:00'),readyAt:stamp('17:30')}
+  ctx.reservations[0].continuation={hospitalId:'new-hospital',recordedAt:stamp('16:00'),arrivalAt:stamp('17:00'),readyAt:stamp('17:00')}
   assert.deepEqual(validateReservations(ctx),[])
   assert.deepEqual(ctx.reservations[0].schedule,planned)
-  const later=confirmReservation(ctx,chained('11:00'),now)
-  assert.equal(later.ok,false);assert.ok(codes(later).includes('CONFLICT'));assert.ok(codes(later).includes('LOCATION'))
-  ctx.reservations[0].continuation.readyAt=stamp('17:29')
+  const later=confirmReservation(ctx,input('second','11:00'),now)
+  assert.equal(later.ok,false);assert.ok(codes(later).includes('CONFLICT'))
+  ctx.reservations[0].continuation.readyAt=stamp('16:59')
   assert.ok(validateReservations(ctx).some(issue=>issue.code==='INVALID'))
 })
 
-test('reverse scheduling includes fixed buffer and hospital turnaround', () => {
+test('reverse scheduling ends occupancy at the buffered hospital arrival', () => {
   const schedule = calculateSchedule(input(), calendar)
   assert.equal(schedule.departureAt, new Date(stamp('07:50')).toISOString())
   assert.equal(schedule.pickupAt, new Date(stamp('08:05')).toISOString())
   assert.equal(schedule.arrivalAt, new Date(stamp('08:40')).toISOString())
-  assert.equal(schedule.readyAt, new Date(stamp('09:10')).toISOString())
+  assert.equal(schedule.readyAt, schedule.arrivalAt)
 })
 
 test('48-hour boundary is inclusive and no maximum advance booking applies', () => {
@@ -60,14 +61,17 @@ test('48-hour boundary is inclusive and no maximum advance booking applies', () 
   assert.doesNotThrow(() => calculateSchedule(exact, calendar))
 })
 
-test('full interval must fit Bangkok 06:00–16:00, including exact boundaries', () => {
-  assert.equal(calculateSchedule(input('early', '07:10'), calendar).departureAt, new Date(stamp('06:00')).toISOString())
-  assert.throws(() => calculateSchedule(input('early', '07:09'), calendar), { code: 'HOURS' })
-  assert.equal(calculateSchedule(input('late', '15:50'), calendar).readyAt, new Date(stamp('16:00')).toISOString())
-  assert.throws(() => calculateSchedule(input('late', '15:51'), calendar), { code: 'HOURS' })
-  const fractional = input('fractional', '15:50')
-  fractional.request.appointmentAt = '2026-11-12T15:50:00.001+07:00'
-  assert.throws(() => calculateSchedule(fractional, calendar), { code: 'HOURS' })
+test('appointment hours are inclusive and early departure still requires a covering driver shift', () => {
+  assert.equal(isAppointmentClock('06:00:00.000'), true)
+  assert.equal(isAppointmentClock('16:00:00.000'), true)
+  assert.equal(isAppointmentClock('05:59:59.999'), false)
+  assert.equal(isAppointmentClock('16:00:00.001'), false)
+  const early = input('early', '06:00')
+  assert.equal(calculateSchedule(early, calendar).departureAt, new Date(stamp('04:50')).toISOString())
+  const ctx = context()
+  assert.ok(codes(confirmReservation(ctx, early, now)).includes('SHIFT'))
+  ctx.drivers[0].windows[0].from = stamp('04:50')
+  assert.equal(confirmReservation(ctx, early, now).ok, true)
   const utc = input(); utc.request.appointmentAt = '2026-11-12T02:00:00Z'
   assert.deepEqual(calculateSchedule(utc, calendar), calculateSchedule(input(), calendar))
 })
@@ -106,28 +110,26 @@ test('each driver and vehicle independently prevents overlap', () => {
   assert.ok(driverConflict.issues.some(issue => issue.code === 'CONFLICT' && issue.resourceId === 'driver'))
 })
 
-test('chained departure can equal prior readiness; one minute earlier fails', () => {
+test('depot departure can equal prior hospital arrival; one minute earlier fails', () => {
   const ctx = reserve(context(), input())
-  // 10:25 appointment - 20 buffer - 35 hospital leg - 20 connecting leg = 09:10.
-  const next = confirmReservation(ctx, chained('10:25'), now)
+  const next = confirmReservation(ctx, input('second', '09:50'), now)
   assert.equal(next.ok, true, JSON.stringify(next.issues))
   assert.equal(next.reservation.schedule.departureAt, ctx.reservations[0].schedule.readyAt)
-  const early = confirmReservation(ctx, chained('10:24'), now)
+  const early = confirmReservation(ctx, input('second', '09:49'), now)
   assert.equal(early.ok, false)
   assert.ok(codes(early).includes('CONFLICT'))
 })
 
-test('chain cannot teleport a replacement driver or refer to an unrelated predecessor', () => {
+test('a legacy hospital-origin reservation remains readable, and new proposals must start at the depot', () => {
   const ctx = reserve(context(), input())
   ctx.drivers.push(resource('replacement'))
   const next = chained(); next.driverId = 'replacement'
   const result = confirmReservation(ctx, next, now)
   assert.equal(result.ok, false)
   assert.ok(codes(result).includes('LOCATION'))
-  assert.ok(codes(result).includes('CHAIN'))
-  next.driverId = 'driver'; next.origin.previousTripId = 'unrelated'
-  assert.ok(codes(confirmReservation(ctx, next, now)).includes('CHAIN'))
-  assert.ok(codes(confirmReservation(ctx, input('pretend-depot', '11:00'), now)).includes('LOCATION'))
+  const historical = { ...chained(), historicalTurnaroundMinutes: 30 }
+  ctx.reservations.push({ input: historical, schedule: calculateSchedule(historical, calendar) })
+  assert.deepEqual(validateReservations(ctx), [])
 })
 
 test('capabilities, shifts, inactive resources and readiness holds are enforced', () => {
@@ -145,7 +147,7 @@ test('capabilities, shifts, inactive resources and readiness holds are enforced'
 
 test('schedule changes revalidate downstream and preserve existing schedules on failure', () => {
   let ctx = reserve(context(), input())
-  ctx = reserve(ctx, chained('10:25'))
+  ctx = reserve(ctx, input('second', '09:50'))
   const before = globalThis.structuredClone(ctx)
   const failed = confirmReservation(ctx, input('first', '09:15'), now, true)
   assert.equal(failed.ok, false)
@@ -155,7 +157,7 @@ test('schedule changes revalidate downstream and preserve existing schedules on 
   const changedDestination = input()
   changedDestination.request.hospitalId = 'other-hospital'
   changedDestination.pickupToHospital.toId = 'other-hospital'
-  assert.ok(codes(confirmReservation(ctx, changedDestination, now, true)).includes('LOCATION'))
+  assert.equal(confirmReservation(ctx, changedDestination, now, true).ok, true)
 })
 
 test('calendar change flags affected assignments and never cancels or mutates them', () => {

@@ -23,9 +23,10 @@ test('dispatcher reviews, schedules and assigns through API without prototype da
   const row = requestRow()
   let conflict = false
   let routingDown = true
+  let shiftConflict = true
   const mutations: string[] = []
   await mockDispatcherLogin(page)
-  await page.route('**/api/catalog', route => route.fulfill({ json: { ...emptyCatalog, hospitals: [{ id: 'hospital', name: 'โรงพยาบาลทดสอบ' }], vehicles: [{ id: 'vehicle', name: 'รถทดสอบ', plate: 'กข 1234', active: true, held: false }], drivers: [{ id: 'driver', name: 'คนขับทดสอบ', active: true, held: false }], locations: [{ id: 'depot', name: 'ศูนย์รถ', kind: 'depot' }], depotLocationId: 'depot' } }))
+  await page.route('**/api/catalog', route => route.fulfill({ json: { ...emptyCatalog, hospitals: [{ id: 'hospital', name: 'โรงพยาบาลทดสอบ' }], vehicles: [{ id: 'vehicle', name: 'รถทดสอบ', plate: 'กข 1234', active: true, held: false }, { id: 'vehicle-2', name: 'รถสำรอง', plate: 'DEMO-ONLY-01', active: true, held: false }], drivers: [{ id: 'driver', name: 'คนขับทดสอบ', active: true, held: false }], locations: [{ id: 'depot', name: 'ศูนย์รถ', kind: 'depot' }], depotLocationId: 'depot' } }))
   await page.route('**/api/bookings**', async route => {
     expect(route.request().headers().authorization).toBe('Bearer synthetic-token')
     if (route.request().method() === 'GET') return route.fulfill({ json: { bookings: [row] } })
@@ -35,16 +36,28 @@ test('dispatcher reviews, schedules and assigns through API without prototype da
     const endpoint = route.request().url().split('/').pop()!
     if (conflict) return route.fulfill({ status: 409, json: { error: 'Changed' } })
     if (endpoint === 'schedule' && routingDown) return route.fulfill({ status: 503, json: { error: 'Routing unavailable' } })
+    if (endpoint === 'schedule' && shiftConflict) return route.fulfill({ status: 409, json: { error: 'Schedule unavailable', details: [{ code: 'SHIFT' }] } })
     mutations.push(endpoint)
     if (endpoint === 'commands') { expect(body.command).toEqual({ type: 'APPROVE' }); row.status = 'APPROVED' }
-    if (endpoint === 'schedule') { expect(body).not.toHaveProperty('originToPickup'); row.status = 'SCHEDULED'; row.proposedSchedule = { ...schedule, vehicleId: 'vehicle', driverId: 'driver' } }
-    if (endpoint === 'assignment') { expect(row.status).toBe('SCHEDULED'); row.status = 'ASSIGNED'; row.vehicleId = 'vehicle'; row.driverId = 'driver'; row.schedule = schedule }
+    if (endpoint === 'schedule') { expect(body).not.toHaveProperty('originToPickup'); row.status = 'SCHEDULED'; row.proposedSchedule = { ...schedule, vehicleId: body.vehicleId, driverId: body.driverId } }
+    if (endpoint === 'assignment') { expect(row.status).toBe('SCHEDULED'); expect(body.vehicleId).toBe('vehicle-2'); row.status = 'ASSIGNED'; row.vehicleId = body.vehicleId; row.driverId = 'driver'; row.schedule = schedule }
     row.revision++
     return route.fulfill({ json: row })
   })
   await page.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis).*/, route => route.abort())
   await enterDispatcher(page)
   await page.getByRole('button', { name: 'ดูรายละเอียด →', exact: true }).click()
+  const review = page.getByRole('dialog', { name: 'รายละเอียดงาน' })
+  await expect(review.getByRole('heading', { name: 'จุดรับและความช่วยเหลือ' })).toBeVisible()
+  const detailsOrder = await review.getByRole('heading', { level: 3 }).allTextContents()
+  expect(detailsOrder.indexOf('จุดรับและความช่วยเหลือ')).toBeLessThan(detailsOrder.indexOf('ผู้รับบริการและผู้ติดต่อ'))
+  await expect(review.getByRole('heading', { name: 'ตรวจสอบคำขอและประวัติการติดต่อ' })).toHaveCount(0)
+  const desktopViewport = page.viewportSize()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(review.getByRole('button', { name: 'อนุมัติคำขอ', exact: true })).toBeInViewport()
+  await expect(review.getByRole('button', { name: 'ปฏิเสธคำขอ', exact: true })).toBeInViewport()
+  expect(await review.evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth)).toBe(true)
+  if (desktopViewport) await page.setViewportSize(desktopViewport)
   await page.getByRole('button', { name: 'อนุมัติคำขอ', exact: true }).click()
   conflict = true
   await page.getByRole('button', { name: 'ยืนยันอนุมัติ', exact: true }).click()
@@ -53,23 +66,38 @@ test('dispatcher reviews, schedules and assigns through API without prototype da
   conflict = false
   await page.getByRole('button', { name: 'ยืนยันอนุมัติ', exact: true }).click()
   await expect(page.locator('.dispatch-notice')).toContainText('อนุมัติคำขอ')
-  await page.getByRole('link', { name: 'จัดตารางและมอบหมาย', exact: true }).click()
+  await page.getByRole('link', { name: 'จัดตารางสำหรับคำขอนี้ →', exact: true }).click()
+  await expect(page).toHaveURL(/\/dispatcher\/assignment\?booking=/)
+  await expect(page.getByText('รอคำนวณเวลาเดินทาง', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'รถรับส่ง: เลือกรถ', exact: true }).click()
   await page.getByRole('option', { name: /รถทดสอบ/ }).click()
   await page.getByRole('button', { name: 'คนขับ: เลือกคนขับ', exact: true }).click()
   await page.getByRole('option', { name: /คนขับทดสอบ/ }).click()
-  await page.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true }).click()
-  await page.getByRole('button', { name: 'ยืนยันตาราง', exact: true }).click()
+  await page.getByRole('button', { name: 'ตรวจสอบ', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('บริการคำนวณเส้นทางยังไม่พร้อม')
   expect(row.status).toBe('APPROVED')
   routingDown = false
-  await page.getByRole('button', { name: 'ยืนยันตาราง', exact: true }).click()
+  await page.getByRole('button', { name: 'ตรวจสอบ', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('ช่วงเวลาปฏิบัติงานของคนขับไม่ครอบคลุมงานนี้')
+  expect(row.status).toBe('APPROVED')
+  shiftConflict = false
+  await page.getByRole('button', { name: 'ตรวจสอบ', exact: true }).click()
   await expect(page.getByText('ยืนยันตารางแล้ว ยังไม่จองรถหรือคนขับจนกว่าจะยืนยันการมอบหมาย')).toBeVisible()
-  await page.getByRole('button', { name: 'ตรวจสอบซ้ำและยืนยันการมอบหมาย', exact: true }).click()
+  await expect(page.getByText('รอคำนวณเวลาเดินทาง', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'ยืนยัน', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'แก้ไขข้อเสนอตารางและทรัพยากร', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: /^รถรับส่ง:/ }).click()
+  const spareVehicle = page.getByRole('option', { name: 'รถสำรอง แตะเพื่อเลือก', exact: true })
+  await spareVehicle.click()
+  await expect(page.getByRole('button', { name: 'ยืนยัน', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'กำหนดการเดินทาง' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'ตรวจสอบ', exact: true }).click()
+  await expect(page.getByRole('list', { name: 'กำหนดการเดินทาง' })).toBeVisible()
+  await page.getByRole('button', { name: 'ยืนยัน', exact: true }).click()
   await page.getByRole('button', { name: 'ยืนยันการมอบหมาย', exact: true }).click()
   await expect(page).toHaveURL(/dispatcher\/tracking$/)
   await expect(page.getByRole('cell', { name: 'มอบหมายแล้ว', exact: true })).toBeVisible()
-  expect(mutations).toEqual(['commands', 'schedule', 'assignment'])
+  expect(mutations).toEqual(['commands', 'schedule', 'schedule', 'assignment'])
 })
 
 test('dispatcher access requires verified role and never falls back to demo bookings', async ({ page }) => {

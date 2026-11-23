@@ -2,9 +2,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { transitionTrip } from '../src/domain/lifecycle.ts'
 import { assignProductionTrip, modifyProductionTrip } from '../src/domain/assignment.ts'
 import { confirmReservation } from '../src/domain/scheduling.ts'
-import { checkCitizenSlotCapacity } from '../src/domain/capacity.ts'
+import { isAppointmentClock } from '../src/domain/appointmentHours.ts'
 import { ApiError, check, fields, text, uuid } from './errors.mjs'
-import { citizenFields, citizenText } from './citizen-fields.mjs'
+import { citizenFields, citizenText, resolvePickupVillage } from './citizen-fields.mjs'
 import { requireCurrentConsent } from './consents.mjs'
 import {messageSnapshot} from './notification-messages.mjs'
 
@@ -89,7 +89,8 @@ function inputFromSchedule(row) {
     origin: { kind: row.origin_kind, locationId: row.origin_location_id, ...(row.previous_booking_id ? { previousTripId: row.previous_booking_id } : {}) },
     originToPickup: { fromId: row.origin_location_id, toId: `pickup:${row.booking_id}`, minutes: Number(row.origin_to_pickup_seconds)/60 },
     pickupToHospital: { fromId: `pickup:${row.booking_id}`, toId: row.hospital_location_id, minutes: Number(row.pickup_to_hospital_seconds)/60 },
-    pickupWaitingMinutes: row.pickup_waiting_seconds/60 }
+    pickupWaitingMinutes: row.pickup_waiting_seconds/60,
+    historicalTurnaroundMinutes: (row.ready_at.getTime()-row.arrival_at.getTime())/60000 }
 }
 export async function loadScheduling(client, now) {
   const { rows: [settings] } = await client.query('SELECT * FROM patient_transfer.service_settings')
@@ -109,7 +110,7 @@ export async function loadScheduling(client, now) {
   const { rows: schedules } = await client.query(`SELECT s.*,b.submitted_at,b.mobility,b.status,b.started_at,s.hospital_location_snapshot AS hospital_location_id,to_jsonb(r) AS continuation
     FROM patient_transfer.schedules s JOIN patient_transfer.bookings b ON b.id=s.booking_id JOIN patient_transfer.hospitals h ON h.id=s.hospital_id
     LEFT JOIN LATERAL (SELECT * FROM patient_transfer.trip_route_legs WHERE schedule_id=s.id ORDER BY version DESC LIMIT 1) r ON true
-    WHERE s.committed AND s.released_at IS NULL ORDER BY s.departure_at`)
+    WHERE s.committed AND s.released_at IS NULL AND s.handover_at IS NULL ORDER BY s.departure_at`)
   const context = { calendar: { timezone:'Asia/Bangkok',opensAt:'06:00',closesAt:'16:00',closureDates:closures.map(row=>row.day) },
     vehicles:resources(vehicles,'vehicle_id'), drivers:resources(drivers,'driver_id'),
     reservations:schedules.map(row=>({ input: inputFromSchedule(row), schedule:{tripId:row.booking_id,hospitalId:row.hospital_location_id,
@@ -126,6 +127,7 @@ export async function loadScheduling(client, now) {
 }
 
 export async function buildScheduleInput(client, row, body, route, now) {
+  check(Number.isFinite(row.latitude)&&Number.isFinite(row.longitude),422,'Verify pickup coordinates before routing')
   const originId=uuid(body.originLocationId)
   const { rows:[origin] }=await client.query('SELECT *,ST_X(point::geometry) AS longitude,ST_Y(point::geometry) AS latitude FROM patient_transfer.locations WHERE id=$1 AND active',[originId])
   const { rows:[destination] }=await client.query(`SELECT l.*,ST_X(l.point::geometry) AS longitude,ST_Y(l.point::geometry) AS latitude
@@ -136,7 +138,7 @@ export async function buildScheduleInput(client, row, body, route, now) {
     const {rows:[settings]}=await client.query('SELECT depot_location_id FROM patient_transfer.service_settings')
     check((row.depot_location_snapshot??settings?.depot_location_id)===origin.id && origin.kind==='depot',422,'Origin is not the booking depot snapshot')
   }
-  check(['depot','previous_hospital','handoff'].includes(originKind),400,'Invalid origin kind')
+  check(['depot','handoff'].includes(originKind),422,'New schedules must depart from the dispatch station')
   if(originKind==='handoff') check(body.arrangement?.locationId===originId && Date.parse(body.arrangement?.confirmedAt)<=Date.parse(now) && Date.parse(body.arrangement?.confirmedAt)>=Date.parse(now)-5*60000,422,'Current verified handoff required')
   const [first,second]=await Promise.all([route(origin,row),route(row,destination)])
   check([first.minutes,second.minutes].every(value=>Number.isFinite(value)&&value>=0),503,'Routing unavailable')
@@ -217,8 +219,10 @@ async function currentConfiguration(client,row) {
   check(!row.started_at&&['APPROVED','SCHEDULED','ASSIGNED'].includes(row.status),409,'Configuration review requires approved, unstarted work')
   const {rows:[settings]}=await client.query('SELECT revision,depot_location_id FROM patient_transfer.service_settings')
   const {rows:[hospital]}=await client.query('SELECT location_id,name FROM patient_transfer.hospitals WHERE id=$1 AND active',[row.hospital_id])
-  const {rowCount:eligible}=await client.query(`SELECT 1 FROM patient_transfer.service_villages v WHERE v.id=$1 AND v.active
-    AND (ST_Covers(v.boundary,ST_SetSRID(ST_MakePoint($2,$3),4326)::geography) OR ST_DWithin(v.center,ST_SetSRID(ST_MakePoint($2,$3),4326)::geography,v.radius_metres))`,[row.village_id,row.longitude,row.latitude])
+  const eligible=row.village_id===null
+    ? Number.isFinite(row.latitude)&&Number.isFinite(row.longitude)
+    : (await client.query(`SELECT 1 FROM patient_transfer.service_villages v WHERE v.id=$1 AND v.active
+      AND (ST_Covers(v.boundary,ST_SetSRID(ST_MakePoint($2,$3),4326)::geography) OR ST_DWithin(v.center,ST_SetSRID(ST_MakePoint($2,$3),4326)::geography,v.radius_metres))`,[row.village_id,row.longitude,row.latitude])).rowCount
   check(settings&&hospital&&eligible,422,'Current hospital or service area requires dispatcher intervention')
   return {revision:Number(settings.revision),row:{...row,hospital_location_snapshot:hospital.location_id,hospital_location_id:hospital.location_id,
     hospital_name_snapshot:hospital.name,depot_location_snapshot:settings.depot_location_id}}
@@ -255,16 +259,22 @@ export async function schedulingAction(client,row,user,body,mode,route,now) {
     check(mode==='modify'&&['ASSIGNED','PICKING_UP'].includes(trip.status),409,'Booking changes require a pre-pickup modification')
     text(body.reason,'modification reason')
     const changes=fields(body.bookingChanges,['appointmentAt','hospitalId','latitude','longitude','pickupAddress','villageId'])
-    if(Object.hasOwn(changes,'appointmentAt')) check(typeof changes.appointmentAt==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(changes.appointmentAt)&&Number.isFinite(Date.parse(changes.appointmentAt)),400,'Explicit appointment timezone required')
+    if(Object.hasOwn(changes,'appointmentAt')) {
+      const appointment=Date.parse(changes.appointmentAt)
+      check(typeof changes.appointmentAt==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(changes.appointmentAt)&&Number.isFinite(appointment),400,'Explicit appointment timezone required')
+      check(isAppointmentClock(new Date(appointment+7*3600000).toISOString().slice(11,23)),422,'Appointment must be between 06:00 and 16:00 Bangkok time',{code:'BOOKING_OUTSIDE_HOURS'})
+    }
     for(const key of ['latitude','longitude']) if(Object.hasOwn(changes,key)) check(typeof changes[key]==='number',400,'Numeric pickup coordinates required')
     if(Object.hasOwn(changes,'pickupAddress')) text(changes.pickupAddress,'pickup address',1000)
     const latitude=changes.latitude??row.latitude,longitude=changes.longitude??row.longitude
     check(Number.isFinite(latitude)&&Math.abs(latitude)<=90&&Number.isFinite(longitude)&&Math.abs(longitude)<=180,400,'Invalid pickup coordinates')
     const hospitalId=changes.hospitalId?uuid(changes.hospitalId):row.hospital_id
     const villageId=changes.villageId?uuid(changes.villageId):row.village_id
-    const {rows:eligible}=await client.query(`SELECT 1 FROM patient_transfer.hospitals h,patient_transfer.service_villages v
-      WHERE h.id=$1 AND h.active AND v.id=$2 AND v.active AND
-      (ST_Covers(v.boundary,ST_SetSRID(ST_MakePoint($3,$4),4326)::geography) OR ST_DWithin(v.center,ST_SetSRID(ST_MakePoint($3,$4),4326)::geography,v.radius_metres))`,
+    const {rows:eligible}=await client.query(`SELECT 1 FROM patient_transfer.hospitals h
+      WHERE h.id=$1 AND h.active AND ($2::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM patient_transfer.service_villages v WHERE v.id=$2 AND v.active AND
+        (ST_Covers(v.boundary,ST_SetSRID(ST_MakePoint($3,$4),4326)::geography) OR ST_DWithin(v.center,ST_SetSRID(ST_MakePoint($3,$4),4326)::geography,v.radius_metres))
+      ))`,
       [hospitalId,villageId,longitude,latitude])
     check(eligible.length,422,'Changed destination or pickup is outside service scope')
     await client.query(`UPDATE patient_transfer.bookings SET hospital_id=$2,appointment_at=$3,pickup_point=ST_SetSRID(ST_MakePoint($4,$5),4326)::geography,
@@ -314,8 +324,8 @@ export async function schedulingAction(client,row,user,body,mode,route,now) {
 
 export async function createBooking(client,user,body,now,noticeVersion) {
   check(user.role==='citizen',403,'Citizen identity required')
-  fields(body,['requestId','consentId','patientName','requesterName','contactPhone','pickupAddress','latitude','longitude','landmark','villageId','hospitalId','mobility','appointmentAt','patientProfileId','bookingFor','assistance'],
-    ['consentId','patientName','requesterName','contactPhone','pickupAddress','latitude','longitude','villageId','hospitalId','mobility','appointmentAt','bookingFor'])
+  fields(body,['requestId','consentId','patientName','requesterName','contactPhone','pickupAddress','pickupMethod','latitude','longitude','landmark','villageId','hospitalId','mobility','appointmentAt','patientProfileId','bookingFor','assistance'],
+    ['consentId','patientName','requesterName','contactPhone','hospitalId','mobility','appointmentAt','bookingFor'])
   const requestId=body.requestId===undefined?null:uuid(body.requestId)
   const requestHash=requestId?createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.keys(body).filter(key=>key!=='requestId').sort().map(key=>[key,body[key]])))).digest('hex'):null
   if(requestId) {
@@ -333,55 +343,24 @@ export async function createBooking(client,user,body,now,noticeVersion) {
   const requesterName=citizenText(body.requesterName,'requesterName',120)
   check(['self','other'].includes(body.bookingFor),400,'Invalid booking relationship',{field:'bookingFor'})
   await requireCurrentConsent(client,user,body.consentId,now,noticeVersion)
-  const {rows:[eligible]}=await client.query(`SELECT 1 FROM patient_transfer.service_villages v,patient_transfer.hospitals h,
-    patient_transfer.consent_records c WHERE v.id=$1 AND v.active AND h.id=$2 AND h.active AND c.id=$3 AND c.user_id=$4 AND c.accepted
-    AND c.recorded_at <= $7 AND c.notice_version=$8
-    AND (ST_Covers(v.boundary,ST_SetSRID(ST_MakePoint($5,$6),4326)::geography)
-      OR ST_DWithin(v.center,ST_SetSRID(ST_MakePoint($5,$6),4326)::geography,v.radius_metres))`,
-  [uuid(body.villageId),uuid(body.hospitalId),uuid(body.consentId),user.id,body.longitude,body.latitude,now,noticeVersion])
-  check(eligible,422,'Consent, hospital or service-area validation failed')
+  const villageId=(await resolvePickupVillage(client,body))??null
+  const {rowCount:eligibleHospital}=await client.query('SELECT 1 FROM patient_transfer.hospitals WHERE id=$1 AND active',[uuid(body.hospitalId)])
+  check(villageId||body.pickupMethod==='map',422,'Consent, hospital or service-area validation failed',
+    {code:body.pickupMethod==='address'?'PICKUP_VILLAGE_UNAVAILABLE':'PICKUP_OUTSIDE_AREA'})
+  check(eligibleHospital,422,'Consent, hospital or service-area validation failed',{code:'BOOKING_HOSPITAL_UNAVAILABLE'})
   const appointment=Date.parse(body.appointmentAt)
-  check(typeof body.appointmentAt==='string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(body.appointmentAt)&&Number.isFinite(appointment)&&appointment-Date.parse(now)>=48*3600000,422,'Appointment requires at least 48-hour notice and explicit timezone')
+  check(typeof body.appointmentAt==='string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(body.appointmentAt)&&Number.isFinite(appointment)&&appointment-Date.parse(now)>=48*3600000,422,'Appointment requires at least 48-hour notice and explicit timezone',{code:'BOOKING_LEAD_TIME'})
   const date=new Date(appointment+7*3600000).toISOString().slice(0,10)
   const clock=new Date(appointment+7*3600000).toISOString().slice(11,23)
-  check(clock>='06:20:00.000'&&clock<='15:50:00.000',422,'Appointment cannot fit the service-hour window')
+  check(isAppointmentClock(clock),422,'Appointment must be between 06:00 and 16:00 Bangkok time',{code:'BOOKING_OUTSIDE_HOURS'})
   const {rows:closures}=await client.query('SELECT 1 FROM patient_transfer.service_closures WHERE closed_on=$1 AND active',[date])
-  check(!closures.length,422,'Service closed on appointment date')
-  const {rows:vehicles}=await client.query(`SELECT v.id,v.name,v.active,to_json(v.capabilities) AS capabilities,
-    EXISTS(SELECT 1 FROM patient_transfer.resource_holds h WHERE h.vehicle_id=v.id AND h.ends_at IS NULL) AS held
-    FROM patient_transfer.vehicles v`)
-  if(vehicles.length>0) {
-    const {rows:activeBookings}=await client.query(`SELECT b.id,b.appointment_at AS "appointmentAt",b.hospital_id AS "hospitalId",
-      COALESCE(b.hospital_name_snapshot,h.name) AS "hospitalName",b.mobility,b.status,s.vehicle_id AS "vehicleId",
-      CASE WHEN s.departure_at IS NOT NULL THEN json_build_object('departureAt',s.departure_at,'pickupAt',s.pickup_at,'arrivalAt',s.arrival_at,'readyAt',s.ready_at) ELSE NULL END AS schedule
-      FROM patient_transfer.bookings b
-      LEFT JOIN patient_transfer.hospitals h ON h.id=b.hospital_id
-      LEFT JOIN LATERAL (
-        SELECT vehicle_id,departure_at,pickup_at,arrival_at,ready_at FROM patient_transfer.schedules
-        WHERE booking_id=b.id AND released_at IS NULL ORDER BY committed DESC,routed_at DESC LIMIT 1
-      ) s ON TRUE
-      WHERE b.status NOT IN ('COMPLETED','CANCELLED','REJECTED','ABORTED')`)
-    const capacity=checkCitizenSlotCapacity({
-      appointmentAt:body.appointmentAt,
-      hospitalId:body.hospitalId,
-      mobility:body.mobility,
-      vehicles,
-      existingBookings:activeBookings,
-      nowMs:Date.parse(now),
-    })
-    check(capacity.available,409,capacity.message,{
-      code:'CAPACITY_FULL',
-      reason:capacity.reason,
-      windowLabel:capacity.window.windowLabel,
-      alternativeTimes:capacity.alternativeTimes,
-    })
-  }
+  check(!closures.length,422,'Service closed on appointment date',{code:'BOOKING_DATE_CLOSED'})
   const id=randomUUID()
   await client.query(`INSERT INTO patient_transfer.bookings(id,reference,requester_id,patient_profile_id,consent_id,patient_name,requester_name,contact_phone,
     pickup_address,pickup_point,landmark,village_id,hospital_id,mobility,submitted_at,appointment_at,booking_for,assistance,intake_request_id,intake_request_hash)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,ST_SetSRID(ST_MakePoint($10,$11),4326)::geography,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
   [id,`BK-${id}`,user.id,body.patientProfileId?uuid(body.patientProfileId):null,body.consentId,normalized.patientName,requesterName,normalized.contactPhone,
-    normalized.pickupAddress,body.longitude,body.latitude,normalized.landmark,body.villageId,body.hospitalId,body.mobility,now,body.appointmentAt,body.bookingFor,normalized.assistance,requestId,requestHash])
+    normalized.pickupAddress,body.longitude??null,body.latitude??null,normalized.landmark,villageId,body.hospitalId,body.mobility,now,body.appointmentAt,body.bookingFor,normalized.assistance,requestId,requestHash])
   // Publication leaves this fresh booking unchanged; return only after its writes succeed.
   return enqueue(client,{id},[{recipient:'citizen',recipientId:user.id,event:'REQUEST_RECEIVED'}],null,now)
 }

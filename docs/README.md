@@ -9,6 +9,7 @@ The same SRS v2.1 is available in [Thai](requirements/SRS-TH.md) and [English](r
 | [Main SRS](requirements/SRS.md) | Required final system and acceptance baseline |
 | [Integration plan](plans/INTEGRATION-PLAN.md) | Current implementation progress, remaining work and SRS refinements to implement |
 | [Development](guides/DEVELOPMENT.md) | Run the UI/API and relevant checks |
+| [Local development](guides/LOCAL-DEVELOPMENT.md) | Set up the local database and run the API/frontend in separate terminals |
 | [API](guides/API.md) | Existing endpoints, authentication and server contracts |
 | [Database](guides/DATABASE.md) | Local PostgreSQL/PostGIS setup and migrations |
 | [LINE setup](guides/LINE-SETUP.md) | Private configuration and live integration prerequisites |

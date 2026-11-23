@@ -46,7 +46,7 @@ test('concurrent original dispatcher reassignments commit once, retain losing in
       await page.getByLabel('ชื่อผู้ใช้', { exact: true }).fill(username)
       await page.getByLabel('รหัสผ่าน', { exact: true }).fill(syntheticPassword)
       await page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
-      await page.getByRole('link', { name: username.includes('driver') ? 'เปิดหน้าคนขับ' : 'เปิดหน้าจัดรถ', exact: true }).click()
+      if (username.includes('driver')) await page.getByRole('link', { name: 'เปิดหน้าคนขับ', exact: true }).click(); else await page.locator('#dispatcher-main').waitFor()
       await expect(page.getByText('กำลังโหลดข้อมูล…', { exact: true })).toHaveCount(0)
     }
     await open(oldDriver, 'synthetic-driver', `/driver/details?booking=${original.id}`)
@@ -186,7 +186,7 @@ for (const variant of ['both', 'driver', 'vehicle', 'driver-incident'] as const)
       await page.getByLabel('ชื่อผู้ใช้', { exact: true }).fill(username)
       await page.getByLabel('รหัสผ่าน', { exact: true }).fill(syntheticPassword)
       await page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
-      await page.getByRole('link', { name: username.includes('driver') ? 'เปิดหน้าคนขับ' : 'เปิดหน้าจัดรถ', exact: true }).click()
+      if (username.includes('driver')) await page.getByRole('link', { name: 'เปิดหน้าคนขับ', exact: true }).click(); else await page.locator('#dispatcher-main').waitFor()
       await expect(page.getByText('กำลังโหลดข้อมูล…', { exact: true })).toHaveCount(0)
     }
     await wire(citizen)
@@ -236,7 +236,12 @@ for (const variant of ['both', 'driver', 'vehicle', 'driver-incident'] as const)
       await f.request(`/resources/vehicles/${ids.vehicle}/readiness`, 'dispatcher', { locationId: pickup, reason: 'Readiness cannot resolve active incident execution' }, 409)
       expect(await recoveryFingerprint(f.pool)).toEqual(blocked)
     }
-    await citizen.getByRole('button', { name: 'โหลดข้อมูลล่าสุด', exact: true }).click()
+    async function refreshCitizenBooking() {
+      const refreshed = citizen.waitForResponse(row => new URL(row.url()).pathname === `/api/bookings/${booking.id}` && row.request().method() === 'GET')
+      await citizen.reload()
+      return (await refreshed).json()
+    }
+    expect((await refreshCitizenBooking()).revision).toBe(booking.revision)
     await expect(citizen.getByRole('button', { name: 'ยืนยันยกเลิกการจอง', exact: true })).toBeDisabled()
     await staff(newDriver, replaceDriver ? 'synthetic-driver2' : 'synthetic-driver', `/driver/details?booking=${booking.id}`)
     if (replaceDriver) await expect(newDriver.getByRole('heading', { name: 'ไม่พบงานที่มอบหมายให้คนขับนี้', exact: true })).toBeVisible()
@@ -277,12 +282,12 @@ for (const variant of ['both', 'driver', 'vehicle', 'driver-incident'] as const)
     await expect(submit).toBeDisabled()
     if (incident) {
       await dispatcher.getByRole('button', { name: /^รถรับส่ง:/ }).click()
-      const retained = dispatcher.getByRole('option', { name: /SYNTHETIC-01/ })
+      const retained = dispatcher.getByRole('option', { name: /Synthetic vehicle 1/ })
       await expect(retained).toBeEnabled(); await retained.click()
     }
     if (replaceVehicle) {
       await dispatcher.getByRole('button', { name: /^รถรับส่ง:/ }).click()
-      await dispatcher.getByRole('option', { name: /SYNTHETIC-02/ }).click()
+      await dispatcher.getByRole('option', { name: /Synthetic vehicle 2/ }).click()
     }
     if (replaceDriver) {
       await dispatcher.getByRole('button', { name: /^คนขับ:/ }).click()
@@ -356,11 +361,11 @@ for (const variant of ['both', 'driver', 'vehicle', 'driver-incident'] as const)
     const history = (await f.pool.query("SELECT command,command_data FROM patient_transfer.trip_events WHERE booking_id=$1 ORDER BY sequence", [booking.id])).rows
     expect(history.filter((row: { command: string }) => row.command === 'START_TRIP')).toHaveLength(1)
     expect(history.find((row: { command: string }) => row.command === 'MODIFY_ASSIGNMENT').command_data.arrangement).toEqual({ locationId: pickup, confirmedAt: f.control.now, note })
+    expect((await refreshCitizenBooking()).revision).toBe(reassigned.revision)
+    await expect(citizen.getByRole('button', { name: 'ยืนยันยกเลิกการจอง', exact: true })).toBeDisabled()
     const locked = await recoveryFingerprint(f.pool)
     await f.command(reassigned, 'CANCEL', { reason: 'Cutoff must not reset' }, 'citizen', 409)
     expect(await recoveryFingerprint(f.pool)).toEqual(locked)
-    await citizen.getByRole('button', { name: 'โหลดข้อมูลล่าสุด', exact: true }).click()
-    await expect(citizen.getByRole('button', { name: 'ยืนยันยกเลิกการจอง', exact: true })).toBeDisabled()
     const oldWrite = oldDriver.waitForResponse(row => row.url().endsWith('/commands') && row.request().method() === 'POST')
     await oldDriver.getByRole('button', { name: 'ยืนยันการอัปเดต', exact: true }).click()
     expect((await oldWrite).status()).toBe(replaceDriver ? 403 : 409)
@@ -445,7 +450,7 @@ for (const variant of ['both', 'driver', 'vehicle', 'driver-incident'] as const)
       await expect(newDriver.getByText(booking.patientName, { exact: false })).toHaveCount(0)
       await expect(newDriver.locator('a[href^="tel:"]')).toHaveCount(0)
       const completed = await f.get(booking.id)
-      expect(completed.status).toBe('COMPLETED'); expect(completed.resourceHold).toBe(true)
+      expect(completed.status).toBe('COMPLETED'); expect(completed.resourceHold).toBe(false)
       expect(completed.driverId).toBe(currentDriver); expect(completed.vehicleId).toBe(currentVehicle)
       expect(completed.schedule).toEqual(reassigned.schedule)
       const events = (await f.pool.query('SELECT command,actor_id,recorded_at FROM patient_transfer.trip_events WHERE booking_id=$1 ORDER BY sequence', [booking.id])).rows
@@ -463,44 +468,14 @@ for (const variant of ['both', 'driver', 'vehicle', 'driver-incident'] as const)
       await expect(citizen.getByText('ผู้ป่วยเดินทางถึงโรงพยาบาลแล้ว', { exact: true })).toBeVisible()
       await expect(citizen.getByText('Synthetic hospital', { exact: true })).toBeVisible()
       await expect(citizen.getByRole('button', { name: 'ยกเลิกการจอง', exact: true })).toHaveCount(0)
-      expect(await holds()).toHaveLength(2)
-      const boundary = Math.max(Date.parse(completed.schedule!.readyAt), Date.parse(actualHandover) + 30 * 60000)
-      expect(boundary).toBeGreaterThan(Date.parse(completed.schedule!.readyAt))
-      // Both current resources remain held even at the old planned readiness time.
-      f.control.now = completed.schedule!.readyAt
-      for (const resource of [`vehicles/${currentVehicle}`, `drivers/${currentDriver}`]) {
-        const before = await recoveryFingerprint(f.pool)
-        await f.request(`/resources/${resource}/readiness`, 'dispatcher', { locationId: hospital, reason: 'Planned readiness cannot waive actual turnaround' }, 409)
-        expect(await recoveryFingerprint(f.pool)).toEqual(before)
-      }
-      f.control.now = new Date(boundary - 1).toISOString()
-      const refreshed = dispatcher.waitForResponse(row => new URL(row.url()).pathname === '/api/catalog')
-      await dispatcher.getByRole('button', { name: 'โหลดข้อมูลล่าสุด', exact: true }).click(); await refreshed
-      await expect(dispatcher.getByText('กำลังโหลดข้อมูล…', { exact: true })).toHaveCount(0)
-      const beforeEarly = await recoveryFingerprint(f.pool)
-      await ready(`vehicles/${currentVehicle}`, hospital, 409)
-      await expect(dispatcher.getByRole('alert').filter({ hasText: 'ข้อมูลหรือความพร้อมเปลี่ยนแล้ว' })).toBeVisible()
-      await expect(dispatcher.getByRole('textbox', { name: 'เหตุผลและผลตรวจสอบ', exact: true })).toHaveValue('ตรวจตำแหน่งจริงและพร้อมใช้งานแล้ว')
-      expect(await recoveryFingerprint(f.pool)).toEqual(beforeEarly)
-      // Exact handover + 30-minute boundary permits each independent confirmation.
-      f.control.now = new Date(boundary).toISOString()
-      await ready(`vehicles/${currentVehicle}`, hospital)
-      expect(await holds()).toEqual([{ vehicle_id: null, driver_id: currentDriver }])
-      expect((await f.get(booking.id)).resourceHold).toBe(true)
-      await ready(`drivers/${currentDriver}`, hospital)
       expect(await holds()).toEqual([])
-      const ended = await f.get(booking.id)
-      expect(ended.status).toBe('COMPLETED'); expect(ended.resourceHold).toBe(false)
-      expect(ended.cancellationLocked).toBe(true)
+      expect(completed.cancellationLocked).toBe(true)
       for (const [index, [kind, key, id]] of currentResources.entries()) {
         const positions = (await f.pool.query(`SELECT * FROM patient_transfer.resource_position_updates WHERE ${key}=$1 ORDER BY confirmed_at,id`, [id])).rows
-        expect(positions).toHaveLength(positionHistory[index].length + 1)
-        expect(positions.slice(0, -1)).toEqual(positionHistory[index])
-        expect(positions.at(-1).location_id).toBe(hospital)
-        expect(positions.at(-1).confirmed_at.toISOString()).toBe(new Date(boundary).toISOString())
-        expect(positions.at(-1).confirmed_by).toBe('00000000-0000-4000-8000-000000000002')
+        expect(positions).toEqual(positionHistory[index])
         expect((await f.pool.query(`SELECT location_id FROM patient_transfer.${kind} WHERE id=$1`, [id])).rows[0].location_id).toBe(ids.depot)
       }
+
       const completion = (await f.pool.query("SELECT recipient_id,status,attempts,message_data FROM patient_transfer.notifications WHERE booking_id=$1 AND template_key='TRIP_CONFIRM_HANDOVER'", [booking.id])).rows
       expect(completion.map((row: { recipient_id: string }) => row.recipient_id).sort()).toEqual([ids.citizen, account].sort())
       expect(completion.every((row: { status: string; attempts: number; message_data: { status: string } }) => row.status === 'PENDING' && row.attempts === 0 && row.message_data.status === 'COMPLETED')).toBe(true)

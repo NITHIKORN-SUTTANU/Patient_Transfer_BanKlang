@@ -81,9 +81,9 @@ test('pre-pickup reassignment holds old resources and requires new Start Trip/ve
   let next = advance(result.state, 'START_TRIP', day('08:00'))
   for (const command of ['DEPART_ORIGIN', 'CONFIRM_PICKUP', 'DEPART_FOR_HOSPITAL', 'CONFIRM_HANDOVER']) next = advance(next, command, day('08:20'))
   assert.equal(next.trips[0].status, 'COMPLETED')
-  assert.equal(next.trips[0].resourceHold, true)
-  const ready = transitionTrip(next.trips[0], { type: 'CONFIRM_READY', reason: 'Turnaround and readiness checked' }, officer, 'ready', day('09:40'))
-  assert.equal(ready.resourceHold, false)
+  assert.equal(next.trips[0].resourceHold, false)
+  assert.equal(next.scheduling.vehicles[0].holds.length, 1)
+  assert.equal(next.scheduling.drivers[0].holds.length, 1)
   assert.equal(result.state.outbox.filter(notice => notice.event === 'ASSIGNMENT_CHANGED').length, 3)
 })
 

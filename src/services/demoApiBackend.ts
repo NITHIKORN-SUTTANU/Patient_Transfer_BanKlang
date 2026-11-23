@@ -1138,6 +1138,19 @@ export async function handleDemoApiRequest<T>(
     }
   }
 
+  if (pathname === '/driver/future') {
+    const driverId = driverIdFromToken(options.token, db)
+    const today = bangkokDateFromMs(Date.now())
+    const bookings = mergeWithOverlayBookings(db)
+      .flatMap(({ id, reference, status, appointmentAt, schedule, driverId: bookingDriverId, startedAt }) =>
+        driverId && bookingDriverId === driverId && status === 'ASSIGNED' && !startedAt && schedule &&
+        bangkokDateFromMs(Date.parse(schedule.departureAt)) > today
+          ? [{ id, reference, status, appointmentAt, departureAt: schedule.departureAt, pickupAt: schedule.pickupAt }]
+          : [])
+      .sort((a, b) => Date.parse(a.departureAt) - Date.parse(b.departureAt))
+    return { bookings, nextCursor: null } as T
+  }
+
   // --- Driver History ---
   if (pathname === '/driver/history') {
     const driverId = driverIdFromToken(options.token, db)

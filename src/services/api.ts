@@ -19,6 +19,7 @@ async function request(path: string, options: { token?: string; body?: unknown; 
       typeof failure?.details?.code === 'string' ? failure.details.code : undefined,
       typeof failure?.message === 'string' ? failure.message : undefined,
       Array.isArray(failure?.details?.alternativeTimes) ? failure.details.alternativeTimes : undefined,
+      failure?.details,
     )
   }
   return response

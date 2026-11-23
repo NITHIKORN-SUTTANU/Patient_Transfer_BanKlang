@@ -69,7 +69,7 @@ export async function startOperationalTestApi(providers: { liffId?: string; veri
     await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill('synthetic-dispatcher')
     await page.getByLabel('รหัสผ่าน',{exact:true}).fill(syntheticPassword)
     await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click()
-    await page.getByRole('link',{name:'เปิดหน้าจัดรถ',exact:true}).click()
+    await page.locator('#dispatcher-main').waitFor()
     await page.getByRole('button',{name:'ดูสถานะ →',exact:true}).click()
     await page.getByRole('combobox',{name:'การดำเนินการ',exact:true}).selectOption(action)
   }

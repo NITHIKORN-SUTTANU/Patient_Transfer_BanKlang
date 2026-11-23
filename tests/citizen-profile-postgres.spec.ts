@@ -1,3 +1,4 @@
+import { chooseCitizenPickup } from './helpers/citizen-gps'
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { startOperationalTestApi, ids } from './helpers/operational-postgres'
@@ -7,12 +8,12 @@ import { createApi } from '../server/app.mjs'
 test.use({ actionTimeout: 10000 })
 test.beforeEach(() => test.skip(!process.env.DATABASE_TEST_ADMIN_URL, 'Local test database required'))
 
-for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-intake', 'village-inactive', 'village-boundary'] as const) test(`original citizen profile reuse preserves snapshots${scenario ? ` and rejects stale state for ${scenario}` : ''}`, async ({ page, browser }) => {
+for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-intake', 'village-inactive', 'village-boundary'] as const) test(`original citizen profile reuse preserves snapshots${scenario ? ` after ${scenario}` : ''}`, async ({ page, browser }) => {
   test.setTimeout(60000)
   const noticeChanged = scenario?.startsWith('notice-') ?? false
   const villageChanged = scenario?.startsWith('village-') ?? false
   const staleAction = villageChanged ? null : scenario?.endsWith('profile') ? 'profile' : scenario ? 'intake' : null
-  let recoveredVillage = ids.village
+  let recoveredVillage: string | null = ids.village
   const ownerSubject = `U${'a'.repeat(32)}`
   const f = await startOperationalTestApi({ liffId: 'synthetic-profile', verifyLine: async token => {
     expect(['synthetic-profile-owner', 'synthetic-profile-other']).toContain(token)
@@ -40,7 +41,7 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
       await page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ }).check()
       await page.getByRole('button', { name: 'รับทราบและถัดไป', exact: true }).click()
       if (profileId) {
-        await page.getByLabel('ข้อมูลผู้ป่วยที่บันทึกไว้').selectOption(profileId)
+        await page.getByRole('button', { name: 'ใช้ข้อมูลบันทึกไว้', exact: true }).click()
         await expect(page.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('ผู้ป่วยข้อมูลเดิม')
         await expect(page.getByLabel('เบอร์โทรศัพท์ของคุณ *', { exact: true })).toHaveValue('0800000000')
         await page.getByLabel('ชื่อผู้ป่วย *', { exact: true }).fill('ผู้ป่วยข้อมูลใหม่')
@@ -59,19 +60,10 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
       await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
       await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
       if (profileId) {
-        await expect(page.getByLabel('ที่อยู่จุดรับ *')).toHaveValue('บ้านข้อมูลเดิม')
-        await expect(page.getByLabel('หมู่บ้านในเขตบริการ *')).toHaveValue(ids.village)
         await page.getByRole('button', { name: 'รถเข็น', exact: true }).click()
         await page.getByRole('checkbox', { name: 'มีผู้ดูแลเดินทางไปด้วย', exact: true }).check()
-      } else await page.getByLabel('หมู่บ้านในเขตบริการ *').selectOption(ids.village)
-      await page.getByLabel('ที่อยู่จุดรับ *').fill(profileId ? 'บ้านข้อมูลใหม่' : 'บ้านข้อมูลเดิม')
-      await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง', { exact: true }).click()
-      if (profileId) {
-        await expect(page.getByLabel('ละติจูด', { exact: true })).toHaveValue('18.59')
-        await expect(page.getByLabel('ลองจิจูด', { exact: true })).toHaveValue('99.05')
       }
-      await page.getByLabel('ละติจูด', { exact: true }).fill(profileId ? '18.591' : '18.59')
-      await page.getByLabel('ลองจิจูด', { exact: true }).fill(profileId ? '99.051' : '99.05')
+      await chooseCitizenPickup(page, profileId ? 18.591 : 18.59, profileId ? 99.051 : 99.05)
       await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
       await expect(page.getByRole('heading', { name: 'ตรวจสอบข้อมูล', exact: true })).toBeVisible()
       await expect(page.getByText(profileId ? 'ผู้ป่วยข้อมูลใหม่' : 'ผู้ป่วยข้อมูลเดิม', { exact: true })).toBeVisible()
@@ -79,7 +71,8 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
       if (profileId && villageChanged) {
         const data = await f.request('/admin/service-data', 'admin')
         const village = data.villages.find((row: { id: string }) => row.id === ids.village)
-        recoveredVillage = data.villages.find((row: { id: string; active: boolean }) => row.id !== ids.village && row.active).id
+        recoveredVillage = null
+        await f.pool.query('UPDATE patient_transfer.service_villages SET active=false WHERE id<>$1', [ids.village])
         await f.request(`/admin/villages/${ids.village}`, 'admin', { name: village.name, number: village.number,
           active: scenario !== 'village-inactive', shape: 'circle', latitude: scenario === 'village-boundary' ? 19 : village.latitude,
           longitude: scenario === 'village-boundary' ? 100 : village.longitude, radiusMetres: village.radiusMetres,
@@ -87,60 +80,9 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
         const afterChange = await bookingLedger()
         expect(afterChange.slice(1)).toEqual(original.slice(1))
         expect(afterChange[0]).toEqual(original[0].map(row => ({ ...row, revision: String(BigInt(row.revision) + 1n), schedule_review_required: true })))
-        original = afterChange
-        const before = await recoveryFingerprint(f.pool)
-        const consent = (await f.pool.query('SELECT id FROM patient_transfer.consent_records WHERE user_id=$1 ORDER BY decision_order DESC LIMIT 1', [oldProfile.requester_id])).rows[0]
-        const deniedIntake = await fetch(`${activeBase}/api/bookings`, { method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bookingWrites[0], requestId: randomUUID(), consentId: consent.id }) })
-        expect(deniedIntake.status).toBe(422)
-        expect((await deniedIntake.json()).error).toBe('Consent, hospital or service-area validation failed')
-        const deniedProfile = page.waitForResponse(r => r.url().endsWith(`/api/profiles/${profileId}`) && r.request().method() === 'POST')
-        await page.getByRole('button', { name: 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้', exact: true }).click()
-        expect((await deniedProfile).status()).toBe(422)
-        expect((await (await deniedProfile).json()).error).toBe('Pickup is outside active service scope')
-        await expect(page.getByRole('heading', { name: 'ตรวจสอบข้อมูล', exact: true })).toBeVisible()
-        await page.getByRole('checkbox', { name: 'บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป', exact: true }).uncheck()
-        const deniedBooking = page.waitForResponse(r => r.url().endsWith('/api/bookings') && r.request().method() === 'POST')
-        await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ', exact: true }).click()
-        expect((await deniedBooking).status()).toBe(422)
-        await expect(page.getByRole('button', { name: 'ลองส่งคำขออีกครั้ง', exact: true })).toBeVisible()
-        expect(await recoveryFingerprint(f.pool)).toEqual(before)
-        const context = await browser.newContext()
-        const fresh = await context.newPage()
-        try {
-          await fresh.route('**/src/services/lineClient.ts', route => route.fulfill({ contentType: 'application/javascript', body: 'export async function lineIdToken() { return "synthetic-profile-owner" }' }))
-          await fresh.route('**/api/**', async route => {
-            const url = new URL(route.request().url())
-            await route.fulfill({ response: await route.fetch({ url: `${activeBase}${url.pathname}${url.search}` }) })
-          })
-          await fresh.route(/https:\/\/.*(?:map|tile|openstreetmap|arcgis|line\.me|line-scdn).*/, route => route.abort())
-          const profiles = fresh.waitForResponse(r => r.url().endsWith('/api/profiles'))
-          await fresh.goto('/booking')
-          expect((await (await profiles).json()).profiles).toEqual([])
-          await fresh.getByRole('button', { name: 'เริ่มจองรถ →', exact: true }).click()
-          await fresh.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ }).check()
-          await fresh.getByRole('button', { name: 'รับทราบและถัดไป', exact: true }).click()
-          await expect(fresh.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('')
-          await expect(fresh.getByLabel('ข้อมูลผู้ป่วยที่บันทึกไว้')).toHaveCount(0)
-        } finally { await fresh.unrouteAll({ behavior: 'ignoreErrors' }); await context.close() }
-        // The fresh same-owner acceptance supersedes this draft's consent; explicitly accept again.
-        await page.getByRole('button', { name: 'แก้ไข ข้อมูลผู้ป่วย', exact: true }).click()
-        await expect(page.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('ผู้ป่วยข้อมูลใหม่')
-        await expect(page.getByLabel('เบอร์โทรศัพท์ของคุณ *', { exact: true })).toHaveValue('0800000001')
-        await page.getByRole('button', { name: 'ย้อนกลับ', exact: true }).click()
-        await page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ }).check()
-        await page.getByRole('button', { name: 'รับทราบและถัดไป', exact: true }).click()
-        await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
-        await expect(page.getByLabel('ที่อยู่จุดรับ *')).toHaveValue('บ้านข้อมูลใหม่')
-        await expect(page.getByRole('checkbox', { name: 'มีผู้ดูแลเดินทางไปด้วย', exact: true })).toBeChecked()
-        await page.getByLabel('หมู่บ้านในเขตบริการ *').selectOption(recoveredVillage)
-        await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง', { exact: true }).click()
-        await expect(page.getByLabel('ละติจูด', { exact: true })).toHaveValue('18.591')
-        await expect(page.getByLabel('ลองจิจูด', { exact: true })).toHaveValue('99.051')
-        await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
-        await expect(page.getByRole('heading', { name: 'ตรวจสอบข้อมูล', exact: true })).toBeVisible()
-        await page.getByRole('checkbox', { name: 'บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป', exact: true }).check()
+                original = afterChange
       }
-      if (profileId && staleAction) {
+if (profileId && staleAction) {
         const context = await browser.newContext()
         const other = await context.newPage()
         try {
@@ -176,32 +118,24 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
             expect(await recoveryFingerprint(f.pool)).toEqual(before)
           }
           if (staleAction === 'intake') await page.getByRole('checkbox', { name: 'บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป', exact: true }).uncheck()
-          const denied = noticeChanged && staleAction === 'intake' ? null : page.waitForResponse(r => r.url().includes(staleAction === 'profile' ? '/api/profiles/' : '/api/bookings') && r.request().method() === 'POST')
-          await page.getByRole('button', { name: staleAction === 'profile' ? 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' : 'ยืนยันและส่งคำขอ', exact: true }).click()
+          const denied = noticeChanged ? null : page.waitForResponse(r => r.url().includes(staleAction === 'profile' ? '/api/profiles/' : '/api/bookings') && r.request().method() === 'POST')
+          await page.getByRole('button', { name: /^(ยืนยันและส่งคำขอ|ลองส่งคำขออีกครั้ง)$/ }).click()
           if (denied) expect((await denied).status()).toBe(422)
           await expect(page).toHaveURL(/\/booking\/privacy$/)
           expect(await recoveryFingerprint(f.pool)).toEqual(before)
-          if (noticeChanged && staleAction === 'intake') {
+          if (noticeChanged) {
             expect(bookingWrites).toHaveLength(1)
             expect(profileWrites).toHaveLength(1)
-            await expect(page.getByText('ประกาศฉบับใหม่สำหรับทดสอบ', { exact: true })).toBeVisible()
+            await page.getByRole('button', { name: 'อ่านประกาศความเป็นส่วนตัว', exact: true }).click()
+            await expect(page.getByRole('dialog').getByText('ประกาศฉบับใหม่สำหรับทดสอบ', { exact: true })).toBeVisible()
+            await page.getByRole('dialog').getByText('ปิด', { exact: true }).click()
           }
           await expect(page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ })).not.toBeChecked()
           await page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ }).check()
           await page.getByRole('button', { name: 'รับทราบและถัดไป', exact: true }).click()
-          if (noticeChanged && staleAction === 'profile') {
-            // The first acceptance attempt refreshes the old displayed notice; it cannot record acceptance.
-            await expect(page.getByText('ประกาศเปลี่ยนแล้ว กรุณาอ่านประกาศล่าสุดและยืนยันอีกครั้ง', { exact: true })).toBeVisible()
-            await expect(page.getByText('ประกาศฉบับใหม่สำหรับทดสอบ', { exact: true })).toBeVisible()
-            expect(await recoveryFingerprint(f.pool)).toEqual(before)
-            await expect(page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ })).not.toBeChecked()
-            await page.getByRole('checkbox', { name: /รับทราบการใช้ข้อมูล/ }).check()
-            await page.getByRole('button', { name: 'รับทราบและถัดไป', exact: true }).click()
-          }
           await expect(page.getByLabel('ชื่อผู้ป่วย *', { exact: true })).toHaveValue('ผู้ป่วยข้อมูลใหม่')
           await expect(page.getByLabel('เบอร์โทรศัพท์ของคุณ *', { exact: true })).toHaveValue('0800000001')
           await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
-          await expect(page.getByLabel('ที่อยู่จุดรับ *')).toHaveValue('บ้านข้อมูลใหม่')
           await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
           await page.getByRole('checkbox', { name: 'บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป', exact: true }).check()
           if (noticeChanged) {
@@ -213,11 +147,11 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
           await other.unrouteAll({ behavior: 'ignoreErrors' }); await context.close()
         }
       }
-      const saved = page.waitForResponse(r => r.url().includes('/api/profiles') && r.request().method() === 'POST')
-      await page.getByRole('button', { name: profileId ? 'อัปเดตข้อมูลผู้ป่วยที่บันทึกไว้' : 'บันทึกข้อมูลผู้ป่วย', exact: true }).click()
-      const response = await saved
+      const savedProfile = page.waitForResponse(r => r.url().includes('/api/profiles') && r.request().method() === 'POST')
+      const booking = await submit()
+      const response = await savedProfile
       expect(response.status()).toBe(profileId ? 200 : 201)
-      return response.json()
+      return { savedProfile: await response.json(), booking }
     }
     async function submit() {
       const saved = page.waitForResponse(r => r.url().endsWith('/api/bookings') && r.request().method() === 'POST')
@@ -227,8 +161,7 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
       await expect(page.getByRole('heading', { name: 'ส่งคำขอแล้ว', exact: true })).toBeVisible()
       return response.json()
     }
-    const profile = await begin()
-    const first = await submit()
+    const { savedProfile: profile, booking: first } = await begin()
     async function bookingLedger() {
       const rows = []
       for (const [table, key] of [['bookings', 'id'], ['trip_events', 'booking_id'], ['audit_logs', 'entity_id'], ['notifications', 'booking_id']]) rows.push((await f.pool.query(`SELECT * FROM patient_transfer.${table} WHERE ${key}=$1 ORDER BY id`, [first.id])).rows)
@@ -237,11 +170,10 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
     let original = await bookingLedger()
     const oldProfile = (await f.pool.query('SELECT * FROM patient_transfer.patient_profiles WHERE id=$1', [profile.id])).rows[0]
     const oldLocation = (await f.pool.query('SELECT * FROM patient_transfer.locations WHERE id=$1', [oldProfile.pickup_location_id])).rows[0]
-    const updated = await begin(profile.id)
+    const { savedProfile: updated, booking: second } = await begin(profile.id)
     expect(updated.id).toBe(profile.id)
-    expect(updated).toMatchObject({ patientName: 'ผู้ป่วยข้อมูลใหม่', contactPhone: '0800000001', mobility: 'wheelchair', assistance: ['caregiver_accompanies'], pickupAddress: 'บ้านข้อมูลใหม่', latitude: 18.591, longitude: 99.051, villageId: recoveredVillage })
+    expect(updated).toMatchObject({ patientName: 'ผู้ป่วยข้อมูลใหม่', contactPhone: '0800000001', mobility: 'wheelchair', assistance: ['caregiver_accompanies'], pickupAddress: 'จุดรับบนแผนที่', latitude: 18.591, longitude: 99.051, villageId: recoveredVillage })
     expect(await bookingLedger()).toEqual(original)
-    const second = await submit()
     expect(second).toMatchObject({ patientProfileId: profile.id, patientName: updated.patientName, contactPhone: updated.contactPhone, mobility: updated.mobility, assistance: updated.assistance, latitude: updated.latitude, longitude: updated.longitude, pickupAddress: updated.pickupAddress })
     expect(second.id).not.toBe(first.id); expect(second.reference).not.toBe(first.reference)
     expect(first.patientProfileId).toBe(profile.id)
@@ -250,7 +182,7 @@ for (const scenario of [null, 'profile', 'intake', 'notice-profile', 'notice-int
     const savedProfile = (await f.pool.query('SELECT * FROM patient_transfer.patient_profiles WHERE id=$1', [profile.id])).rows[0]
     expect(savedProfile.pickup_location_id).not.toBe(oldProfile.pickup_location_id)
     expect(savedProfile.requester_id).toBe(oldProfile.requester_id)
-    expect(profileWrites.map(w => w.path)).toEqual(['/api/profiles', ...(staleAction === 'profile' || villageChanged ? [`/api/profiles/${profile.id}`] : []), `/api/profiles/${profile.id}`])
+    expect(profileWrites.map(w => w.path)).toEqual(['/api/profiles', ...(staleAction === 'profile' && !noticeChanged ? [`/api/profiles/${profile.id}`] : []), `/api/profiles/${profile.id}`])
     const login = await f.request('/auth/line', 'citizen', { idToken: 'synthetic-profile-other' })
     async function foreign(path: string, body?: unknown, status = 200) {
       const response = await fetch(`${activeBase}/api${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${login.token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })

@@ -7,10 +7,10 @@ import type { ApiBooking } from '../src/services/dispatcherApi'
 test.use({actionTimeout:10000})
 test.beforeEach(()=>test.skip(!process.env.DATABASE_TEST_ADMIN_URL,'Run npm run test:destination:integration with a local test database configured'))
 
-async function setup(phase='IN_TRANSIT',chain=false) {
+async function setup(phase='IN_TRANSIT',withNext=false) {
   const f=await startOperationalTestApi()
   let booking=await f.assigned()
-  const next=chain?await f.assigned('11:00',{originKind:'previous_hospital',originLocationId:booking.hospitalLocationId,previousBookingId:booking.id}):null
+  const next=withNext?await f.assigned('11:00'):null
   f.control.now=booking.schedule!.departureAt
   for(const role of ['dispatcher','admin','driver']) await f.login(role)
   booking=await f.command(booking,'START_TRIP',{},'driver')
@@ -91,11 +91,8 @@ test('dispatcher changes an onboard destination through original screens; driver
     f.control.now=row.destinationRevision!.arrivalAt
     const driver=await f.request(`/bookings/${row.id}`,'driver')
     expect(driver.hospitalId).toBe(f.hospital.id)
-    let completed=await f.command(row,'CONFIRM_HANDOVER',{},'driver')
+    const completed=await f.command(row,'CONFIRM_HANDOVER',{},'driver')
     expect(completed.status).toBe('COMPLETED')
-    await f.command(completed,'CONFIRM_READY',{reason:'Too early'},'dispatcher',409)
-    f.control.now=row.destinationRevision!.readyAt
-    completed=await f.command(completed,'CONFIRM_READY',{reason:'Actual readiness verified'})
     expect(completed.resourceHold).toBe(false)
   } finally {if(!page.isClosed()){await page.unrouteAll({behavior:'wait'});await page.close()}await f.close()}
 })
@@ -136,7 +133,7 @@ test('active late continuation can overrun original hours while incident holds a
     const row=await f.request(`/bookings/${incident.id}/destination`,'dispatcher',f.body(incident))
     expect(row.status).toBe('IN_TRANSIT');expect(row.incidentOpen).toBe(true);expect(row.resourceHold).toBe(true)
     expect(Date.parse(row.destinationRevision.arrivalAt)).toBe(Date.parse('2030-01-15T10:05:00Z'))
-    expect(Date.parse(row.destinationRevision.readyAt)).toBe(Date.parse('2030-01-15T10:35:00Z'))
+    expect(Date.parse(row.destinationRevision.readyAt)).toBe(Date.parse('2030-01-15T10:05:00Z'))
     expect((await f.request(`/bookings/${row.id}`,'driver')).hospitalId).toBe(f.hospital.id)
     await f.command(row,'CONFIRM_HANDOVER',{},'driver',409)
     const resolved=await f.command(row,'RESOLVE_INCIDENT',{reason:'Actual incident resolved separately'})
@@ -149,7 +146,7 @@ test('active late continuation can overrun original hours while incident holds a
   } finally {await f.close()}
 })
 
-test('continuation protects downstream intervals and origins atomically, including raw database commits',async()=>{
+test('continuation protects downstream intervals atomically, including raw database commits',async()=>{
   const f=await setup('IN_TRANSIT',true)
   try {
     f.control.remainingMinutes=180

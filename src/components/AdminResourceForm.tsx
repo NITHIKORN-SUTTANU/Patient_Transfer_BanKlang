@@ -33,13 +33,13 @@ export function AdminResourceForm({ kind, previous, catalog, accounts, activeTri
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (pending.current) return
-    if (!capabilities.length) { setError('กรุณาเลือกการรองรับอย่างน้อยหนึ่งรายการ'); return }
+    if (kind === 'vehicles' && !capabilities.length) { setError('กรุณาเลือกการรองรับอย่างน้อยหนึ่งรายการ'); return }
     if (previous && (previous.rosterActive ?? previous.active) && !active && !confirmation) { setConfirmation(true); return }
     pending.current = true; setBusy(true); setError('')
     try {
       await staffRequest(previous ? `/admin/resources/${kind}/${previous.id}` : `/admin/resources/${kind}`, {
-        name, active, capabilities, reason,
-        ...(kind === 'vehicles' ? { plate, vehicleType } : { userId, phone }),
+        name, active, reason,
+        ...(kind === 'vehicles' ? { plate, vehicleType, capabilities } : { userId, phone }),
         ...(previous ? { expectedRevision: previous.revision } : { locationId, availableAt: `${availableAt}:00+07:00`, initialPositionConfirmed: initialConfirmed }),
         ...(previous && kind === 'drivers' && userId !== previous.accountId ? { sameDriverConfirmed } : {}),
       })
@@ -66,13 +66,13 @@ export function AdminResourceForm({ kind, previous, catalog, accounts, activeTri
           <AdminField label="เบอร์ติดต่อ"><input required type="tel" value={phone} onChange={event => setPhone(event.target.value)} /></AdminField>
           {previous && userId !== previous.accountId && <label className="booking-checkbox"><input type="checkbox" required checked={sameDriverConfirmed} onChange={event => setSameDriverConfirmed(event.target.checked)} />ยืนยันว่าเป็นคนขับรายเดิม เปลี่ยนเฉพาะบัญชีเข้าสู่ระบบ</label>}
         </>}
-        <div role="group" aria-label="การรองรับ">{Object.entries(support).map(([code, label]) => <label className="booking-checkbox" key={code}><input type="checkbox" checked={capabilities.includes(code)} onChange={event => setCapabilities(current => event.target.checked ? [...current, code] : current.filter(value => value !== code))} />{label}</label>)}</div>
+        {kind === 'vehicles' && <div role="group" aria-label="การรองรับ">{Object.entries(support).map(([code, label]) => <label className="booking-checkbox" key={code}><input type="checkbox" checked={capabilities.includes(code)} onChange={event => setCapabilities(current => event.target.checked ? [...current, code] : current.filter(value => value !== code))} />{label}</label>)}</div>}
         <AdminField label={kind === 'vehicles' ? 'สถานะรถ' : 'สถานะคนขับ'}><select value={String(active)} onChange={event => { setActive(event.target.value === 'true'); setConfirmation(false) }}><option value="true">เปิดใช้งาน</option><option value="false">ปิดใช้งาน</option></select></AdminField>
         {!previous ? <>
           <AdminField label="ตำแหน่งเริ่มต้นที่ตรวจสอบแล้ว"><select required value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">เลือกศูนย์รถหรือโรงพยาบาล</option>{catalog.locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}</select></AdminField>
           <AdminField label="พร้อมตั้งแต่ (เวลาไทย)"><input required type="datetime-local" value={availableAt} onChange={event => setAvailableAt(event.target.value)} /></AdminField>
           <label className="booking-checkbox"><input type="checkbox" required checked={initialConfirmed} onChange={event => setInitialConfirmed(event.target.checked)} />ตรวจสอบตำแหน่งและความพร้อมเริ่มต้นจริงแล้ว</label>
-          <p className="admin-muted">เพิ่มช่วงเวลาปฏิบัติงานหลังบันทึก ก่อนนำไปมอบหมายงาน</p>
+          {kind === 'drivers' && <p className="admin-muted">เพิ่มช่วงเวลาปฏิบัติงานหลังบันทึก ก่อนนำไปมอบหมายงาน</p>}
         </> : <p className="admin-muted">ตำแหน่งและสถานะรอยืนยันความพร้อมยังคงเดิม เจ้าหน้าที่จัดรถเป็นผู้ยืนยันความพร้อมเดินรถ</p>}
         <AdminField label="เหตุผลในการเปลี่ยนแปลง"><input required maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></AdminField>
         {previous && !active && activeTripCount > 0 && <p role="status" className="admin-warning">พบงานมอบหมายที่ยังไม่เสร็จสิ้น {activeTripCount} งาน — กรุณาตรวจสอบและย้ายคิวก่อนปิดใช้งาน</p>}

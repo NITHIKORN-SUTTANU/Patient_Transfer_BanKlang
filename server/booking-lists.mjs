@@ -15,9 +15,11 @@ function readCursor(value, scope) {
 
 // Each page has one database snapshot, including scoped selection and hydration.
 // Cursors are positions, not authorization; recheck the authenticated scope every page.
-export async function bookingList(client, user, value, serialize, history = false) {
-  check(history ? user.role === 'driver' : ['dispatcher', 'citizen', 'driver'].includes(user.role), 403, 'Scoped booking access required')
-  const scope = `${history ? 'history' : 'bookings'}:${user.role}:${user.id}:${user.driver_id ?? ''}`
+export async function bookingList(client, user, value, serialize, mode = 'bookings') {
+  const history = mode === 'history'
+  const future = mode === 'future'
+  check(mode !== 'bookings' ? user.role === 'driver' : ['dispatcher', 'citizen', 'driver'].includes(user.role), 403, 'Scoped booking access required')
+  const scope = `${mode}:${user.role}:${user.id}:${user.driver_id ?? ''}`
   const cursor = readCursor(value, scope)
   const values = []
   const param = value => { values.push(value); return `$${values.length}` }
@@ -27,7 +29,9 @@ export async function bookingList(client, user, value, serialize, history = fals
   if (history) {
     join = 'JOIN LATERAL(SELECT driver_id FROM patient_transfer.schedules s WHERE s.booking_id=b.id AND s.committed ORDER BY s.created_at DESC,s.id DESC LIMIT 1) latest ON true'
     filter = `latest.driver_id=${param(user.driver_id)} AND b.status IN ${terminal}`
-  } else if (user.role === 'citizen') filter = `b.requester_id=${param(user.id)}`
+  } else if (future) filter = `s.driver_id=${param(user.driver_id)} AND b.status='ASSIGNED' AND b.started_at IS NULL
+    AND (s.departure_at AT TIME ZONE 'Asia/Bangkok')::date>${param(user.service_day)}::date`
+  else if (user.role === 'citizen') filter = `b.requester_id=${param(user.id)}`
   else if (user.role === 'driver') filter = `s.driver_id=${param(user.driver_id)} AND b.status NOT IN ${terminal} AND
     (b.started_at IS NOT NULL OR (${param(user.in_shift)}::boolean AND (s.departure_at AT TIME ZONE 'Asia/Bangkok')::date=${param(user.service_day)}::date))`
   if (cursor) filter += ` AND (b.appointment_at,b.id) ${history ? '<' : '>'} (${param(cursor.at)}::timestamptz,${param(cursor.id)}::uuid)`
@@ -35,15 +39,17 @@ export async function bookingList(client, user, value, serialize, history = fals
   await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
   try {
     const { rows } = await client.query(`SELECT b.id,b.reference,b.status,b.appointment_at AS "appointmentAt",
+      ${future ? 's.departure_at AS "departureAt",s.pickup_at AS "pickupAt",' : ''}
       to_char(b.appointment_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at
       FROM patient_transfer.bookings b ${join} WHERE ${filter}
       ORDER BY b.appointment_at ${direction},b.id ${direction} LIMIT ${pageSize + 1}`, values)
     const page = rows.slice(0, pageSize)
     // Hydrate within the same snapshot in one round trip, then restore cursor order.
-    const hydrated = history ? null : new Map((await bookingRows(client, page.map(row => row.id))).map(row => [row.id, row]))
+    const hydrated = history || future ? null : new Map((await bookingRows(client, page.map(row => row.id))).map(row => [row.id, row]))
     const bookings = []
     for (const row of page) {
       if (history) bookings.push({ id: row.id, reference: row.reference, status: row.status, appointmentAt: row.appointmentAt })
+      else if (future) bookings.push({ id: row.id, reference: row.reference, status: row.status, appointmentAt: row.appointmentAt, departureAt: row.departureAt, pickupAt: row.pickupAt })
       else {
         const booking = hydrated.get(row.id)
         check(booking, 404, 'Booking not found')

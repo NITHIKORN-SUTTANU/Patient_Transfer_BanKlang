@@ -40,7 +40,7 @@ test('normal lifecycle separates Start Trip from departure and retains history',
   for (const type of ['DEPART_ORIGIN', 'CONFIRM_PICKUP', 'DEPART_FOR_HOSPITAL', 'CONFIRM_HANDOVER']) trip = act(trip, { type }, driver)
   assert.equal(trip.status, 'COMPLETED')
   assert.equal(trip.events.length, 8)
-  assert.equal(trip.resourceHold, true)
+  assert.equal(trip.resourceHold, false)
 })
 
 test('identity, order, reasons, and both resources are enforced', () => {

@@ -9,6 +9,14 @@ interface Session { user: CitizenIdentity | null; config: CitizenConfig | null; 
 let state: Session = { user: null, config: null, busy: true, error: '' }
 let token: string | undefined
 let initialization: Promise<void> | undefined
+const bookingValidationMessages: Record<string,string> = {
+  PICKUP_OUTSIDE_AREA: 'จุดรับบนแผนที่อยู่นอกเขตบริการ กรุณาตรวจสอบหมุด หรือกรอกที่อยู่แทนแผนที่หากอยู่ในเขตบริการ',
+  PICKUP_VILLAGE_UNAVAILABLE: 'หมู่บ้านที่เลือกไม่เปิดให้บริการ กรุณาตรวจสอบหมู่บ้านของจุดรับ',
+  BOOKING_HOSPITAL_UNAVAILABLE: 'โรงพยาบาลที่เลือกไม่เปิดรับคำขอ กรุณาเลือกโรงพยาบาลอีกครั้ง',
+  BOOKING_LEAD_TIME: 'กรุณาเลือกวันและเวลานัดล่วงหน้าอย่างน้อย 48 ชั่วโมง',
+  BOOKING_OUTSIDE_HOURS: 'กรุณาเลือกเวลานัดระหว่าง 06:00–16:00 น.',
+  BOOKING_DATE_CLOSED: 'งดให้บริการในวันที่เลือก กรุณาเลือกวันนัดหมายอื่น',
+}
 const listeners = new Set<() => void>()
 function publish(next: Session) { state = next; listeners.forEach(listener => listener()) }
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
@@ -19,9 +27,9 @@ export function citizenError(error: unknown) {
     if (error.status === 401) return 'เซสชันหมดอายุ กรุณายืนยันตัวตนผ่าน LINE อีกครั้ง'
     if (error.status === 403 || error.status === 404) return 'ไม่มีสิทธิ์เข้าถึงรายการนี้ หรือไม่พบรายการ'
     if (error.status === 409) return 'สถานะเปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดก่อนทำรายการอีกครั้ง'
-    if (error.status === 400 || error.status === 422) return 'ข้อมูลไม่ผ่านเงื่อนไข กรุณาตรวจสอบข้อมูล จุดรับ และประกาศความเป็นส่วนตัวล่าสุด'
+    if (error.status === 400 || error.status === 422) return (error.code && Object.hasOwn(bookingValidationMessages,error.code) ? bookingValidationMessages[error.code] : undefined) ?? 'ข้อมูลไม่ผ่านเงื่อนไข กรุณาตรวจสอบข้อมูล จุดรับ และประกาศความเป็นส่วนตัวล่าสุด'
   }
-  return 'เชื่อมต่อบริการไม่ได้ ข้อมูลที่กรอกยังอยู่ กรุณาตรวจสอบรายการจองล่าสุดก่อนส่งซ้ำ'
+  return 'เชื่อมต่อบริการไม่ได้ ข้อมูลที่กรอกยังอยู่'
 }
 export async function citizenRequest<T>(path: string, body?: unknown): Promise<T> {
   if (!token) throw new ApiError(401)

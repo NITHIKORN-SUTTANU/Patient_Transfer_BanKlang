@@ -3,9 +3,10 @@ import { transitionTrip } from '../src/domain/lifecycle.ts'
 import { check, fields, text, uuid } from './errors.mjs'
 import { bookingRow, enqueue, hydrateTrip, saveTrip } from './repository.mjs'
 import {validateCapacityEvidence} from './capacity-evidence.mjs'
+import { pickupCoordinates } from './citizen-fields.mjs'
 
 const allowedCommands = {
-  APPROVE: [], REJECT:['reason','rejectionKind','capacityCheckId'], START_TRIP:[], UNDO_START:['reason'], DEPART_ORIGIN:[], CONFIRM_PICKUP:[],
+  APPROVE: ['pickup'], REJECT:['reason','rejectionKind','capacityCheckId'], START_TRIP:[], UNDO_START:['reason'], DEPART_ORIGIN:[], CONFIRM_PICKUP:[],
   DEPART_FOR_HOSPITAL:[], CONFIRM_HANDOVER:[], CANCEL:['reason'], FAILED_PICKUP:['reason'], REPORT_INCIDENT:['reason'],
   RESOLVE_INCIDENT:['reason'], ABORT:['reason','endedAt','location','disposition'], CONFIRM_READY:['reason'],
   CORRECT_MILESTONE:['target','reason','physicalStateConfirmed'],
@@ -20,8 +21,12 @@ export async function applyCommand(client,row,user,body,now,route) {
   else if(body.command.type==='CANCEL') check(['citizen','dispatcher'].includes(user.role),403,'Cancellation authority required')
   else if(body.command.type==='REPORT_INCIDENT') check(['driver','dispatcher'].includes(user.role),403,'Incident reporting authority required')
   else check(user.role==='dispatcher',403,'Dispatcher authority required')
-  fields(body.command,['type',...keys],['type',...keys.filter(key=>!['capacityCheckId','rejectionKind'].includes(key))])
-  for(const key of keys.filter(key=>!['physicalStateConfirmed','capacityCheckId','rejectionKind'].includes(key))) text(body.command[key],key,1000)
+  fields(body.command,['type',...keys],['type',...keys.filter(key=>!['capacityCheckId','rejectionKind','pickup'].includes(key))])
+  for(const key of keys.filter(key=>!['physicalStateConfirmed','capacityCheckId','rejectionKind','pickup'].includes(key))) text(body.command[key],key,1000)
+  if(Object.hasOwn(body.command,'pickup')) {
+    fields(body.command.pickup,['latitude','longitude'],['latitude','longitude'])
+    pickupCoordinates(body.command.pickup)
+  }
   if(body.command.type==='CORRECT_MILESTONE') check(typeof body.command.physicalStateConfirmed==='boolean',400,'Physical confirmation must be boolean')
   const {rows:[previous]}=await client.query('SELECT * FROM patient_transfer.trip_events WHERE id=$1',[body.eventId])
   if(previous) {
@@ -48,11 +53,21 @@ export async function applyCommand(client,row,user,body,now,route) {
       AND s.committed AND s.released_at IS NULL AND (s.driver_id=$2 OR s.vehicle_id=$3) LIMIT 1`,[row.id,row.driver_id,row.vehicle_id])
     check(!busy.length,409,'Resource already executing another trip')
   }
-  if(body.command.type==='CONFIRM_READY' && row.status==='COMPLETED') {
-    const {rows:[handover]}=await client.query("SELECT recorded_at FROM patient_transfer.trip_events WHERE booking_id=$1 AND command='CONFIRM_HANDOVER' ORDER BY sequence DESC LIMIT 1",[row.id])
-    check(handover && Date.parse(now)>=Math.max(row.ready_at?.getTime()??0,handover.recorded_at.getTime()+30*60000),409,'Turnaround not complete')
-  }
   const updated=transitionTrip(trip,body.command,actor,body.eventId,now,body.expectedExecutionVersion)
+  if(body.command.type==='APPROVE') {
+    const unresolved=row.latitude===null
+    const pickup=body.command.pickup
+    check(unresolved?!!pickup:!pickup,422,unresolved?'Verify pickup coordinates before approval':'Pickup coordinates were already supplied')
+    if(pickup) {
+      const {rowCount}=await client.query(`UPDATE patient_transfer.bookings b SET pickup_point=q.point
+        FROM patient_transfer.service_villages v,
+          (SELECT ST_SetSRID(ST_MakePoint($2,$3),4326)::geography AS point) q
+        WHERE b.id=$1 AND v.id=b.village_id AND v.active
+          AND (ST_Covers(v.boundary,q.point) OR ST_DWithin(v.center,q.point,v.radius_metres))`,
+      [row.id,pickup.longitude,pickup.latitude])
+      check(rowCount,422,'Verified pickup is outside the active service village')
+    }
+  }
   if(['FAILED_PICKUP','ABORT','CANCEL'].includes(body.command.type)) await client.query('UPDATE patient_transfer.schedules SET released_at=$2 WHERE booking_id=$1 AND committed AND released_at IS NULL',[row.id,now])
   if(body.command.type==='ABORT') {
     await client.query(`INSERT INTO patient_transfer.trip_dispositions(booking_id,recorded_by,reason,ended_at,end_location,patient_arrangement,recorded_at)
@@ -63,9 +78,9 @@ export async function applyCommand(client,row,user,body,now,route) {
   }
   if(body.command.type==='RESOLVE_INCIDENT') await client.query(`UPDATE patient_transfer.trip_incidents SET resolved_by=$2,resolved_at=$3,resolution=$4
     WHERE booking_id=$1 AND resolved_at IS NULL`,[row.id,user.id,now,body.command.reason])
-  if(updated.resourceHold && row.vehicle_id && row.driver_id) {
+  if(updated.resourceHold && body.command.type!=='CONFIRM_HANDOVER' && row.vehicle_id && row.driver_id) {
     for(const [key,id] of [['vehicle_id',row.vehicle_id],['driver_id',row.driver_id]]) await client.query(`INSERT INTO patient_transfer.resource_holds(booking_id,${key},starts_at,reason,created_by)
-      VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[row.id,id,now,body.command.reason??'Hospital handover; turnaround/readiness pending',user.id])
+      VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[row.id,id,now,body.command.reason??'Operational readiness hold',user.id])
   }
   if(['CONFIRM_READY','RESOLVE_INCIDENT'].includes(body.command.type)) {
     const {rows:busy}=await client.query(`SELECT 1 FROM patient_transfer.resource_holds h JOIN patient_transfer.schedules s
@@ -79,6 +94,7 @@ export async function applyCommand(client,row,user,body,now,route) {
     await client.query('UPDATE patient_transfer.resource_holds SET ends_at=$2 WHERE booking_id=$1 AND ends_at IS NULL',[row.id,now])
   }
   await saveTrip(client,row,updated,user,body.eventId,now)
+  if(body.command.type==='CONFIRM_HANDOVER') await client.query('UPDATE patient_transfer.schedules SET handover_at=$2 WHERE id=$1',[row.schedule_id,now])
   if(validatedCheck)await client.query('INSERT INTO patient_transfer.capacity_rejections(event_id,source_check_id,validated_check_id) VALUES($1,$2,$3)',[body.eventId,body.command.capacityCheckId,validatedCheck])
   const driverAudience=['REJECT','CANCEL','REPORT_INCIDENT','RESOLVE_INCIDENT','CONFIRM_HANDOVER','ABORT'].includes(body.command.type)
   const recipients=[{recipient:'citizen',recipientId:row.requester_id},...(row.driver_id&&driverAudience?[{recipient:'driver',recipientId:row.driver_id}]:[])]

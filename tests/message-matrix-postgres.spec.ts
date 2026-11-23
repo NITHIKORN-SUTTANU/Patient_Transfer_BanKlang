@@ -47,7 +47,7 @@ async function openLink(page:Page,f:Fixture,path:string,username:string) {
  await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill(username)
  await page.getByLabel('รหัสผ่าน',{exact:true}).fill(syntheticPassword)
  await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click()
- await page.getByRole('link',{name:username.includes('driver')?'เปิดหน้าคนขับ':'เปิดหน้าจัดรถ',exact:true}).click()
+ if (username.includes('driver')) await page.getByRole('link', { name: 'เปิดหน้าคนขับ', exact: true }).click(); else await page.locator('#dispatcher-main').waitFor()
 }
 
 test('request, proposed schedule and final assignment capture minimized recipients/timing and stable retry text',async()=>{
@@ -145,7 +145,7 @@ test('failure, incident, rejection and cancellation audiences use web alerts and
  }
 })
 
-test('destination, ABORTED and real handover messages preserve distinct outcomes and current readiness',async()=>{
+test('destination, ABORTED and real handover messages preserve distinct outcomes without a turnaround estimate',async()=>{
  for(const mode of ['abort','handover']) {
   const f=await startOperationalTestApi()
   try {
@@ -156,7 +156,7 @@ test('destination, ABORTED and real handover messages preserve distinct outcomes
     const revised=await rows(f,booking.id,'DESTINATION_CHANGED')
     const messages=await send(f,revised)
     expect(messages).toHaveLength(2);expect(messages.every(row=>row.text.includes('ปรับโรงพยาบาล'))).toBe(true)
-    expect(revised.every(row=>Date.parse(row.message_data.readyAt!)===Date.parse(booking.destinationRevision!.readyAt))).toBe(true)
+    expect(revised.every(row=>row.message_data.readyAt===null)).toBe(true)
     booking=await f.command(booking,'ABORT',{reason:'PRIVATE_REASON',endedAt:f.control.now,location:'PRIVATE_LOCATION',disposition:'PRIVATE_DISPOSITION'})
    } else {
     f.control.now=new Date(Date.parse(booking.schedule!.arrivalAt)+3600000).toISOString()
@@ -170,7 +170,7 @@ test('destination, ABORTED and real handover messages preserve distinct outcomes
     expect(item.text).not.toContain(mode==='abort'?'COMPLETED':'ABORTED')
     for(const secret of ['PRIVATE_REASON','PRIVATE_LOCATION','PRIVATE_DISPOSITION',booking.patientName])expect(item.text).not.toContain(secret)
    }
-   if(mode==='handover')expect(selected.every(row=>Date.parse(row.message_data.readyAt!)===Date.parse(f.control.now)+30*60000)).toBe(true)
+   if(mode==='handover')expect(selected.every(row=>row.message_data.readyAt===null)).toBe(true)
   } finally {await f.close()}
  }
 })
@@ -212,10 +212,8 @@ test('original dispatcher work queue is authenticated, acknowledges web events o
   const foreign=await fetch(`${f.base}/api/bookings/${booking.id}`,{headers:{Authorization:`Bearer ${token}`}})
   expect(foreign.status).toBe(403)
   await openLink(page,f,'/staff/login?next=%2Fdispatcher','synthetic-dispatcher')
-  await page.locator('summary').filter({hasText:'แจ้งเตือนงานรับส่ง'}).click()
-  const card=page.locator('section').filter({hasText:'รับคำขอแล้ว (REQUESTED) รอเจ้าหน้าที่พิจารณา'}).last()
-  await card.getByRole('button',{name:'รับทราบรายการในเว็บ',exact:true}).click()
-  await expect(card.getByText('รับทราบรายการในเว็บแล้ว',{exact:true})).toBeVisible()
+  await expect(page.getByText('แจ้งเตือนงานรับส่ง',{exact:true})).toHaveCount(0)
+  await f.request(`/dispatcher-alerts/${received.id}/acknowledgement`,'dispatcher',{})
   await f.request(`/dispatcher-alerts/${received.id}/acknowledgement`,'dispatcher',{})
   expect((await f.pool.query('SELECT count(*)::int AS n FROM patient_transfer.dispatcher_alert_receipts WHERE alert_id=$1',[received.id])).rows[0].n).toBe(1)
   expect((await f.request('/dispatcher-alerts')).unread).toBe(queue.unread-1)

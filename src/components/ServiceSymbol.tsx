@@ -1,4 +1,4 @@
-export type ServiceSymbolKind = 'vehicle' | 'person' | 'calendar' | 'settings' | 'home' | 'route' | 'history' | 'people' | 'list' | 'shield' | 'phone' | 'pin' | 'check' | 'clock' | 'hospital' | 'walk' | 'wheel' | 'bed'
+export type ServiceSymbolKind = 'vehicle' | 'person' | 'calendar' | 'settings' | 'home' | 'route' | 'history' | 'people' | 'list' | 'shield' | 'phone' | 'pin' | 'check' | 'clock' | 'hospital' | 'walk' | 'wheel' | 'bed' | 'close'
 
 export function ServiceSymbol({ kind = 'vehicle' }: { kind?: ServiceSymbolKind }) {
   const paths = {
@@ -20,6 +20,7 @@ export function ServiceSymbol({ kind = 'vehicle' }: { kind?: ServiceSymbolKind }
     walk: <><circle cx="13" cy="4" r="2" /><path d="m7 13 3-5h4l3 5h3M12 8l-2 7-4 6m4-6 5 1 2 5" /></>,
     wheel: <><circle cx="14" cy="4" r="2" /><path d="m12 8-1 5h6l3 7h2M12 8h5M8 10a6 6 0 1 0 7 8" /></>,
     bed: <><path d="M3 18V7m18 11v-7H3m0 5h18M3 18v3m18-3v3M5 7h5v4" /><path d="M10 8h8a3 3 0 0 1 3 3" /></>,
+    close: <><circle cx="12" cy="12" r="9" /><path d="m9 9 6 6m0-6-6 6" /></>,
   }
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[kind]}</svg>
 }

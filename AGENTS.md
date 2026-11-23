@@ -2,6 +2,8 @@
 
 ## Start each task
 
+before starting, use caveman skills.
+
 1. Read `docs/plans/INTEGRATION-PLAN.md`, starting with **Resume here**. This is the saved session handoff and implementation progress record.
 2. Read the relevant requirements in `docs/requirements/SRS.md` before planning or changing behavior. Use `docs/requirements/SRS-TH.md` for the identical Thai edition. Consult `docs/README.md` for supporting guides.
 3. Inspect Git status and the actual implementation before editing. Many changes are saved but uncommitted; preserve modified, untracked, moved and intentionally deleted files.

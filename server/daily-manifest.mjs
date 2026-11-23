@@ -33,7 +33,7 @@ export async function dailyManifest(client,user,date,asOf) {
    FROM patient_transfer.trip_events e WHERE e.booking_id=b.id) AS events,
   (SELECT coalesce(json_agg(json_build_object('id',vl.id,'correctsId',vl.corrects_id,'outcome',vl.outcome,'note',vl.notes,'at',vl.recorded_at,'actorId',vl.actor_id) ORDER BY vl.recorded_at,vl.revision),'[]'::json)
    FROM patient_transfer.verification_logs vl WHERE vl.booking_id=b.id) AS verification
- FROM patient_transfer.bookings b JOIN patient_transfer.service_villages sv ON sv.id=b.village_id
+ FROM patient_transfer.bookings b LEFT JOIN patient_transfer.service_villages sv ON sv.id=b.village_id
  JOIN patient_transfer.schedules s ON s.booking_id=b.id AND s.committed
  JOIN patient_transfer.vehicles v ON v.id=s.vehicle_id JOIN patient_transfer.drivers d ON d.id=s.driver_id
  LEFT JOIN patient_transfer.users u ON u.id=d.user_id JOIN patient_transfer.locations o ON o.id=s.origin_location_id

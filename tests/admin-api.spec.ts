@@ -99,8 +99,8 @@ test('admin history and settings exclude demo patient records', async ({ page })
 
 async function resources(page: Page) {
   const fixture = await setup(page)
-  const catalog = { vehicles: [{ id: 'vehicle', name: 'รถจากระบบ', plate: 'TEST-01', vehicleType: 'รถรับส่งทั่วไป', active: true, capabilities: ['standard', 'wheelchair'], revision: 4, locationId: 'depot', availableAt: '2030-01-12T00:00:00Z', held: true }], drivers: [], villages: [], hospitals: [], locations: [{ id: 'depot', name: 'ศูนย์รถทดสอบ', kind: 'depot' }], settings: null }
-  const windows = [{ id: 'window', vehicleId: 'vehicle', driverId: null, startsAt: '2030-01-14T23:00:00Z', endsAt: '2030-01-15T09:00:00Z', revision: 1, retiredAt: null as string | null }]
+  const catalog = { vehicles: [{ id: 'vehicle', name: 'รถจากระบบ', plate: 'TEST-01', vehicleType: 'รถรับส่งทั่วไป', active: true, capabilities: ['standard', 'wheelchair'], revision: 4, locationId: 'depot', availableAt: '2030-01-12T00:00:00Z', held: true }], drivers: [{ id: 'driver', name: 'คนขับจากระบบ', active: true, capabilities: ['standard'], revision: 4, locationId: 'depot', availableAt: '2030-01-12T00:00:00Z', held: false }], villages: [], hospitals: [], locations: [{ id: 'depot', name: 'ศูนย์รถทดสอบ', kind: 'depot' }], settings: null }
+  const windows = [{ id: 'window', vehicleId: null, driverId: 'driver', startsAt: '2030-01-14T23:00:00Z', endsAt: '2030-01-15T09:00:00Z', revision: 1, retiredAt: null as string | null }]
   await page.route('**/api/catalog', route => route.fulfill({ json: catalog }))
   await page.route('**/api/admin/resources/**', route => {
     const body = route.request().postDataJSON(); fixture.writes.push(body)
@@ -118,8 +118,8 @@ async function resources(page: Page) {
     const body = route.request().postDataJSON(); fixture.writes.push(body)
     if (fixture.controls.failWrite) return route.fulfill({ status: 409, json: { error: 'Required', details: { code: 'ASSIGNMENT_WINDOW_REQUIRED' } } })
     Object.assign(windows[0], body, { revision: windows[0].revision + 1, ...(route.request().url().endsWith('/retire') ? { retiredAt: '2030-01-12T00:00:00Z' } : {}) })
-    catalog.vehicles[0].revision++
-    return route.fulfill({ json: { ...windows[0], resourceRevision: catalog.vehicles[0].revision } })
+    catalog.drivers[0].revision++
+    return route.fulfill({ json: { ...windows[0], resourceRevision: catalog.drivers[0].revision } })
   })
   return { ...fixture, catalog, windows }
 }
@@ -169,8 +169,8 @@ test('new vehicle requires initial physical state and does not invent working wi
 
 test('availability editor uses Bangkok time and retains a required window after server rejection', async ({ page }) => {
   const fixture = await resources(page)
-  await enterAdmin(page, '/admin/vehicles')
-  await page.getByRole('button', { name: 'ช่วงเวลารถ', exact: true }).click()
+  await enterAdmin(page, '/admin/drivers')
+  await page.getByRole('button', { name: 'ช่วงเวลาคนขับ', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('combobox', { name: 'ช่วงเวลาที่บันทึกไว้', exact: true }).selectOption('window')
   await expect(dialog.getByLabel('เริ่มช่วงเวลา (เวลาไทย)', { exact: true })).toHaveValue('2030-01-15T06:00')

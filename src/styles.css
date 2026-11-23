@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* Calm Modern Civic Healthcare design tokens (aligned with Ban Klang municipal identity). */
-@theme {
+/* Values read from Figma palette and spacing variables. */
+@theme static {
   --font-sans: 'Noto Sans Thai', sans-serif;
   --color-canvas: #f5f9f8;
   --color-surface: #ffffff;

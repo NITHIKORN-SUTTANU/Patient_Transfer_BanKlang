@@ -30,8 +30,8 @@ async function fixture() {
     await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill(admin?'synthetic-admin':'synthetic-dispatcher')
     await page.getByLabel('รหัสผ่าน',{exact:true}).fill(syntheticPassword)
     await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click()
-    await page.getByRole('link',{name:admin?'เปิดหน้าผู้ดูแลระบบ':'เปิดหน้าจัดรถ',exact:true}).click()
-    await page.locator('summary').filter({hasText:admin?'ปัญหาการส่งข้อความ':'ข้อความที่ส่งไม่สำเร็จ'}).click()
+    if (admin) await page.getByRole('link', { name: 'เปิดหน้าผู้ดูแลระบบ', exact: true }).click(); else await page.locator('#dispatcher-main').waitFor()
+    if(admin) await page.locator('summary').filter({hasText:'ปัญหาการส่งข้อความ'}).click()
   }
   return {...f,booking,event,notification,row,open}
 }
@@ -189,7 +189,7 @@ test('failure pagination and reviewer ownership prevent forged reviews; inactive
   } finally {await f.close()}
 })
 
-test('original dispatcher and admin screens record independent named reviews without retrying or exposing patient data to admin',async({page})=>{
+test('dispatcher hides message failures and admin can review without retrying or seeing patient data',async({page})=>{
   test.setTimeout(60000)
   const f=await fixture()
   try {
@@ -201,19 +201,7 @@ test('original dispatcher and admin screens record independent named reviews wit
     const minimized=await f.request('/admin/notification-failures','admin')
     for(const value of [f.booking.id,f.booking.reference,ids.citizen,f.event,f.booking.patientName,'0800000000',`U${'c'.repeat(32)}`]) expect(JSON.stringify(minimized)).not.toContain(value)
     await f.open(page)
-    const card=page.locator('section').filter({has:page.getByRole('heading',{name:f.booking.reference,exact:true})}).last()
-    await card.getByRole('button',{name:'รับตรวจสอบรายการนี้',exact:true}).click()
-    const note=page.getByRole('textbox',{name:'ผลตรวจสอบและขั้นตอนถัดไป',exact:true})
-    await note.fill('ติดต่อผู้ขอผ่านช่องทางที่ได้รับอนุญาตแล้ว และส่งต่อปัญหาระบบ')
-    await f.pool.query('UPDATE patient_transfer.notifications SET failure_code=failure_code WHERE id=$1',[id])
-    await page.getByRole('button',{name:'บันทึกผลตรวจสอบ',exact:true}).click()
-    await expect(page.getByRole('alert')).toBeVisible()
-    await expect(note).toHaveValue('ติดต่อผู้ขอผ่านช่องทางที่ได้รับอนุญาตแล้ว และส่งต่อปัญหาระบบ')
-    await page.getByRole('button',{name:'โหลดรายการส่งข้อความล่าสุด',exact:true}).click()
-    await page.getByRole('textbox',{name:'ผลตรวจสอบและขั้นตอนถัดไป',exact:true}).fill('ตรวจสอบแล้ว ติดต่อผ่านช่องทางอื่นโดยไม่ส่งซ้ำ')
-    await page.getByRole('button',{name:'บันทึกผลตรวจสอบ',exact:true}).click()
-    await expect(page.getByText('บันทึกผลตรวจสอบแล้ว · ตรวจสอบแล้ว ติดต่อผ่านช่องทางอื่นโดยไม่ส่งซ้ำ',{exact:true})).toBeVisible()
-    expect(await f.row(id)).toMatchObject({status:'FAILED',attempts:1,claimed_by:'00000000-0000-4000-8000-000000000002',technical_claimed_by:null})
+    await expect(page.getByText('ข้อความที่ส่งไม่สำเร็จ',{exact:true})).toHaveCount(0)
     await f.open(page,true)
     await expect(page.getByText(f.booking.patientName,{exact:true})).toHaveCount(0)
     await expect(page.getByText(f.booking.reference,{exact:true})).toHaveCount(0)

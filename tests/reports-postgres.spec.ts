@@ -46,11 +46,13 @@ test('daily files preserve committed history, Thai text, string cells, scope and
   await page.getByLabel('ชื่อผู้ใช้',{exact:true}).fill('synthetic-dispatcher')
   await page.getByLabel('รหัสผ่าน',{exact:true}).fill(syntheticPassword)
   await page.getByRole('button',{name:'เข้าสู่ระบบ',exact:true}).click()
-  await page.getByRole('link',{name:'เปิดหน้าจัดรถ',exact:true}).click()
-  await page.getByText('ส่งออกใบงานรายวัน',{exact:true}).click()
-  await page.getByLabel('วันนัดหมายสำหรับส่งออก').fill('2030-01-15')
+  await page.locator('#dispatcher-main').waitFor()
+  const reportLink=page.getByRole('button',{name:'ส่งออกใบงานรายวัน',exact:true})
+  await reportLink.click()
+  const report=page.getByRole('dialog',{name:'ส่งออกใบงานรายวัน',exact:true})
+  await report.getByLabel('วันนัดหมายสำหรับส่งออก').fill('2030-01-15')
   const download=page.waitForEvent('download')
-  await page.getByRole('button',{name:'ดาวน์โหลด Excel (.xlsx)',exact:true}).click()
+  await report.getByRole('button',{name:'ดาวน์โหลด Excel (.xlsx)',exact:true}).click()
   const file=await download
   expect(file.suggestedFilename()).toBe('dispatch-2030-01-15.xlsx')
   const stream=await file.createReadStream(),chunks:Buffer[]=[]
@@ -62,7 +64,7 @@ test('daily files preserve committed history, Thai text, string cells, scope and
   expect(sheet.getCell('G2').value).toBe('0800000000')
   expect(JSON.stringify(sheet.getRow(2).values)).not.toContain(pending.reference)
   const pdfDownload=page.waitForEvent('download')
-  await page.getByRole('button',{name:'ดาวน์โหลด PDF สำหรับพิมพ์',exact:true}).click()
+  await report.getByRole('button',{name:'ดาวน์โหลด PDF สำหรับพิมพ์',exact:true}).click()
   const pdfFile=await pdfDownload, pdfStream=await pdfFile.createReadStream(),pdfChunks:Buffer[]=[]
   for await(const chunk of pdfStream!)pdfChunks.push(Buffer.from(chunk))
   const loading=getDocument({data:new Uint8Array(Buffer.concat(pdfChunks)),useSystemFonts:false})
@@ -77,6 +79,10 @@ test('daily files preserve committed history, Thai text, string cells, scope and
   await firstPage.render({canvasContext:canvas.getContext('2d'),viewport}).promise
   await writeFile(testInfo.outputPath('daily-manifest.png'),canvas.toBuffer('image/png'))
   await loading.destroy()
+  await expect(report.getByRole('button',{name:'ปิดหน้าต่าง',exact:true})).toHaveCount(0)
+  await report.locator('header').getByRole('button',{name:'ปิด',exact:true}).click()
+  await expect(report).toHaveCount(0)
+  await expect(reportLink).toBeFocused()
   const logs=(await f.pool.query("SELECT * FROM patient_transfer.audit_logs WHERE action='EXPORT_DAILY_MANIFEST' ORDER BY recorded_at,id")).rows
   expect(logs).toHaveLength(2)
   expect(logs.map(r=>r.after_data.format).sort()).toEqual(['pdf','xlsx'])

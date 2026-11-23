@@ -22,7 +22,7 @@ export async function completeCitizenJourney({ browser, citizen, pool, base, con
     await page.getByLabel('ชื่อผู้ใช้', { exact: true }).fill(`synthetic-${role}`)
     await page.getByLabel('รหัสผ่าน', { exact: true }).fill(syntheticPassword)
     await page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true }).click()
-    await page.getByRole('link', { name: role === 'driver' ? 'เปิดหน้าคนขับ' : 'เปิดหน้าจัดรถ', exact: true }).click()
+    if (role === 'driver') await page.getByRole('link', { name: 'เปิดหน้าคนขับ', exact: true }).click(); else await page.locator('#dispatcher-main').waitFor()
     return page
   }
   async function state() {
@@ -38,11 +38,10 @@ export async function completeCitizenJourney({ browser, citizen, pool, base, con
     await dispatch.getByRole('option', { name: /Synthetic vehicle 1/ }).click()
     await dispatch.getByRole('button', { name: 'คนขับ: เลือกคนขับ', exact: true }).click()
     await dispatch.getByRole('option', { name: /Synthetic driver/ }).click()
-    await dispatch.getByRole('button', { name: 'ตรวจสอบและยืนยันตาราง', exact: true }).click()
-    await dispatch.getByRole('button', { name: 'ยืนยันตาราง', exact: true }).click()
+    await dispatch.getByRole('button', { name: 'ตรวจสอบ', exact: true }).click()
     await expect(dispatch.getByText('ยืนยันตารางแล้ว ยังไม่จองรถหรือคนขับจนกว่าจะยืนยันการมอบหมาย')).toBeVisible()
     expect((await pool.query('SELECT count(*)::int AS n FROM patient_transfer.schedules WHERE booking_id=$1 AND committed AND released_at IS NULL', [bookingId])).rows[0].n).toBe(0)
-    await dispatch.getByRole('button', { name: 'ตรวจสอบซ้ำและยืนยันการมอบหมาย', exact: true }).click()
+    await dispatch.getByRole('button', { name: 'ยืนยัน', exact: true }).click()
     await dispatch.getByRole('button', { name: 'ยืนยันการมอบหมาย', exact: true }).click()
     await expect(dispatch).toHaveURL(/dispatcher\/tracking$/)
     const { rows: [schedule] } = await pool.query('SELECT * FROM patient_transfer.schedules WHERE booking_id=$1 AND committed AND released_at IS NULL', [bookingId])

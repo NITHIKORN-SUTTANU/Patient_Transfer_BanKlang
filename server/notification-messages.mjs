@@ -10,7 +10,7 @@ const names={
  TRIP_FAILED_PICKUP:'รับผู้ป่วยไม่สำเร็จ ยกเลิกการรับ (CANCELLED) รถและคนขับยังต้องยืนยันความพร้อม',
  TRIP_REPORT_INCIDENT:'มีเหตุขัดข้อง กรุณาตรวจสอบและติดต่อเทศบาล สถานะระงับความพร้อมยังมีผล',
  TRIP_RESOLVE_INCIDENT:'ยืนยันคลี่คลายเหตุขัดข้องแล้ว กรุณาตรวจสถานะและขั้นตอนเดินทางล่าสุด',
- TRIP_CONFIRM_HANDOVER:'ส่งถึงโรงพยาบาลแล้ว (COMPLETED) ยังต้องเตรียมพร้อมและยืนยันก่อนรับงานต่อ',
+ TRIP_CONFIRM_HANDOVER:'ส่งถึงโรงพยาบาลแล้ว (COMPLETED)',
  TRIP_ABORT:'ยุติการเดินทางโดยไม่ส่งถึงโรงพยาบาล (ABORTED) ติดต่อเทศบาลเพื่อทราบการจัดการต่อ ทรัพยากรยังรอยืนยันความพร้อม',
  TRIP_START_TRIP:'คนขับเริ่มงานแล้ว ยังไม่ออกจากต้นทาง',TRIP_UNDO_START:'แก้ไขการเริ่มงานแล้ว กรุณาตรวจสถานะล่าสุด',
  TRIP_DEPART_ORIGIN:'ออกจากต้นทางไปรับผู้ป่วยแล้ว',TRIP_CONFIRM_PICKUP:'รับผู้ป่วยขึ้นรถแล้ว (PICKED_UP)',
@@ -27,11 +27,10 @@ export function messageSnapshot(row,event,audience,now,meaning='changed') {
   :meaning==='removed'?'/driver':terminal.includes(row.status)?'/driver/history':`/driver/details?booking=${row.id}`
  if(audience==='driver') path=`/staff/login?next=${encodeURIComponent(path)}`
  const timing=['ASSIGNED','ASSIGNMENT_CHANGED','SCHEDULE_CONFIRMED','DESTINATION_CHANGED'].includes(event)&&meaning!=='removed'
- const ready=event==='TRIP_CONFIRM_HANDOVER'?new Date(Math.max(Date.parse(row.ready_at??now),Date.parse(now)+30*60000)).toISOString():null
  return {version:1,event,audience,reference:row.reference,status:row.status,meaning,recordedAt:now,linkPath:path,
   pickupAt:timing?stamp(schedule?.pickupAt??row.pickup_at):null,
   arrivalAt:timing?stamp(schedule?.arrivalAt??row.arrival_at):null,
-  readyAt:ready??(timing?stamp(schedule?.readyAt??row.ready_at):null)}
+  readyAt:null}
 }
 export function eventDescription(data) {
  if(data.event==='ASSIGNMENT_CHANGED'&&data.audience==='driver') {
@@ -56,7 +55,6 @@ export function renderNotification(data,publicAppUrl) {
  const lines=[`คำขอรับส่ง ${data.reference}`,eventDescription(data),`สถานะงานเมื่อบันทึก: ${data.status}`]
  if(data.pickupAt) lines.push(`${data.event==='SCHEDULE_CONFIRMED'?'เวลารับตามตารางเสนอ':'เวลารับที่ยืนยัน'} ${localTime(data.pickupAt)} น.`)
  if(data.arrivalAt) lines.push(`คาดถึงโรงพยาบาล ${localTime(data.arrivalAt)} น.`)
- if(data.readyAt) lines.push(`เตรียมพร้อมอย่างน้อยถึง ${localTime(data.readyAt)} น. และต้องยืนยันความพร้อมแยกต่างหาก`)
  lines.push(`ข้อมูลเหตุการณ์ ${localTime(data.recordedAt)} น. เปิดดูข้อมูลล่าสุดในระบบ`,new URL(data.linkPath,origin).href)
  return lines.join('\n')
 }

@@ -1,3 +1,4 @@
+import { chooseCitizenPickup } from './helpers/citizen-gps'
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -69,11 +70,7 @@ test(`original citizen screens submit and ${outcome} through real API/PostgreSQL
     await page.getByRole('button', { name: 'ยืนยันเวลา', exact: true }).click()
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
     await page.getByRole('checkbox', { name: 'มีผู้ดูแลเดินทางไปด้วย', exact: true }).check()
-    await page.getByLabel('หมู่บ้านในเขตบริการ *').selectOption('30000000-0000-4000-8000-000000000001')
-    await page.getByLabel('ที่อยู่จุดรับ *').fill('บ้านทดสอบ')
-    await page.getByText('เลือกจุดบนแผนที่ไม่ได้? ระบุพิกัดด้วยตนเอง', { exact: true }).click()
-    await page.getByLabel('ละติจูด', { exact: true }).fill('18.59')
-    await page.getByLabel('ลองจิจูด', { exact: true }).fill('99.05')
+    await chooseCitizenPickup(page, 18.59, 99.05)
     await page.getByRole('button', { name: 'ถัดไป →', exact: true }).click()
     await page.getByRole('checkbox', { name: 'บันทึกข้อมูลผู้ป่วยไว้ใช้ครั้งต่อไป', exact: true }).check()
     await page.getByRole('button', { name: 'ยืนยันและส่งคำขอ', exact: true }).click()
@@ -88,9 +85,9 @@ test(`original citizen screens submit and ${outcome} through real API/PostgreSQL
     expect(saved.notice_version).toBe('synthetic-browser-v1')
     expect(saved.line_subject).toBe(`U${'d'.repeat(32)}`)
     expect(saved.patient_profile_id).toBeTruthy()
-    await expect(page.getByText(saved.reference, { exact: true })).toBeVisible()
+    await expect(page.getByTitle(saved.reference, { exact: true })).toBeVisible()
     await page.reload()
-    await expect(page.getByText(saved.reference, { exact: true })).toBeVisible()
+    await expect(page.getByTitle(saved.reference, { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'ดูสถานะการจอง', exact: true }).click()
     if (outcome !== 'cancel') {
       await completeCitizenJourney({ browser, citizen: page, pool, base: `http://127.0.0.1:${port}`, control, bookingId: saved.id, outcome })

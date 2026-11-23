@@ -24,7 +24,7 @@ export interface ServiceCalendar {
 }
 export type TripCommand =
   | { type: 'REVISE_DESTINATION'; hospitalId: string; reason: string }
-  | { type: 'APPROVE' }
+  | { type: 'APPROVE'; pickup?: { latitude: number; longitude: number } }
   | { type: 'CONFIRM_SCHEDULE' }
   | { type: 'ASSIGN'; vehicleId: string; driverId: string }
   | { type: 'MODIFY_ASSIGNMENT'; vehicleId: string; driverId: string; reason: string; arrangement?: { locationId: string; confirmedAt: string; note: string } }
@@ -162,8 +162,6 @@ export function transitionTrip(
       requireRule(!!trip.startedAt, 'Start Trip must be recorded before departure')
       requireRule(!trip.incidentOpen, 'Dispatcher must resolve the incident before normal progression')
       next.status = target
-      // Completion alone does not waive turnaround or a readiness hold.
-      if (target === 'COMPLETED') next.resourceHold = true
       break
     }
     case 'CANCEL':

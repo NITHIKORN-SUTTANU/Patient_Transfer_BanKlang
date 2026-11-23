@@ -5,6 +5,7 @@ export class ApiError extends Error {
     public readonly code?: string,
     public readonly serverMessage?: string,
     public readonly alternativeTimes?: string[],
+    public readonly details?: unknown,
   ) {
     super(`API request failed (${status})`)
   }

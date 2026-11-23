@@ -214,12 +214,6 @@ export function createApi({pool,clock=()=>new Date().toISOString(),route=osrmRou
               WHERE s.${key}=$1 AND s.committed AND s.released_at IS NULL AND b.started_at IS NOT NULL
               AND b.status NOT IN ('COMPLETED','CANCELLED','REJECTED','ABORTED') LIMIT 1`,[id])
             check(!busy.length,409,'Resource still executing an active trip')
-            const {rows:turnaround}=await client.query(`SELECT 1 FROM patient_transfer.resource_holds h JOIN patient_transfer.bookings b ON b.id=h.booking_id
-              JOIN patient_transfer.trip_events e ON e.booking_id=b.id AND e.command='CONFIRM_HANDOVER'
-              JOIN patient_transfer.schedules s ON s.booking_id=b.id AND s.committed AND s.released_at IS NULL
-              WHERE h.${key}=$1 AND h.ends_at IS NULL AND b.status='COMPLETED'
-              AND greatest(s.ready_at,(SELECT r.ready_at FROM patient_transfer.trip_route_legs r WHERE r.schedule_id=s.id ORDER BY version DESC LIMIT 1),e.recorded_at+interval '30 minutes')>$2 LIMIT 1`,[id,now])
-            check(!turnaround.length,409,'Turnaround not complete')
             const {rows:equal}=await client.query(`SELECT 1 FROM patient_transfer.resource_holds WHERE ${key}=$1 AND ends_at IS NULL AND starts_at >= $2 LIMIT 1`,[id,now])
             check(!equal.length,409,'Readiness must follow hold event')
             // Serialize finalization across independently confirmed resources.
@@ -278,8 +272,8 @@ export function createApi({pool,clock=()=>new Date().toISOString(),route=osrmRou
         if(request.method==='GET'&&path==='/api/admin/availability') {send(200,await listWindows(client,user));return}
         if(request.method==='GET'&&path==='/api/admin/service-data') {send(200,await serviceData(client,user));return}
         if(request.method==='GET'&&path==='/api/profiles') {send(200,await listProfiles(client,user));return}
-        if(request.method==='GET'&&path==='/api/driver/history') {
-          send(200,await bookingList(client,user,new URL(request.url,'http://localhost').searchParams.get('cursor'),publicBooking,true));return
+        if(request.method==='GET'&&(path==='/api/driver/history'||path==='/api/driver/future')) {
+          send(200,await bookingList(client,user,new URL(request.url,'http://localhost').searchParams.get('cursor'),publicBooking,path.endsWith('/history')?'history':'future'));return
         }
         if(request.method==='GET'&&path==='/api/admin/audit') {
           check(user.role==='admin',403,'Administrator authority required')
