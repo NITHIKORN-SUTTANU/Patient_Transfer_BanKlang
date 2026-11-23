@@ -4,7 +4,7 @@ import { dispatcherError, viewBooking, type ApiBooking, type Catalog } from './d
 import { staffRequest, useStaffSession } from './staffSession'
 import { bookingPages } from './bookingPages'
 
-export interface DriverHistory { id: string; reference: string; status: string; appointmentAt: string }
+export interface DriverHistory { id: string; reference: string; status: string; appointmentAt: string; villageName?: string; hospitalName?: string }
 export type DriverPhase = 'assigned' | 'started' | 'going_to_pickup' | 'patient_onboard' | 'going_to_hospital' | 'delivered'
 export const driverStages: DriverPhase[] = ['assigned', 'started', 'going_to_pickup', 'patient_onboard', 'going_to_hospital', 'delivered']
 export const driverLabels: Record<DriverPhase, string> = { assigned: 'ได้รับมอบหมาย', started: 'เริ่มงานแล้ว · ยังไม่ออกจากต้นทาง', going_to_pickup: 'กำลังไปรับผู้ป่วย', patient_onboard: 'รับผู้ป่วยขึ้นรถแล้ว', going_to_hospital: 'กำลังเดินทางไปโรงพยาบาล', delivered: 'ส่งถึงโรงพยาบาล' }
@@ -32,8 +32,15 @@ export function useDriverData() {
       if (!active) return
       setMore({ jobs: jobs.hasMore, history: history.hasMore })
       setData({ jobs: jobs.bookings.filter(row => row.driverId === session.user?.driverId && row.schedule && ['ASSIGNED', 'PICKING_UP', 'PICKED_UP', 'IN_TRANSIT'].includes(row.status)).map(row => viewBooking(row, { ...catalog, vehicles: [], drivers: [], locations: [], depotLocationId: null })),
-        // Whitelist history fields: never retain patient/contact/location data in history state.
-        history: history.bookings.map(row => ({ id: row.id, reference: row.reference, status: row.status, appointmentAt: row.appointmentAt })) })
+        // Whitelist history fields: never retain patient/contact/street-address PII in history state.
+        history: history.bookings.map(row => ({
+          id: row.id,
+          reference: row.reference,
+          status: row.status,
+          appointmentAt: row.appointmentAt,
+          ...(row.villageName ? { villageName: row.villageName } : {}),
+          ...(row.hospitalName ? { hospitalName: row.hospitalName } : {}),
+        })), })
     }).catch(error => { if (active) { setData(null); setError(dispatcherError(error)) } }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [session.user?.driverId, version, pages, historyPages])

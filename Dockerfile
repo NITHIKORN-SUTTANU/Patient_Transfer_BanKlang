@@ -17,6 +17,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json ./
 COPY server ./server
 COPY src/domain ./src/domain
+COPY src/data ./src/data
 COPY scripts/database ./scripts/database
 COPY database ./database
 USER node

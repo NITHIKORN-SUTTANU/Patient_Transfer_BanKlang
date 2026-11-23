@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { transitionTrip } from '../src/domain/lifecycle.ts'
 import { assignProductionTrip, modifyProductionTrip } from '../src/domain/assignment.ts'
 import { confirmReservation } from '../src/domain/scheduling.ts'
+import { checkCitizenSlotCapacity } from '../src/domain/capacity.ts'
 import { ApiError, check, fields, text, uuid } from './errors.mjs'
 import { citizenFields, citizenText } from './citizen-fields.mjs'
 import { requireCurrentConsent } from './consents.mjs'
@@ -346,6 +347,35 @@ export async function createBooking(client,user,body,now,noticeVersion) {
   check(clock>='06:20:00.000'&&clock<='15:50:00.000',422,'Appointment cannot fit the service-hour window')
   const {rows:closures}=await client.query('SELECT 1 FROM patient_transfer.service_closures WHERE closed_on=$1 AND active',[date])
   check(!closures.length,422,'Service closed on appointment date')
+  const {rows:vehicles}=await client.query(`SELECT v.id,v.name,v.active,to_json(v.capabilities) AS capabilities,
+    EXISTS(SELECT 1 FROM patient_transfer.resource_holds h WHERE h.vehicle_id=v.id AND h.ends_at IS NULL) AS held
+    FROM patient_transfer.vehicles v`)
+  if(vehicles.length>0) {
+    const {rows:activeBookings}=await client.query(`SELECT b.id,b.appointment_at AS "appointmentAt",b.hospital_id AS "hospitalId",
+      COALESCE(b.hospital_name_snapshot,h.name) AS "hospitalName",b.mobility,b.status,s.vehicle_id AS "vehicleId",
+      CASE WHEN s.departure_at IS NOT NULL THEN json_build_object('departureAt',s.departure_at,'pickupAt',s.pickup_at,'arrivalAt',s.arrival_at,'readyAt',s.ready_at) ELSE NULL END AS schedule
+      FROM patient_transfer.bookings b
+      LEFT JOIN patient_transfer.hospitals h ON h.id=b.hospital_id
+      LEFT JOIN LATERAL (
+        SELECT vehicle_id,departure_at,pickup_at,arrival_at,ready_at FROM patient_transfer.schedules
+        WHERE booking_id=b.id AND released_at IS NULL ORDER BY committed DESC,routed_at DESC LIMIT 1
+      ) s ON TRUE
+      WHERE b.status NOT IN ('COMPLETED','CANCELLED','REJECTED','ABORTED')`)
+    const capacity=checkCitizenSlotCapacity({
+      appointmentAt:body.appointmentAt,
+      hospitalId:body.hospitalId,
+      mobility:body.mobility,
+      vehicles,
+      existingBookings:activeBookings,
+      nowMs:Date.parse(now),
+    })
+    check(capacity.available,409,capacity.message,{
+      code:'CAPACITY_FULL',
+      reason:capacity.reason,
+      windowLabel:capacity.window.windowLabel,
+      alternativeTimes:capacity.alternativeTimes,
+    })
+  }
   const id=randomUUID()
   await client.query(`INSERT INTO patient_transfer.bookings(id,reference,requester_id,patient_profile_id,consent_id,patient_name,requester_name,contact_phone,
     pickup_address,pickup_point,landmark,village_id,hospital_id,mobility,submitted_at,appointment_at,booking_for,assistance,intake_request_id,intake_request_hash)

@@ -1,4 +1,4 @@
-.driver-shell { min-height:100dvh; padding-bottom:100px; background:var(--color-canvas); color:#1c3836; font-size: 16px; line-height:1.5; }
+.driver-shell { min-height:100dvh; padding-bottom:100px; background:var(--color-canvas); color:var(--color-ink); font-size: 16px; line-height:1.58; }
 .driver-shell *, .driver-modal * { box-sizing:border-box; }
 .driver-shell h2 { font-size:17px; font-weight:700; margin:0 2px 12px; }
 .driver-shell h3 { font-weight:700; margin-bottom:8px; }
@@ -93,4 +93,4 @@
 .driver-modal .driver-helper { margin:0 0 4px; }
 .driver-modal .driver-arrow { margin:12px 0; }
 .driver-modal h3 { margin:0 0 24px; }
-.driver-failed textarea { width: 100%; min-height: 120px; padding: 16px; border: 1px solid var(--color-border); border-radius: 14px; background: white; color: var(--color-ink); font: inherit; resize: vertical; }
+.driver-failed textarea { width: 100%; min-height: 120px; padding: 14px 16px; border: 1.5px solid #96ada6; border-radius: 12px; background: white; color: var(--color-ink); font: inherit; resize: vertical; }

@@ -32,7 +32,7 @@ export function DestinationRevisionForm({booking,catalog,onSaved,onBusyChange}:{
     } catch(error) {setError(dispatcherError(error));if(!commit) setProposal(null)}
     finally {pending.current=false;setBusy(false);onBusyChange(false)}
   }
-  return <section className="dispatch-detail-section"><h3>เปลี่ยนโรงพยาบาลหลังรับผู้ป่วย</h3><p>ใช้รถและคนขับเดิม คงสถานะจริงและประวัติการรับผู้ป่วย หากมีเหตุขัดข้องต้องยืนยันคลี่คลายแยกต่างหาก</p><fieldset disabled={busy}>
+  return <section className="dispatch-detail-section dispatch-destination-section"><h3>เปลี่ยนโรงพยาบาลหลังรับผู้ป่วย</h3><p>ใช้รถและคนขับเดิม คงสถานะจริงและประวัติการรับผู้ป่วย หากมีเหตุขัดข้องต้องยืนยันคลี่คลายแยกต่างหาก</p><fieldset disabled={busy}>
     <label className="booking-field">โรงพยาบาลปลายทางใหม่<select value={hospitalId} onChange={e=>{setHospitalId(e.target.value);invalidate()}}><option value="">เลือกโรงพยาบาล</option>{catalog.hospitals.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
     <label className="booking-field">สถานที่ปัจจุบันที่ตรวจสอบ<input maxLength={1000} value={label} onChange={e=>{setLabel(e.target.value);invalidate()}} /></label>
     <label className="booking-field">ละติจูดปัจจุบัน<input type="number" step="any" min="-90" max="90" value={latitude} onChange={e=>{setLatitude(e.target.value);invalidate()}} /></label>

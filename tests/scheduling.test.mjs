@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { calculateSchedule, confirmReservation, proposeReservation, validateReservations, reviewCalendarChange } from '../src/domain/scheduling.ts'
+import { checkCitizenSlotCapacity, computeBackwardBlockedWindow } from '../src/domain/capacity.ts'
 import { assignProductionTrip } from '../src/domain/assignment.ts'
 import { createProductionTrip, transitionTrip } from '../src/domain/lifecycle.ts'
 
@@ -206,4 +207,46 @@ test('dispatcher assignment commits lifecycle and both reservations together or 
   assert.equal(failed.ok, false)
   assert.equal(failed.state, result.state)
   assert.equal(failed.state.trips[1].status, 'SCHEDULED')
+})
+
+test('citizen backward-scheduled capacity engine blocks overlapping slots and incompatible mobility', () => {
+  const appt = '2026-11-15T13:30:00+07:00'
+  const win = computeBackwardBlockedWindow(appt, { hospitalName: 'โรงพยาบาลลำพูน' })
+  assert.ok(win)
+  // T_appt=13:30 -> T_target=13:10 -> T_pickup=12:45 (25m) -> departure=12:15 (30m), free=13:30+25+30=14:25
+  assert.equal(win.pickupClock, '12:45')
+  assert.equal(win.departureClock, '12:15')
+  assert.equal(win.freeClock, '14:25')
+
+  const twoVehicles = [
+    { id: 'v1', active: true, capabilities: ['standard', 'wheelchair'] },
+    { id: 'v2', active: true, capabilities: ['standard'] },
+  ]
+  const existing = [
+    { id: 'b1', appointmentAt: appt, mobility: 'standard', status: 'REQUESTED', hospitalName: 'โรงพยาบาลลำพูน' },
+    { id: 'b2', appointmentAt: appt, mobility: 'standard', status: 'APPROVED', hospitalName: 'โรงพยาบาลลำพูน' },
+  ]
+  const thirdOverlap = checkCitizenSlotCapacity({
+    appointmentAt: appt,
+    hospitalName: 'โรงพยาบาลลำพูน',
+    mobility: 'standard',
+    vehicles: twoVehicles,
+    existingBookings: existing,
+    nowMs: Date.parse('2026-11-10T06:00:00+07:00'),
+  })
+  assert.equal(thirdOverlap.available, false)
+  assert.equal(thirdOverlap.reason, 'window_full')
+  assert.match(thirdOverlap.message, /ช่วงเวลาเต็ม \/ รถไม่ว่าง/)
+  assert.ok(thirdOverlap.alternativeTimes.length > 0)
+
+  const stretcherBlocked = checkCitizenSlotCapacity({
+    appointmentAt: '2026-11-15T09:00:00+07:00',
+    hospitalName: 'โรงพยาบาลลำพูน',
+    mobility: 'stretcher',
+    vehicles: twoVehicles,
+    existingBookings: [],
+    nowMs: Date.parse('2026-11-10T06:00:00+07:00'),
+  })
+  assert.equal(stretcherBlocked.available, false)
+  assert.equal(stretcherBlocked.reason, 'equipment_unavailable')
 })

@@ -22,12 +22,14 @@ function explanation(code:string) {
   if(code==='LINE_NETWORK'||code.startsWith('LINE_HTTP_5')) return 'เชื่อมต่อผู้ให้บริการไม่สำเร็จ'
   return 'ส่งข้อความไม่สำเร็จ — ตรวจสอบผู้รับและการตั้งค่ากับผู้รับผิดชอบระบบ'
 }
-export function NotificationFailures({admin=false}:{admin?:boolean}) {
+export function NotificationFailures({admin=false,onPendingChange}:{admin?:boolean;onPendingChange?:(pending:number)=>void}) {
   const [queue,setQueue]=useState<Queue|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(true),[version,setVersion]=useState(0),[cursor,setCursor]=useState<string|null>(null)
   const path=admin?'/admin/notification-failures':'/notification-failures'
+  const notifyRef=useRef(onPendingChange)
+  useEffect(()=>{notifyRef.current=onPendingChange},[onPendingChange])
   useEffect(()=>{
     let active=true
-    staffRequest<Queue>(`${path}${cursor?`?cursor=${encodeURIComponent(cursor)}`:''}`).then(data=>{if(active)setQueue(data)}).catch(error=>{if(active){setQueue(null);setError(dispatcherError(error))}}).finally(()=>{if(active)setLoading(false)})
+    staffRequest<Queue>(`${path}${cursor?`?cursor=${encodeURIComponent(cursor)}`:''}`).then(data=>{if(active){setQueue(data);notifyRef.current?.(data.pending??0)}}).catch(error=>{if(active){setQueue(null);setError(dispatcherError(error))}}).finally(()=>{if(active)setLoading(false)})
     return()=>{active=false}
   },[path,cursor,version])
   function reload(){setError('');setLoading(true);setVersion(value=>value+1)}

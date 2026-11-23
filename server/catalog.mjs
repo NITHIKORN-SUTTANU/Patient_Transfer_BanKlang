@@ -3,6 +3,22 @@ export async function catalog(client,user) {
     FROM patient_transfer.hospitals h JOIN patient_transfer.locations l ON l.id=h.location_id WHERE h.active AND l.active ORDER BY h.name`)
   const {rows:villages}=await client.query('SELECT id,village_number AS number,name FROM patient_transfer.service_villages WHERE active ORDER BY village_number')
   const result={hospitals,villages}
+  if(user.role==='citizen') {
+    const {rows:vehicles}=await client.query(`SELECT v.id,v.name,v.plate,v.active,to_json(v.capabilities) AS capabilities,
+      EXISTS(SELECT 1 FROM patient_transfer.resource_holds h WHERE h.vehicle_id=v.id AND h.ends_at IS NULL) AS held FROM patient_transfer.vehicles v ORDER BY v.name`)
+    const {rows:activeBookings}=await client.query(`SELECT ('slot-' || row_number() OVER (ORDER BY b.appointment_at, b.submitted_at)) AS "slotToken",
+      b.appointment_at AS "appointmentAt",b.hospital_id AS "hospitalId",
+      COALESCE(b.hospital_name_snapshot,h.name) AS "hospitalName",b.mobility,b.status,s.vehicle_id AS "vehicleId",
+      CASE WHEN s.departure_at IS NOT NULL THEN json_build_object('departureAt',s.departure_at,'pickupAt',s.pickup_at,'arrivalAt',s.arrival_at,'readyAt',s.ready_at) ELSE NULL END AS schedule
+      FROM patient_transfer.bookings b
+      LEFT JOIN patient_transfer.hospitals h ON h.id=b.hospital_id
+      LEFT JOIN LATERAL (
+        SELECT vehicle_id,departure_at,pickup_at,arrival_at,ready_at FROM patient_transfer.schedules
+        WHERE booking_id=b.id AND released_at IS NULL ORDER BY committed DESC,routed_at DESC LIMIT 1
+      ) s ON TRUE
+      WHERE b.status NOT IN ('COMPLETED','CANCELLED','REJECTED','ABORTED')`)
+    Object.assign(result,{vehicles,activeBookings})
+  }
   if(['dispatcher','admin'].includes(user.role)) {
     const {rows:vehicles}=await client.query(`SELECT v.id,v.name,v.plate,v.active,to_json(v.capabilities) AS capabilities,
       EXISTS(SELECT 1 FROM patient_transfer.resource_holds h WHERE h.vehicle_id=v.id AND h.ends_at IS NULL) AS held FROM patient_transfer.vehicles v ORDER BY v.name`)

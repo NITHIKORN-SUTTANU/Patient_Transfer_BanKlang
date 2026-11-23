@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { apiRequest, ApiError } from './api'
+import { activateInteractiveDemo, isDemoModeAllowed, isInteractiveDemoActive } from './interactiveDemo'
 import { LineConnectionError } from './lineAuthentication'
 
 export interface CitizenConfig { liffId: string; lineEnabled: boolean; noticeVersion: string; noticeText: string; contactPhone: string }
@@ -14,6 +15,7 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 export function citizenError(error: unknown) {
   if (error instanceof LineConnectionError) return error.message
   if (error instanceof ApiError) {
+    if (error.code === 'CAPACITY_FULL') return error.serverMessage || 'ช่วงเวลาเต็ม / รถไม่ว่าง สำหรับอุปกรณ์หรือเวลานัดหมายนี้ กรุณาเลือกเวลาอื่น'
     if (error.status === 401) return 'เซสชันหมดอายุ กรุณายืนยันตัวตนผ่าน LINE อีกครั้ง'
     if (error.status === 403 || error.status === 404) return 'ไม่มีสิทธิ์เข้าถึงรายการนี้ หรือไม่พบรายการ'
     if (error.status === 409) return 'สถานะเปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดก่อนทำรายการอีกครั้ง'
@@ -49,6 +51,12 @@ export function initializeCitizen(reconnect = false) {
     try {
       const config = await apiRequest<CitizenConfig>('/config')
       publish({ ...state, config })
+      if (isInteractiveDemoActive()) {
+        token = 'demo-token-citizen'
+        const user = await citizenRequest<CitizenIdentity>('/auth/me')
+        publish({ config, user, busy: false, error: '' })
+        return
+      }
       if (!config.lineEnabled || !config.liffId) {
         publish({ ...state, busy: false, error: 'บริการจองผ่าน LINE ยังไม่พร้อม กรุณาติดต่อเทศบาล' }); return
       }
@@ -68,5 +76,13 @@ export function initializeCitizen(reconnect = false) {
     }
   })().finally(() => { initialization = undefined })
   return initialization
+}
+export function enterDemoCitizen() {
+  if (!isDemoModeAllowed()) return Promise.resolve()
+  activateInteractiveDemo('citizen')
+  if (state.user && token === 'demo-token-citizen') return Promise.resolve()
+  token = undefined
+  publish({ ...state, user: null, busy: true, error: '' })
+  return initializeCitizen()
 }
 export function useCitizenSession() { return useSyncExternalStore(subscribe, () => state) }

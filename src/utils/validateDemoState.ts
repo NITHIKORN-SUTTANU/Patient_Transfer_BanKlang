@@ -1,5 +1,5 @@
-import { isActorId } from '../data/actors'
-import type { DemoState } from '../data/seed'
+import { isActorId } from '../data/actors.ts'
+import type { DemoState } from '../data/seed.ts'
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 const timestamp = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value))

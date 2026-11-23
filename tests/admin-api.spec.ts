@@ -224,3 +224,28 @@ test('service master failure preserves coordinates, reason and revision for revi
   await expect(dialog.getByLabel('เหตุผลในการเปลี่ยนแปลง',{exact:true})).toHaveValue('พิกัดที่เทศบาลอนุมัติ')
   expect(fixture.writes[0]).toMatchObject({expectedRevision:3,latitude:18.62})
 })
+
+test('admin dashboard renders live aggregated executive analytics from GET /api/admin/analytics when no demo overlay is active', async ({ page }) => {
+  await setup(page)
+  await page.route('**/api/admin/analytics', route => route.fulfill({
+    json: {
+      total_bookings: 12,
+      statuses: [{ status: 'COMPLETED', count: 9 }, { status: 'CANCELLED', count: 2 }, { status: 'REQUESTED', count: 1 }],
+      monthly: [{ month: '2026-11', count: 12 }],
+      hourly: [{ hour: 9, count: 7 }, { hour: 13, count: 5 }],
+      villages: [{ villageNumber: 1, villageName: 'บ้านกลาง', count: 8 }, { villageNumber: 2, villageName: 'บ้านท่าล้อ', count: 4 }],
+      mobility: [{ mobility: 'standard', count: 7 }, { mobility: 'wheelchair', count: 4 }, { mobility: 'stretcher', count: 1 }],
+      hospitals: [{ hospitalName: 'โรงพยาบาลลำพูน', count: 9 }, { hospitalName: 'โรงพยาบาลป่าซาง', count: 3 }],
+      active_days: 4,
+      active_vehicles: 3,
+      total_vehicles: 5,
+    },
+  }))
+  await enterAdmin(page)
+  const analytics = page.locator('.admin-analytics-panel')
+  await expect(analytics).toContainText('12 รายการ')
+  await expect(analytics).toContainText('75%')
+  await expect(analytics).toContainText('พ.ย. 69')
+  await expect(analytics).toContainText('หมู่ 1 บ้านกลาง')
+  await expect(analytics).toContainText('โรงพยาบาลลำพูน')
+})

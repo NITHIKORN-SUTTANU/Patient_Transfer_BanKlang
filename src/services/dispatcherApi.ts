@@ -3,6 +3,8 @@ import { createSeedState, type Booking, type DemoState } from '../data/seed'
 import { ApiError } from './api'
 import { staffRequest, useStaffSession } from './staffSession'
 import { bookingPages } from './bookingPages'
+import { bookingToApiBooking } from '../utils/seedCsvImport'
+import { useSeedOverlay } from './seedOverlay'
 
 export interface Schedule { departureAt: string; pickupAt: string; arrivalAt: string; readyAt: string; pickupWaitingMinutes: number; originLocationId: string; originKind: string; previousBookingId?: string }
 export interface ApiBooking {
@@ -12,6 +14,7 @@ export interface ApiBooking {
   patientName: string; appointmentAt: string; hospitalId: string; contactPhone: string; pickupAddress: string;
   latitude: number; longitude: number; mobility: string; vehicleId: string | null; driverId: string | null;
   startedAt: string | null; incidentOpen: boolean; resourceHold: boolean; scheduleReviewRequired: boolean;
+  incidentReason?: string | null; incidentReportedAt?: string | null;
   originName?: string; vehicleName?: string;
   hospitalName?: string; hospitalLocationId?: string; depotLocationId?: string;
   configurationChanges?: {id: string; type: string; proposed: {name?: string; date?: string; active?: boolean; latitude?: number; longitude?: number; radiusMetres?: number}}[];
@@ -22,7 +25,7 @@ export interface ApiBooking {
 export interface DestinationRevision { version: number; arrivalAt: string; readyAt: string; latenessSeconds: number; appointmentLatenessSeconds: number; originalHospitalName: string; originalArrivalAt: string; recordedAt: string }
 export interface Catalog {
   hospitals: { id: string; name: string; location_id?: string }[];
-  vehicles: { id: string; name: string; plate: string; active: boolean; held: boolean }[];
+  vehicles: { id: string; name: string; plate: string; active: boolean; held: boolean; capabilities?: string[] }[];
   drivers: { id: string; name: string; active: boolean; held: boolean }[];
   locations: { id: string; name: string; kind: string }[]; depotLocationId: string | null;
   configurationRevision?: number;
@@ -34,6 +37,9 @@ export const statusLabels: Record<string, string> = {
 }
 export function dispatcherError(error: unknown) {
   if (error instanceof ApiError) {
+    if (error.status === 409 && (error.code === 'RESOURCE_TIME_CONFLICT' || error.code === 'RESOURCE_INCIDENT_HOLD') && error.message) {
+      return error.message
+    }
     if (error.status === 409) return 'ข้อมูลหรือความพร้อมเปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดและตรวจสอบอีกครั้ง'
     if (error.status === 503) return 'บริการคำนวณเส้นทางยังไม่พร้อม ไม่มีการยืนยันตารางใหม่'
     if (error.status === 401) return 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง'
@@ -48,6 +54,7 @@ export function viewBooking(row: ApiBooking, catalog: Catalog): Booking {
   return {
     id: row.id, patientName: row.patientName, appointmentAt: row.appointmentAt, status, apiStatus: row.status,
     revision: row.revision, executionVersion: row.executionVersion, incidentOpen: row.incidentOpen, resourceHold: row.resourceHold,
+    incidentReason: row.incidentReason ?? undefined, incidentReportedAt: row.incidentReportedAt ?? undefined,
     startedAt: row.startedAt, originName: row.originName, vehicleName: row.vehicleName,
     destinationRevision: row.destinationRevision ?? undefined,
     vehicleId: row.vehicleId ?? undefined, driverId: row.driverId ?? undefined,
@@ -63,6 +70,7 @@ export function viewBooking(row: ApiBooking, catalog: Catalog): Booking {
 }
 export function useDispatcherData(bookingId?: string) {
   const session = useStaffSession()
+  const overlay = useSeedOverlay()
   const [data, setData] = useState<{ state: DemoState; catalog: Catalog; rows: ApiBooking[] } | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -72,20 +80,59 @@ export function useDispatcherData(bookingId?: string) {
   useEffect(() => {
     let active = true
     Promise.all([bookingPages<ApiBooking>(staffRequest, '/bookings', pages), staffRequest<Catalog>('/catalog')]).then(async ([result, catalog]) => {
-      if (bookingId && !result.bookings.some(row => row.id === bookingId)) {
+      const inOverlay = Boolean(bookingId && overlay.active && overlay.bookings.some(b => b.id === bookingId))
+      if (bookingId && !inOverlay && !result.bookings.some(row => row.id === bookingId)) {
         const focused = await staffRequest<ApiBooking>(`/bookings/${encodeURIComponent(bookingId)}`)
         if (focused.id !== bookingId) throw new ApiError(404)
         result.bookings.push(focused)
       }
       if (!active) return
       setHasMore(result.hasMore)
-      setData({ catalog, rows: result.bookings, state: { ...createSeedState(), bookings: result.bookings.map(row => viewBooking(row, catalog)),
-        vehicles: catalog.vehicles.map(v => ({ id: v.id, label: `${v.name} · ${v.plate}`, active: v.active && !v.held })),
-        drivers: catalog.drivers.map(d => ({ id: d.id, name: d.name, active: d.active && !d.held })) } })
+      const apiRows = result.bookings
+      const apiIds = new Set(apiRows.map(r => r.id))
+      const overlayRows = overlay.active && overlay.bookings.length > 0
+        ? overlay.bookings.filter(b => !apiIds.has(b.id)).map(b => bookingToApiBooking(b))
+        : []
+      const mergedRows = [...apiRows, ...overlayRows]
+      const apiViewBookings = apiRows.map(row => viewBooking(row, catalog))
+      const overlayViewBookings = overlay.active && overlay.bookings.length > 0
+        ? overlay.bookings.filter(b => !apiIds.has(b.id))
+        : []
+      const catalogVehicles = catalog.vehicles.map(v => ({
+        id: v.id,
+        label: `${v.name} · ${v.plate}`,
+        active: v.active && !v.held,
+        support: v.capabilities?.map(c => c === 'wheelchair' ? 'รถเข็น' : c === 'stretcher' ? 'เปลนอน' : 'เดินได้').join(' / '),
+      }))
+      const overlayVehicles = overlay.active
+        ? overlay.vehicles.filter(ov => !catalogVehicles.some(cv => cv.id === ov.id)).map(ov => ({ ...ov }))
+        : []
+      const catalogDrivers = catalog.drivers.map(d => ({ id: d.id, name: d.name, active: d.active && !d.held }))
+      const overlayDrivers = overlay.active
+        ? overlay.drivers.filter(od => !catalogDrivers.some(cd => cd.id === od.id)).map(od => ({ ...od }))
+        : []
+      setData({
+        catalog,
+        rows: mergedRows,
+        state: {
+          ...createSeedState(),
+          bookings: [...apiViewBookings, ...overlayViewBookings],
+          vehicles: [...catalogVehicles, ...overlayVehicles],
+          drivers: [...catalogDrivers, ...overlayDrivers],
+        },
+      })
     }).catch(error => { if (active) { setData(null); setError(dispatcherError(error)) } }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [session.user?.id, version, bookingId, pages])
-  return { data, error, loading, hasMore, loadMore: () => { if (!loading) { setLoading(true); setError(''); setPages(p => p + 1) } }, reload: () => { setLoading(true); setError(''); setVersion(v => v + 1) } }
+  }, [session.user?.id, version, bookingId, pages, overlay.active, overlay.importedAt, overlay.bookings, overlay.vehicles, overlay.drivers])
+  return {
+    data,
+    error,
+    loading,
+    hasMore,
+    loadMore: () => { if (!loading) { setLoading(true); setError(''); setPages(p => p + 1) } },
+    reload: () => { setLoading(true); setError(''); setVersion(v => v + 1) },
+    silentReload: () => { setVersion(v => v + 1) },
+  }
 }
 export function bookingCommand(row: Booking, command: Record<string, unknown>) {
   return staffRequest(`/bookings/${encodeURIComponent(row.id)}/commands`, { eventId: crypto.randomUUID(), expectedRevision: row.revision, expectedExecutionVersion: row.executionVersion, command })

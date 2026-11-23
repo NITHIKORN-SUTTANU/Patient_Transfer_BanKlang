@@ -1,34 +1,255 @@
 @import "tailwindcss";
 
-/* Values read from Figma palette and spacing variables. */
+/* Calm Modern Civic Healthcare design tokens (aligned with Ban Klang municipal identity). */
 @theme {
   --font-sans: 'Noto Sans Thai', sans-serif;
-  --color-canvas: #f6faf9;
-  --color-ink: #132d2c;
-  --color-muted: #49635f;
-  --color-primary: #075e57;
-  --color-primary-hover: #08796c;
-  --color-accent: #ecf9f5;
+  --color-canvas: #f5f9f8;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f7fbfa;
+  --color-ink: #122a29;
+  --color-muted: #46605c;
+  --color-primary: #065a53;
+  --color-primary-hover: #087368;
+  --color-accent: #ebf7f3;
   --color-accent-strong: #d7f3ec;
-  --color-border: #d5e0dc;
-  --color-error: #a72d3b;
-  --radius-sm: 6px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --color-border: #d8e4e0;
+  --color-hairline: rgba(15, 23, 42, 0.08);
+  --color-error: #a92b39;
+  --color-warning-bg: #fff8eb;
+  --color-warning-ink: #7c4706;
+  --color-warning-border: #f0cf8e;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 20px rgba(15, 42, 39, 0.045);
+  --shadow-card-hover: 0 4px 12px rgba(15, 23, 42, 0.06), 0 12px 26px rgba(6, 90, 83, 0.08);
+  --shadow-modal: 0 20px 50px rgba(15, 23, 42, 0.18), 0 4px 16px rgba(15, 23, 42, 0.08);
 }
 @layer base {
-  body { margin: 0; min-width: 320px; font-family: var(--font-sans); }
+  :root { --demo-bar-height: 0px; }
+  html { overscroll-behavior: none; overflow-x: clip; }
+  body { margin: 0; min-width: 320px; overflow-x: clip; font-family: var(--font-sans); line-height: 1.6; color: var(--color-ink); background: var(--color-canvas); -webkit-font-smoothing: antialiased; }
   button { cursor: pointer; }
   button, a { -webkit-tap-highlight-color: transparent; }
   :focus-visible { outline: 3px solid var(--color-primary-hover); outline-offset: 4px; }
+  time, .booking-summary-id, .booking-reference strong, .booking-review-time, .dispatch-metrics strong, .dispatch-timeline-scale, .dispatch-timeline-block, .dispatch-pickup-chip, .dispatch-window-chip, .dispatch-window-tag, .admin-metrics strong, .admin-kpi-card strong, .admin-bar-val, .driver-time, .driver-schedule dd { font-variant-numeric: tabular-nums; }
 }
 @layer components {
-  .actor-card { display: flex; flex-direction: column; text-align: left; border: 1px solid var(--color-border); border-radius: 20px; background: white; padding: 24px; transition: border-color .15s, box-shadow .15s; }
+  .actor-card { display: flex; flex-direction: column; text-align: left; border: 1px solid var(--color-hairline); border-radius: 16px; background: var(--color-surface); padding: 24px; box-shadow: var(--shadow-card); transition: border-color .16s ease-out, box-shadow .16s ease-out, transform .15s ease-out; }
   .actor-card > span:nth-last-child(2) { margin-top: auto; padding-top: 16px; }
-  .actor-card:hover { border-color: var(--color-primary); box-shadow: 0 6px 20px #075e570a; }
-  .actor-card-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary); }
+  .actor-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-card-hover); }
+  .actor-card:active { transform: scale(.985); }
+  .actor-card-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary), var(--shadow-card); }
   .actor-number { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--color-accent-strong); color: var(--color-primary); font-weight: 600; font-size: 20px; }
   .skip-link { position: absolute; left: 16px; top: -100px; z-index: 10; background: white; padding: 16px; border-radius: 14px; }
   .skip-link:focus { top: 16px; }
+  .demo-role-bar { position: sticky; top: 0; z-index: 60; width: 100%; max-width: 100%; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 6px 12px; background: #0f3e38; color: white; border-bottom: 1px solid #1b5e54; box-shadow: 0 2px 10px #09262229; }
+  .demo-role-bar.is-collapsed { padding: 4px 12px; }
+  .demo-role-bar-head { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; }
+  .demo-role-pill-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; background: #fef3c7; color: #78350f; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .demo-role-toggle { min-height: 32px; min-width: 44px; padding: 4px 10px; border-radius: 8px; border: 1px solid #6ea79d; background: #14534b; color: #f0fdf9; font: inherit; font-size: 12px; font-weight: 600; transition: background-color .15s ease-out, border-color .15s ease-out, transform .15s ease-out; }
+  .demo-role-toggle:hover { background: #1a675d; border-color: #a6d6ce; }
+  .demo-role-toggle:active { transform: scale(.98); }
+  .demo-role-toggle:focus-visible, .demo-role-btn:focus-visible { outline: 3px solid #ffdc8d; outline-offset: 2px; }
+  .demo-role-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+  .demo-role-btn { min-height: 34px; min-width: 44px; max-width: 100%; padding: 5px 11px; border-radius: 9px; border: 1px solid #3f7e74; background: #14534b; color: white; font: inherit; font-size: 13px; font-weight: 600; transition: background-color .15s ease-out, border-color .15s ease-out, color .15s ease-out, transform .15s ease-out; }
+  .demo-role-btn:hover:not(.active) { background: #1b695f; border-color: #77b7ad; }
+  .demo-role-btn:active { transform: scale(.98); }
+  .demo-role-btn.active { background: white; color: #0f3e38; border-color: white; font-weight: 700; }
+  .demo-role-btn.ghost { background: transparent; border-color: #6ea79d; color: #e6faf6; }
+  .demo-role-btn.ghost:hover { background: #14534b; border-color: #a6d6ce; }
+  .demo-driver-select { min-height: 34px; max-width: 100%; padding: 4px 10px; border-radius: 9px; border: 1px solid #6ea79d; background: #14534b; color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .demo-driver-select:hover { background: #1b695f; border-color: #a6d6ce; }
+  .demo-driver-select:focus-visible { outline: 3px solid #ffdc8d; outline-offset: 2px; box-shadow: none; }
+  .staff-login-form { display: flex; flex-direction: column; gap: 14px; }
+  .staff-login-submit { margin-top: 0.75rem; }
+  .staff-session-card .booking-card-copy { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+  .staff-session-role { color: var(--color-muted); font-size: 16px; margin: 0; }
+  .staff-session-checking { margin: 8px 0 0; padding: 10px 13px; border-radius: 10px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; font-size: 14px; font-weight: 600; }
+  .staff-session-verified { margin: 8px 0 0; padding: 11px 13px; border-radius: 10px; border: 1px solid #a7f3d0; background: #ecfdf5; color: #065f46; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.5; }
+  .staff-session-actions { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 14px; width: 100%; }
+  .staff-demo-panel { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-border); display: flex; flex-direction: column; gap: 10px; }
+  .staff-demo-panel h2 { font-size: 18px; font-weight: 700; color: var(--color-primary); margin: 0; }
+  .staff-demo-buttons { display: flex; flex-direction: column; gap: 0.625rem; }
+
+  /* Actionable sidebar count pills & status dots (Dispatcher & Admin, expanded + collapsed) */
+  .dispatch-sidebar nav a, .admin-sidebar nav a { position: relative; }
+  .nav-badge-count { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; font-style: normal; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; flex-shrink: 0; }
+  .nav-badge-count.amber { background: #fef3c7; color: #78350f; border: 1px solid #f59e0b; }
+  .nav-badge-count.danger { background: #dc2626; color: white; border: 1px solid #fecaca; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2); }
+  .nav-status-dot { margin-left: auto; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .nav-status-dot.active { background: #86efac; border: 2px solid #064e3b; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85); }
+  .nav-status-dot.amber { background: #fbbf24; border: 2px solid #78350f; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85); }
+  .nav-status-dot.danger { background: #ef4444; border: 2px solid #7f1d1d; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9); }
+  .dispatch-sidebar-collapsed .nav-badge-count,
+  .admin-sidebar-collapsed .nav-badge-count { position: absolute; top: 4px; right: 4px; margin-left: 0; min-width: 18px; height: 18px; padding: 0 4px; font-size: 10px; }
+  .dispatch-sidebar-collapsed .nav-status-dot,
+  .admin-sidebar-collapsed .nav-status-dot { position: absolute; top: 8px; right: 8px; margin-left: 0; }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+
+@keyframes ui-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-modal-in {
+  from { opacity: 0; transform: translateY(6px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ui-dropdown-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Lightweight pure-CSS micro-interactions (LINE LIFF & Playwright safe) */
+@media (prefers-reduced-motion: no-preference) {
+  .booking-button,
+  .dispatch-quick-approve-btn,
+  .dispatch-date-chip,
+  .dispatch-view-btn,
+  .dispatch-refresh-icon-btn,
+  .dispatch-mini-link,
+  .dispatch-tracking-scopes button,
+  .dispatch-incident-cta,
+  .dispatch-incident-secondary,
+  .dispatch-fleet-action-btn,
+  .dispatch-fleet-toggle-btn,
+  .dispatch-fleet-scroll-btn,
+  .dispatch-fleet-trip-link,
+  .dispatch-held-pill,
+  .dispatch-readiness-chip,
+  .dispatch-smart-suggest-btn,
+  .dispatch-copy-btn,
+  .booking-capacity-alt-btn,
+  .booking-edit,
+  .booking-compact-refresh,
+  .booking-address-suggestion,
+  .booking-picker-jump-btn,
+  .booking-list-chip,
+  .booking-tabs button,
+  .booking-assistance button,
+  .driver-back-link,
+  .driver-contact-action,
+  .driver-utility-link,
+  .driver-reason-chip,
+  .driver-history-chip,
+  .driver-shell .driver-detail-link,
+  .admin-button,
+  .admin-tabs button,
+  .role-selection-shortcut,
+  .dispatch-sidebar:not(.admin-sidebar) nav a,
+  .driver-sidebar .driver-nav a,
+  .navigation-drawer nav a {
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  }
+
+  .admin-sidebar nav a {
+    transition: color 150ms ease, transform 150ms ease;
+  }
+
+  :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+  }
+
+  .booking-button:active:not(:disabled),
+  .dispatch-quick-approve-btn:active:not(:disabled),
+  .dispatch-incident-cta:active:not(:disabled),
+  .dispatch-incident-secondary:active:not(:disabled),
+  .dispatch-fleet-action-btn:active:not(:disabled),
+  .dispatch-date-chip:active:not(:disabled),
+  .dispatch-view-btn:active:not(:disabled),
+  .dispatch-refresh-icon-btn:active:not(:disabled),
+  .dispatch-mini-link:active:not(:disabled),
+  .dispatch-held-pill:active:not(:disabled),
+  .dispatch-readiness-chip:active:not(:disabled),
+  .booking-capacity-alt-btn:active:not(:disabled),
+  .booking-compact-refresh:active:not(:disabled),
+  .booking-address-suggestion:active:not(:disabled),
+  .booking-list-chip:active:not(:disabled),
+  .booking-edit:active:not(:disabled),
+  .driver-reason-chip:active:not(:disabled),
+  .driver-history-chip:active:not(:disabled),
+  .admin-button:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  .booking-summary-card,
+  .booking-card,
+  .driver-card,
+  .dispatch-fleet-unit,
+  .dispatch-timeline-trip-pill,
+  .dispatch-waiting-list article,
+  .dispatch-metrics article,
+  .admin-kpi-card,
+  .admin-metrics article,
+  .dispatch-map-list-item,
+  .admin-table-scroll tbody tr {
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease, transform 150ms ease;
+  }
+
+  .dispatch-fleet-unit:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+
+  .dispatch-timeline-trip-pill:hover {
+    border-color: #9dc2b5;
+    background: #f8fdfb;
+    box-shadow: 0 2px 8px rgba(6, 90, 83, 0.06);
+  }
+
+  a.booking-summary-card:hover {
+    transform: translateY(-1px);
+  }
+
+  .dispatch-waiting-list article:hover {
+    box-shadow: 0 3px 10px rgba(6, 90, 83, 0.08);
+  }
+
+  .dispatch-map-list-item:hover:not(.selected) {
+    border-color: #8bb8a9;
+    background: #f4fbf8;
+  }
+
+  .booking-modal[open] {
+    animation: ui-modal-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .dispatch-resource-options,
+  .pickup-map-results {
+    animation: ui-dropdown-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .dispatch-notice,
+  .dispatch-smart-suggest-hint,
+  .dispatch-readiness-success,
+  .dispatch-readiness-hint,
+  .dispatch-disabled-reason,
+  .dispatch-blocking-conflict,
+  .dispatch-edit-proposal-banner,
+  .dispatch-dup-clear,
+  .dispatch-dup-found,
+  .driver-notice,
+  .driver-incident-status-card,
+  .admin-notice,
+  .booking-success-notice,
+  .booking-out-of-zone-notice {
+    animation: ui-fade-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+button[aria-busy="true"],
+.booking-button[aria-busy="true"],
+.booking-compact-refresh[aria-busy="true"],
+.dispatch-refresh-icon-btn[aria-busy="true"] {
+  cursor: progress;
+  opacity: .72;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

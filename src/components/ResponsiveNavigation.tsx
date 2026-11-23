@@ -3,7 +3,19 @@ import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router'
 
-export function ResponsiveNavigation({ id, label, className = '', children }: { id: string; label: string; className?: string; children: ReactNode }) {
+export function ResponsiveNavigation({
+  id,
+  label,
+  className = '',
+  statusDot = null,
+  children,
+}: {
+  id: string
+  label: string
+  className?: string
+  statusDot?: 'danger' | 'amber' | 'active' | null
+  children: ReactNode
+}) {
   const { pathname } = useLocation()
   const [expandedPath, setExpandedPath] = useState<string | null>(null)
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width:767px)').matches)
@@ -29,6 +41,7 @@ export function ResponsiveNavigation({ id, label, className = '', children }: { 
   return <>
     <button ref={trigger} type="button" className={`navigation-toggle ${id}-toggle`} aria-label={label} aria-controls={id} aria-expanded={open} aria-haspopup="dialog" onClick={() => setExpandedPath(open ? null : pathname)}>
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+      {statusDot && <i className={`mobile-menu-status-dot is-${statusDot}`} aria-hidden="true" />}
     </button>
     {mobile ? createPortal(<dialog ref={dialog} className="navigation-drawer" aria-labelledby={`${id}-heading`} onCancel={event => { event.preventDefault(); close() }} onClick={event => { if (event.target === event.currentTarget) close() }} onKeyDown={event => {
       if (event.key !== 'Tab') return
