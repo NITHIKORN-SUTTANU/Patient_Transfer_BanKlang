@@ -29,6 +29,7 @@ before starting, use caveman skills.
 
 ## Verify and hand off
 
+- Keep the **Live access by role** section in the root `README.md` current. Whenever a deployment or tunnel change updates a public hostname, role route, staff sign-in URL or LINE LIFF entry URL, update all affected README links in the same change. Check that the affected entry points respond and record any unavailable links in the README.
 - Run checks appropriate to the change. Historical passing checks do not prove newly refined SRS requirements.
 - Clearly distinguish browser tests with intercepted responses, real API/PostgreSQL tests, and live provider validation. The complete existing-screen/real-API/PostgreSQL journey and live LINE validation are still pending at this handoff.
 - At a meaningful stopping point, update **Resume here** in `docs/plans/INTEGRATION-PLAN.md` with completed work, verification, limitations and the next concrete step.
