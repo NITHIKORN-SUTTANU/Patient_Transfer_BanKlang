@@ -11,11 +11,13 @@ Start with the [documentation index](docs/README.md). Use the [integration plan]
 | Role | Entry point |
 | --- | --- |
 | Citizen or caregiver | [Open booking in LINE](https://liff.line.me/2012622841-ICLJ2q8K), also available from the LINE OA rich menu |
-| Dispatcher | [Dispatcher dashboard](https://shed-points-decorative-architectural.trycloudflare.com/dispatcher) |
-| Driver | [Driver dashboard](https://shed-points-decorative-architectural.trycloudflare.com/driver) |
-| Administrator | [Admin dashboard](https://shed-points-decorative-architectural.trycloudflare.com/admin) |
+| Dispatcher | [Dispatcher dashboard](https://angle-belong-rapidly-outputs.trycloudflare.com/dispatcher) |
+| Driver | [Driver dashboard](https://angle-belong-rapidly-outputs.trycloudflare.com/driver) |
+| Administrator | [Admin dashboard](https://angle-belong-rapidly-outputs.trycloudflare.com/admin) |
 
-Staff use the [shared staff sign-in](https://shed-points-decorative-architectural.trycloudflare.com/staff/login). As of 24 November 2026, the last recorded demo hostname no longer resolves. The LINE entry URL responds, but the booking flow could not be verified. Update the staff links and confirm the LINE booking endpoint when the demo has a new public hostname.
+Staff use the [shared staff sign-in](https://angle-belong-rapidly-outputs.trycloudflare.com/staff/login). The demo uses a temporary public hostname that may change when the tunnel restarts.
+
+The citizen LINE link still points to the expired hostname. Set the LIFF Endpoint URL in LINE Developers to the [current booking endpoint](https://angle-belong-rapidly-outputs.trycloudflare.com/booking), then verify booking from the LINE rich menu on a phone.
 
 For local setup, follow [Local development](docs/guides/LOCAL-DEVELOPMENT.md), then consult [development](docs/guides/DEVELOPMENT.md), [API](docs/guides/API.md), [database](docs/guides/DATABASE.md) and [LINE](docs/guides/LINE-SETUP.md). Staff enter through `/staff/login`; driver accounts require a linked roster and shifts. Citizen core screens use verified LIFF/API sessions; admin accounts/resources/working windows use protected API management. Hospital/village/depot/closure settings now use protected revisioned APIs with dispatcher configuration review. Post-pickup destination changes now use a separate dispatcher preview/commit action with versioned route history. New event messages now use minimized snapshots/authenticated links and a dispatcher web-alert queue. Live LINE validation and other SRS refinements remain pending as recorded in the plan.
 
